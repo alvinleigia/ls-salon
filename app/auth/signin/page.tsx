@@ -1,16 +1,30 @@
 "use client";
 
-import { signIn } from "next-auth/react";
-import { useState } from "react";
+import { signIn, useSession } from "next-auth/react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/form-field";
 
 export default function SignInPage() {
+  const router = useRouter();
+  const { status } = useSession();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  useEffect(() => {
+    if (status === "authenticated") {
+      router.replace("/dashboard");
+    }
+  }, [router, status]);
+
+  if (status === "authenticated") {
+    return null;
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
@@ -22,13 +36,26 @@ export default function SignInPage() {
         <CardContent>
           <form
             className="space-y-4"
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
-              signIn("credentials", { email, password, callbackUrl: "/" });
+              const result = await signIn("credentials", {
+                email,
+                password,
+                redirect: false,
+                callbackUrl: "/dashboard",
+              });
+
+              if (result?.error) {
+                toast.error("Invalid email or password.");
+                return;
+              }
+
+              if (result?.url) {
+                window.location.href = result.url;
+              }
             }}
           >
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+            <FormField id="email" label="Email">
               <Input
                 id="email"
                 type="email"
@@ -36,10 +63,9 @@ export default function SignInPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
-            </div>
+            </FormField>
 
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+            <FormField id="password" label="Password">
               <Input
                 id="password"
                 type="password"
@@ -47,13 +73,32 @@ export default function SignInPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
-            </div>
+            </FormField>
 
             <Button className="w-full" type="submit">
               Sign in
             </Button>
           </form>
+          <div className="mt-4 text-center text-sm text-muted-foreground">
+            <button
+              type="button"
+              className="text-primary underline-offset-4 hover:underline"
+              onClick={() => router.push("/auth/forgot-password")}
+            >
+              Forgot password?
+            </button>
+          </div>
         </CardContent>
+        <div className="px-6 pb-6 text-center text-sm text-muted-foreground">
+          New here?{" "}
+          <button
+            type="button"
+            className="text-primary underline-offset-4 hover:underline"
+            onClick={() => router.push("/auth/signup")}
+          >
+            Create an account
+          </button>
+        </div>
       </Card>
     </div>
   );
