@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { useSession } from "next-auth/react"
-import Link from "next/link"
 import {
   ColumnDef,
   ColumnFiltersState,
@@ -96,6 +95,7 @@ export default function UsersPage() {
   const { data: session } = useSession()
   const currentRole = (session?.user as { role?: Role })?.role ?? null
   const canManage = canInvite(currentRole)
+  const sessionUserId = session?.user?.id
 
   const [search, setSearch] = React.useState("")
   const [roleFilter, setRoleFilter] = React.useState<"all" | Role>("all")
@@ -213,6 +213,7 @@ export default function UsersPage() {
     void loadUsers()
   }, [loadUsers])
 
+
   React.useEffect(() => {
     setPagination((prev) =>
       prev.pageIndex === 0 ? prev : { ...prev, pageIndex: 0 }
@@ -232,7 +233,7 @@ export default function UsersPage() {
     []
   )
 
-  const startEdit = (user: UserRow) => {
+  const startEdit = React.useCallback((user: UserRow) => {
     setEditingUser(user)
     clearEditErrors()
     setEditValues({
@@ -243,7 +244,7 @@ export default function UsersPage() {
       dateOfBirth: toDateInput(user.dateOfBirth),
       gender: user.gender ?? "PREFER_NOT_TO_SAY",
       status: user.status ?? "ACTIVE",
-      marketingOptIn: Boolean(user.marketingOptIn),
+      marketingOptIn: user.role === "STAFF" ? false : Boolean(user.marketingOptIn),
       addressLine1: user.addressLine1 ?? "",
       addressLine2: user.addressLine2 ?? "",
       city: user.city ?? "",
@@ -254,7 +255,7 @@ export default function UsersPage() {
       password: "",
     })
     setEditOpen(true)
-  }
+  }, [clearEditErrors])
 
   const saveEdit = async () => {
     if (!editingUser) return
@@ -325,11 +326,13 @@ export default function UsersPage() {
     await loadUsers()
   }
 
-  const canEditUser = (user: UserRow) =>
-    canManage || session?.user?.id === user.id
+  const canEditUser = React.useCallback(
+    (user: UserRow) => canManage || sessionUserId === user.id,
+    [canManage, sessionUserId]
+  )
 
   const canEditProfile =
-    canManage || Boolean(editingUser && session?.user?.id === editingUser.id)
+    canManage || Boolean(editingUser && sessionUserId === editingUser.id)
 
   const columns = React.useMemo<ColumnDef<UserRow>[]>(
     () => [
@@ -444,9 +447,10 @@ export default function UsersPage() {
         ),
       },
     ],
-    [canEditUser]
+    [canEditUser, startEdit]
   )
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: users,
     columns,
@@ -527,7 +531,7 @@ export default function UsersPage() {
       <DataTablePagination table={table} totalRows={totalRows} />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Create user</DialogTitle>
             <DialogDescription>
@@ -535,7 +539,8 @@ export default function UsersPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="flex-1 overflow-y-auto">
+            <div className="grid gap-4 sm:grid-cols-2">
             <FormField id="create-name" label="Full name" error={createErrors.name}>
               <Input
                 id="create-name"
@@ -643,6 +648,8 @@ export default function UsersPage() {
                   setNewUser((prev) => ({
                     ...prev,
                     role: event.target.value as Role,
+                    marketingOptIn:
+                      event.target.value === "STAFF" ? false : prev.marketingOptIn,
                   }))
                 }
               >
@@ -724,19 +731,22 @@ export default function UsersPage() {
                 />
               </div>
             </div>
-            <div className="sm:col-span-2 flex items-center gap-2">
-              <input
-                id="create-marketing"
-                type="checkbox"
-                checked={newUser.marketingOptIn}
-                onChange={(event) =>
-                  setNewUser((prev) => ({
-                    ...prev,
-                    marketingOptIn: event.target.checked,
-                  }))
-                }
-              />
-              <Label htmlFor="create-marketing">Marketing opt-in</Label>
+            {newUser.role !== "STAFF" ? (
+              <div className="sm:col-span-2 flex items-center gap-2">
+                <input
+                  id="create-marketing"
+                  type="checkbox"
+                  checked={newUser.marketingOptIn}
+                  onChange={(event) =>
+                    setNewUser((prev) => ({
+                      ...prev,
+                      marketingOptIn: event.target.checked,
+                    }))
+                  }
+                />
+                <Label htmlFor="create-marketing">Marketing opt-in</Label>
+              </div>
+            ) : null}
             </div>
           </div>
 
@@ -761,13 +771,14 @@ export default function UsersPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Edit user</DialogTitle>
             <DialogDescription>Update details or reset a password.</DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="flex-1 overflow-y-auto">
+            <div className="grid gap-4 sm:grid-cols-2">
             <FormField id="edit-name" label="Full name" error={editErrors.name}>
               <Input
                 id="edit-name"
@@ -882,6 +893,8 @@ export default function UsersPage() {
                   setEditValues((prev) => ({
                     ...prev,
                     role: event.target.value as Role,
+                    marketingOptIn:
+                      event.target.value === "STAFF" ? false : prev.marketingOptIn,
                   }))
                 }
                 disabled={!canManage}
@@ -977,20 +990,23 @@ export default function UsersPage() {
                 />
               </div>
             </div>
-            <div className="sm:col-span-2 flex items-center gap-2">
-              <input
-                id="edit-marketing"
-                type="checkbox"
-                checked={editValues.marketingOptIn}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    marketingOptIn: event.target.checked,
-                  }))
-                }
-                disabled={!canManage && !canEditProfile}
-              />
-              <Label htmlFor="edit-marketing">Marketing opt-in</Label>
+            {editValues.role !== "STAFF" ? (
+              <div className="sm:col-span-2 flex items-center gap-2">
+                <input
+                  id="edit-marketing"
+                  type="checkbox"
+                  checked={editValues.marketingOptIn}
+                  onChange={(event) =>
+                    setEditValues((prev) => ({
+                      ...prev,
+                      marketingOptIn: event.target.checked,
+                    }))
+                  }
+                  disabled={!canManage && !canEditProfile}
+                />
+                <Label htmlFor="edit-marketing">Marketing opt-in</Label>
+              </div>
+            ) : null}
             </div>
           </div>
 

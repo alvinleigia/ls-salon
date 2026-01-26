@@ -20,6 +20,8 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Default: **restrict delete** if the record is referenced by other records.
 - When allowed, perform **soft delete** by setting status to INACTIVE/ARCHIVED.
 - Use 409 responses with a clear message when deletion is blocked.
+- If there are no associations, hard delete is allowed; otherwise soft delete.
+- Use confirmation dialogs for destructive actions (no toast confirms or `window.confirm`).
 
 ## Validation + types
 - Define Zod schemas in `lib/validation.ts`.
@@ -34,6 +36,8 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Use `components/data-table.tsx` with server-side pagination.
 - Pass `totalRows` to `DataTablePagination`.
 - Use `columnDef.meta.label` for column labels.
+- Memoize column action handlers with `useCallback` and include them in `useMemo` deps.
+- Suppress `react-hooks/incompatible-library` on `useReactTable` (TanStack) with an inline eslint disable.
 
 ## Email templates
 - Put templates in `lib/emails/*`.
@@ -42,9 +46,16 @@ This is the baseline for new modules (API + UI) in this codebase.
 ## Settings
 - Global settings live under `/settings` (admin/manager).
 - Start with locale, currency, time zone, and date format.
+- Store working hours in settings with day-based periods (WORK/BREAK) and allow multiple breaks.
+- Support special date overrides in settings (date-specific periods override weekly hours).
+- Validate working hours/overrides: start < end and no overlapping periods.
 - Use settings for formatting (no hard-coded currency/locale).
 - Settings API is dynamic (no caching).
 - When formatting values (currency/locale), ensure memoized columns include formatter dependencies.
+- Large dialogs should have `max-h-[80vh] overflow-y-auto`.
+- For long forms, keep the footer outside the scroll area (scroll only the form body).
+- Apply the fixed-footer dialog pattern across all form dialogs.
+- Package item pickers should include a local search input.
 
 ## Module checklist
 - Prisma model + migration (if new data).
@@ -62,6 +73,10 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Invitees list supports status filter (pending/accepted/expired) via `status` query param, defaulting to pending.
 - Service categories module lives under `/services/categories` with admin/manager access.
 - Services module lives under `/services` with admin/manager access and uses standard list params/response.
+- Packages are services with `type=PACKAGE` and must include package items (services).
+- Staff eligibility: default allow all services; if any eligible services are stored, treat as an allow-list.
+- Manage staff eligibility in the staff profile page (not in the general user create/edit form).
+- Staff profile includes documents list (type/number/link/validity), and certifications list (with issue + expiry dates).
 - List pageSize max is 100 unless explicitly raised (align UI requests accordingly).
 - Seed helpers live in `scripts/` (use `seed-service-categories.js` for defaults).
 - Services seed: `scripts/seed-services.js` (requires categories).

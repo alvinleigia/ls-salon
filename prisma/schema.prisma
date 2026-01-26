@@ -45,6 +45,32 @@ enum ServiceStatus {
   INACTIVE
 }
 
+enum ServiceType {
+  STANDARD
+  PACKAGE
+}
+
+enum StaffDocumentType {
+  ADDRESS
+  ID
+  OTHER
+}
+
+enum Weekday {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum AppSettingPeriodType {
+  WORK
+  BREAK
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String?
@@ -69,6 +95,8 @@ model User {
   sessions      Session[]
   invitations   Invitation[] @relation("UserInvitations")
   passwordResetTokens PasswordResetToken[]
+  eligibleServices StaffServiceEligibility[]
+  staffProfile  StaffProfile?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -94,14 +122,32 @@ model Service {
   durationMinutes Int
   priceCents      Int
   status          ServiceStatus @default(ACTIVE)
+  type            ServiceType   @default(STANDARD)
   categoryId      String
   category        ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  packageItems    ServicePackageItem[] @relation("PackageItems")
+  includedIn      ServicePackageItem[] @relation("PackageItemService")
+  eligibleStaff   StaffServiceEligibility[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
   @@index([status])
   @@index([categoryId])
   @@index([createdAt])
+}
+
+model ServicePackageItem {
+  id             String   @id @default(cuid())
+  packageId      String
+  itemServiceId  String
+  sortOrder      Int      @default(0)
+  package        Service  @relation("PackageItems", fields: [packageId], references: [id], onDelete: Cascade)
+  itemService    Service  @relation("PackageItemService", fields: [itemServiceId], references: [id], onDelete: Restrict)
+  createdAt      DateTime @default(now())
+
+  @@unique([packageId, itemServiceId])
+  @@index([packageId])
+  @@index([itemServiceId])
 }
 
 model AppSetting {
@@ -111,6 +157,106 @@ model AppSetting {
   timeZone   String   @default("America/New_York")
   dateFormat String   @default("MM/dd/yyyy")
   updatedAt  DateTime @updatedAt
+  workingDays AppSettingDay[]
+  overrides  AppSettingOverride[]
+}
+
+model AppSettingDay {
+  id        String   @id @default(cuid())
+  settingId String
+  day       Weekday
+  isOpen    Boolean  @default(true)
+  setting   AppSetting @relation(fields: [settingId], references: [id], onDelete: Cascade)
+  periods   AppSettingPeriod[]
+
+  @@unique([settingId, day])
+}
+
+model AppSettingPeriod {
+  id        String   @id @default(cuid())
+  dayId     String
+  kind      AppSettingPeriodType
+  startTime String
+  endTime   String
+  sortOrder Int      @default(0)
+  day       AppSettingDay @relation(fields: [dayId], references: [id], onDelete: Cascade)
+
+  @@index([dayId])
+}
+
+model AppSettingOverride {
+  id        String   @id @default(cuid())
+  settingId String
+  date      DateTime
+  isOpen    Boolean  @default(true)
+  setting   AppSetting @relation(fields: [settingId], references: [id], onDelete: Cascade)
+  periods   AppSettingOverridePeriod[]
+
+  @@unique([settingId, date])
+  @@index([settingId])
+  @@index([date])
+}
+
+model AppSettingOverridePeriod {
+  id        String   @id @default(cuid())
+  overrideId String
+  kind      AppSettingPeriodType
+  startTime String
+  endTime   String
+  sortOrder Int      @default(0)
+  override  AppSettingOverride @relation(fields: [overrideId], references: [id], onDelete: Cascade)
+
+  @@index([overrideId])
+}
+
+model StaffServiceEligibility {
+  id        String   @id @default(cuid())
+  userId    String
+  serviceId String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  service   Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, serviceId])
+  @@index([userId])
+  @@index([serviceId])
+}
+
+model StaffProfile {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  certifications     StaffCertification[]
+  documents          StaffDocument[]
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model StaffCertification {
+  id             String   @id @default(cuid())
+  staffProfileId String
+  title          String
+  issuer         String?
+  issuedAt       DateTime?
+  expiresAt      DateTime?
+  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@index([staffProfileId])
+}
+
+model StaffDocument {
+  id             String   @id @default(cuid())
+  staffProfileId String
+  type           StaffDocumentType
+  number         String?
+  imageUrl       String
+  validFrom      DateTime?
+  validTo        DateTime?
+  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@index([staffProfileId])
 }
 
 model Account {

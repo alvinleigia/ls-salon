@@ -2,12 +2,13 @@
 
 import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
+import { useSession } from "next-auth/react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { canManageUsers, type Role } from "@/lib/permissions"
 
-type Role = "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
 type Gender = "MALE" | "FEMALE" | "NON_BINARY" | "OTHER" | "PREFER_NOT_TO_SAY"
 type UserStatus = "ACTIVE" | "SUSPENDED" | "INVITED" | "ARCHIVED"
 
@@ -37,6 +38,9 @@ const formatDate = (value?: string | null) =>
 
 export default function UserProfilePage() {
   const router = useRouter()
+  const { data: session } = useSession()
+  const currentRole = (session?.user as { role?: Role })?.role
+  const canManage = canManageUsers(currentRole as Role)
   const params = useParams<{ id: string }>()
   const [user, setUser] = React.useState<UserProfile | null>(null)
   const [loading, setLoading] = React.useState(true)
@@ -72,9 +76,16 @@ export default function UserProfilePage() {
           <h1 className="text-2xl font-semibold">{user.name ?? "User"}</h1>
           <p className="text-sm text-muted-foreground">{user.email}</p>
         </div>
-        <Button variant="outline" onClick={() => router.push("/users")}>
-          Back to users
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {canManage && user.role === "STAFF" ? (
+            <Button onClick={() => router.push(`/users/${user.id}/staff`)}>
+              Staff profile
+            </Button>
+          ) : null}
+          <Button variant="outline" onClick={() => router.push("/users")}>
+            Back to users
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -106,12 +117,14 @@ export default function UserProfilePage() {
                   {user.gender ? user.gender.replaceAll("_", " ") : "-"}
                 </div>
               </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Marketing opt-in</div>
-                <div className="font-medium">
-                  {user.marketingOptIn ? "Yes" : "No"}
+              {user.role !== "STAFF" ? (
+                <div>
+                  <div className="text-xs text-muted-foreground">Marketing opt-in</div>
+                  <div className="font-medium">
+                    {user.marketingOptIn ? "Yes" : "No"}
+                  </div>
                 </div>
-              </div>
+              ) : null}
               <div>
                 <div className="text-xs text-muted-foreground">Created</div>
                 <div className="font-medium">{formatDate(user.createdAt)}</div>

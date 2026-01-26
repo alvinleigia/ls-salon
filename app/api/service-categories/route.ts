@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import {
   createServiceCategorySchema,
@@ -46,8 +47,8 @@ export async function GET(request: Request) {
     ...(trimmedSearch
       ? {
           OR: [
-            { name: { contains: trimmedSearch, mode: "insensitive" } },
-            { description: { contains: trimmedSearch, mode: "insensitive" } },
+            { name: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
+            { description: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
           ],
         }
       : {}),

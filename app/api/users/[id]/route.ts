@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
-import { z } from "zod"
 
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
@@ -33,6 +32,13 @@ export async function PATCH(
   }
   const bodyData = parsed.data
 
+  const existingUser = await prisma.user.findUnique({
+    where: { id },
+    select: { role: true },
+  })
+
+  const targetRole = (bodyData.role ?? existingUser?.role ?? null) as Role | null
+
   const data: {
     name?: string
     email?: string
@@ -51,6 +57,8 @@ export async function PATCH(
     postalCode?: string
     country?: string
   } = {}
+  const eligibleServiceIds = bodyData.eligibleServiceIds
+  const staffProfileInput = bodyData.staffProfile
 
   if (role === "ADMIN") {
     if (bodyData.name?.trim()) data.name = bodyData.name.trim()
@@ -64,9 +72,6 @@ export async function PATCH(
     if (bodyData.dateOfBirth) data.dateOfBirth = bodyData.dateOfBirth
     if (bodyData.gender) data.gender = bodyData.gender
     if (bodyData.status) data.status = bodyData.status
-    if (typeof bodyData.marketingOptIn === "boolean") {
-      data.marketingOptIn = bodyData.marketingOptIn
-    }
     if (bodyData.addressLine1?.trim()) data.addressLine1 = bodyData.addressLine1.trim()
     if (bodyData.addressLine2?.trim()) data.addressLine2 = bodyData.addressLine2.trim()
     if (bodyData.city?.trim()) data.city = bodyData.city.trim()
@@ -79,9 +84,6 @@ export async function PATCH(
     if (bodyData.image?.trim()) data.image = bodyData.image.trim()
     if (bodyData.dateOfBirth) data.dateOfBirth = bodyData.dateOfBirth
     if (bodyData.gender) data.gender = bodyData.gender
-    if (typeof bodyData.marketingOptIn === "boolean") {
-      data.marketingOptIn = bodyData.marketingOptIn
-    }
     if (bodyData.addressLine1?.trim()) data.addressLine1 = bodyData.addressLine1.trim()
     if (bodyData.addressLine2?.trim()) data.addressLine2 = bodyData.addressLine2.trim()
     if (bodyData.city?.trim()) data.city = bodyData.city.trim()
@@ -92,32 +94,141 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const user = await prisma.user.update({
-    where: { id },
-    data,
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      phone: true,
-      role: true,
-      createdAt: true,
-      image: true,
-      dateOfBirth: true,
-      gender: true,
-      status: true,
-      lastLoginAt: true,
-      marketingOptIn: true,
-      addressLine1: true,
-      addressLine2: true,
-      city: true,
-      state: true,
-      postalCode: true,
-      country: true,
-    },
+  if (targetRole === "STAFF") {
+    data.marketingOptIn = false
+  } else if (typeof bodyData.marketingOptIn === "boolean") {
+    data.marketingOptIn = bodyData.marketingOptIn
+  }
+
+  const normalizedEligibleServiceIds =
+    targetRole === "STAFF" && eligibleServiceIds
+      ? Array.from(new Set(eligibleServiceIds))
+      : null
+
+  const user = await prisma.$transaction(async (tx) => {
+    const updated = await tx.user.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        createdAt: true,
+        image: true,
+        dateOfBirth: true,
+        gender: true,
+        status: true,
+        lastLoginAt: true,
+        marketingOptIn: true,
+        addressLine1: true,
+        addressLine2: true,
+        city: true,
+        state: true,
+        postalCode: true,
+        country: true,
+        eligibleServices: { select: { serviceId: true } },
+        staffProfile: {
+          select: {
+            documents: {
+              select: {
+                id: true,
+                type: true,
+                number: true,
+                imageUrl: true,
+                validFrom: true,
+                validTo: true,
+              },
+            },
+            certifications: {
+              select: { id: true, title: true, issuer: true, issuedAt: true, expiresAt: true },
+            },
+          },
+        },
+      },
+    })
+
+    if (role === "ADMIN") {
+      if (normalizedEligibleServiceIds !== null) {
+        await tx.staffServiceEligibility.deleteMany({ where: { userId: id } })
+        if (normalizedEligibleServiceIds.length) {
+          await tx.staffServiceEligibility.createMany({
+            data: normalizedEligibleServiceIds.map((serviceId) => ({
+              userId: id,
+              serviceId,
+            })),
+          })
+        }
+      } else if (targetRole && targetRole !== "STAFF" && bodyData.role) {
+        await tx.staffServiceEligibility.deleteMany({ where: { userId: id } })
+      }
+
+      if (targetRole !== "STAFF" && bodyData.role) {
+        await tx.staffProfile.deleteMany({ where: { userId: id } })
+      }
+
+      if (targetRole === "STAFF" && staffProfileInput) {
+        const profile = await tx.staffProfile.upsert({
+          where: { userId: id },
+          update: {},
+          create: { userId: id },
+        })
+
+        if (staffProfileInput.documents) {
+          await tx.staffDocument.deleteMany({
+            where: { staffProfileId: profile.id },
+          })
+          if (staffProfileInput.documents.length) {
+            await tx.staffDocument.createMany({
+              data: staffProfileInput.documents.map((doc) => ({
+                staffProfileId: profile.id,
+                type: doc.type,
+                number: doc.number || null,
+                imageUrl: doc.imageUrl,
+                validFrom: doc.validFrom
+                  ? new Date(`${doc.validFrom}T00:00:00.000Z`)
+                  : null,
+                validTo: doc.validTo
+                  ? new Date(`${doc.validTo}T00:00:00.000Z`)
+                  : null,
+              })),
+            })
+          }
+        }
+
+        if (staffProfileInput.certifications) {
+          await tx.staffCertification.deleteMany({
+            where: { staffProfileId: profile.id },
+          })
+          if (staffProfileInput.certifications.length) {
+            await tx.staffCertification.createMany({
+              data: staffProfileInput.certifications.map((cert) => ({
+                staffProfileId: profile.id,
+                title: cert.title,
+                issuer: cert.issuer || null,
+                issuedAt: cert.issuedAt
+                  ? new Date(`${cert.issuedAt}T00:00:00.000Z`)
+                  : null,
+                expiresAt: cert.expiresAt
+                  ? new Date(`${cert.expiresAt}T00:00:00.000Z`)
+                  : null,
+              })),
+            })
+          }
+        }
+      }
+    }
+
+    return updated
   })
 
-  return NextResponse.json({ user })
+  return NextResponse.json({
+    user: {
+      ...user,
+      eligibleServiceIds: user.eligibleServices.map((item) => item.serviceId),
+    },
+  })
 }
 
 export async function GET(
@@ -157,6 +268,24 @@ export async function GET(
       country: true,
       createdAt: true,
       updatedAt: true,
+      eligibleServices: { select: { serviceId: true } },
+      staffProfile: {
+        select: {
+          documents: {
+            select: {
+              id: true,
+              type: true,
+              number: true,
+              imageUrl: true,
+              validFrom: true,
+              validTo: true,
+            },
+          },
+          certifications: {
+            select: { id: true, title: true, issuer: true, issuedAt: true, expiresAt: true },
+          },
+        },
+      },
     },
   })
 
@@ -164,5 +293,10 @@ export async function GET(
     return NextResponse.json({ error: "User not found." }, { status: 404 })
   }
 
-  return NextResponse.json({ user })
+  return NextResponse.json({
+    user: {
+      ...user,
+      eligibleServiceIds: user.eligibleServices.map((item) => item.serviceId),
+    },
+  })
 }

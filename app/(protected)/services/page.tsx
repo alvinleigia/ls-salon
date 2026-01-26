@@ -43,6 +43,7 @@ import { useFormErrors } from "@/hooks/use-form-errors"
 import type { ListResponse } from "@/types/api"
 
 type ServiceStatus = "ACTIVE" | "INACTIVE"
+type ServiceType = "STANDARD" | "PACKAGE"
 
 type ServiceRow = {
   id: string
@@ -51,13 +52,20 @@ type ServiceRow = {
   durationMinutes: number
   priceCents: number
   status: ServiceStatus
+  type: ServiceType
   createdAt: string
   category: { id: string; name: string }
+  packageItems?: { itemService: { id: string; name: string } }[]
 }
 
 type CategoryOption = { id: string; name: string; status: "ACTIVE" | "INACTIVE" }
+type ServiceOption = { id: string; name: string }
 
 const statusOptions: ServiceStatus[] = ["ACTIVE", "INACTIVE"]
+const typeOptions: { value: ServiceType; label: string }[] = [
+  { value: "STANDARD", label: "Standard" },
+  { value: "PACKAGE", label: "Package" },
+]
 
 const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
   if (value === "asc") return <ArrowUpIcon className="h-4 w-4" />
@@ -70,6 +78,7 @@ export default function ServicesPage() {
 
   const [services, setServices] = React.useState<ServiceRow[]>([])
   const [categories, setCategories] = React.useState<CategoryOption[]>([])
+  const [serviceOptions, setServiceOptions] = React.useState<ServiceOption[]>([])
   const [settings, setSettings] = React.useState({
     locale: "en-US",
     currency: "USD",
@@ -89,6 +98,7 @@ export default function ServicesPage() {
     durationMinutes: true,
     priceCents: true,
     status: true,
+    type: true,
   })
   const [pagination, setPagination] = React.useState({ pageIndex: 0, pageSize: 10 })
 
@@ -96,6 +106,9 @@ export default function ServicesPage() {
   const [editOpen, setEditOpen] = React.useState(false)
   const [editingService, setEditingService] = React.useState<ServiceRow | null>(null)
   const [saving, setSaving] = React.useState(false)
+  const [deleteOpen, setDeleteOpen] = React.useState(false)
+  const [deleteTarget, setDeleteTarget] = React.useState<ServiceRow | null>(null)
+  const [deleting, setDeleting] = React.useState(false)
 
   const {
     errors: createErrors,
@@ -115,7 +128,10 @@ export default function ServicesPage() {
     durationMinutes: 60,
     price: "0.00",
     status: "ACTIVE" as ServiceStatus,
+    type: "STANDARD" as ServiceType,
+    packageItemIds: [] as string[],
   })
+  const [newPackageQuery, setNewPackageQuery] = React.useState("")
 
   const [editValues, setEditValues] = React.useState({
     name: "",
@@ -124,7 +140,10 @@ export default function ServicesPage() {
     durationMinutes: 60,
     price: "0.00",
     status: "ACTIVE" as ServiceStatus,
+    type: "STANDARD" as ServiceType,
+    packageItemIds: [] as string[],
   })
+  const [editPackageQuery, setEditPackageQuery] = React.useState("")
 
   const totalPages = Math.max(1, Math.ceil(totalRows / pagination.pageSize))
 
@@ -196,6 +215,27 @@ export default function ServicesPage() {
     sorting,
   ])
 
+  const loadServiceOptions = React.useCallback(async () => {
+    const params = new URLSearchParams()
+    params.set("page", "1")
+    params.set("pageSize", "100")
+    params.set("sort", "name")
+    params.set("order", "asc")
+    params.set("status", "ACTIVE")
+    params.set("type", "STANDARD")
+    const response = await fetch(`/api/services?${params.toString()}`, {
+      cache: "no-store",
+    })
+    if (!response.ok) {
+      setServiceOptions([])
+      return
+    }
+    const data = (await response.json()) as ListResponse<ServiceRow>
+    setServiceOptions(
+      data.items.map((item) => ({ id: item.id, name: item.name }))
+    )
+  }, [])
+
   React.useEffect(() => {
     void loadCategories()
   }, [loadCategories])
@@ -207,6 +247,10 @@ export default function ServicesPage() {
   React.useEffect(() => {
     void loadSettings()
   }, [loadSettings])
+
+  React.useEffect(() => {
+    void loadServiceOptions()
+  }, [loadServiceOptions])
 
   React.useEffect(() => {
     setPagination((prev) =>
@@ -257,6 +301,9 @@ export default function ServicesPage() {
         durationMinutes: Number(newService.durationMinutes),
         priceCents: priceToCents(newService.price),
         status: newService.status,
+        type: newService.type,
+        packageItemIds:
+          newService.type === "PACKAGE" ? newService.packageItemIds : [],
       }),
     })
 
@@ -279,13 +326,16 @@ export default function ServicesPage() {
       durationMinutes: 60,
       price: "0.00",
       status: "ACTIVE",
+      type: "STANDARD",
+      packageItemIds: [],
     })
+    setNewPackageQuery("")
     setSaving(false)
     setCreateOpen(false)
     await loadServices()
   }
 
-  const startEdit = (service: ServiceRow) => {
+  const startEdit = React.useCallback((service: ServiceRow) => {
     setEditingService(service)
     clearEditErrors()
     setEditValues({
@@ -295,9 +345,13 @@ export default function ServicesPage() {
       durationMinutes: service.durationMinutes,
       price: (service.priceCents / 100).toFixed(2),
       status: service.status,
+      type: service.type ?? "STANDARD",
+      packageItemIds:
+        service.packageItems?.map((item) => item.itemService.id) ?? [],
     })
+    setEditPackageQuery("")
     setEditOpen(true)
-  }
+  }, [clearEditErrors])
 
   const saveEdit = async () => {
     if (!editingService) return
@@ -312,6 +366,9 @@ export default function ServicesPage() {
         durationMinutes: Number(editValues.durationMinutes),
         priceCents: priceToCents(editValues.price),
         status: editValues.status,
+        type: editValues.type,
+        packageItemIds:
+          editValues.type === "PACKAGE" ? editValues.packageItemIds : [],
       }),
     })
 
@@ -332,6 +389,30 @@ export default function ServicesPage() {
     setEditingService(null)
     await loadServices()
   }
+
+  const requestDelete = React.useCallback((service: ServiceRow) => {
+    setDeleteTarget(service)
+    setDeleteOpen(true)
+  }, [])
+
+  const confirmDelete = React.useCallback(async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    const response = await fetch(`/api/services/${deleteTarget.id}`, {
+      method: "DELETE",
+    })
+    if (!response.ok) {
+      const data = (await response.json()) as { error?: string }
+      toast.error(data.error ?? "Unable to delete service.")
+      setDeleting(false)
+      return
+    }
+    toast.success("Service deleted.")
+    setDeleting(false)
+    setDeleteOpen(false)
+    setDeleteTarget(null)
+    await loadServices()
+  }, [deleteTarget, loadServices])
 
   const columns = React.useMemo<ColumnDef<ServiceRow>[]>(
     () => [
@@ -431,6 +512,22 @@ export default function ServicesPage() {
         ),
       },
       {
+        accessorKey: "type",
+        meta: { label: "Type" },
+        header: ({ column }) => (
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 text-sm font-medium"
+            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          >
+            Type
+            <SortIndicator value={column.getIsSorted()} />
+          </button>
+        ),
+        cell: ({ row }) =>
+          row.original.type === "PACKAGE" ? "Package" : "Standard",
+      },
+      {
         id: "actions",
         header: "",
         enableHiding: false,
@@ -445,14 +542,21 @@ export default function ServicesPage() {
               <DropdownMenuItem onSelect={() => startEdit(row.original)}>
                 Edit
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => requestDelete(row.original)}
+                className="text-destructive"
+              >
+                Delete
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         ),
       },
     ],
-    [formatPrice]
+    [formatPrice, requestDelete, startEdit]
   )
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: services,
     columns,
@@ -520,13 +624,48 @@ export default function ServicesPage() {
 
       <DataTablePagination table={table} totalRows={totalRows} />
 
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open)
+          if (!open) {
+            setDeleteTarget(null)
+            setDeleting(false)
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete service</DialogTitle>
+            <DialogDescription>
+              {deleteTarget
+                ? `Delete "${deleteTarget.name}"? This cannot be undone.`
+                : "Delete this service? This cannot be undone."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>New service</DialogTitle>
             <DialogDescription>Create a service offering.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4">
+          <div className="flex-1 overflow-y-auto">
+            <div className="grid gap-4">
             <FormField id="service-name" label="Name" error={createErrors.name}>
               <Input
                 id="service-name"
@@ -626,6 +765,84 @@ export default function ServicesPage() {
                 ))}
               </select>
             </FormField>
+            <FormField id="service-type" label="Type" error={createErrors.type}>
+              <select
+                id="service-type"
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={newService.type}
+                onChange={(event) =>
+                  setNewService((prev) => ({
+                    ...prev,
+                    type: event.target.value as ServiceType,
+                    packageItemIds:
+                      event.target.value === "PACKAGE"
+                        ? prev.packageItemIds
+                        : [],
+                  }))
+                }
+              >
+                {typeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            {newService.type === "PACKAGE" ? (
+              <FormField
+                id="service-package-items"
+                label="Package items"
+                error={createErrors.packageItemIds}
+              >
+                <div className="space-y-3">
+                  <Input
+                    placeholder="Search services..."
+                    value={newPackageQuery}
+                    onChange={(event) => setNewPackageQuery(event.target.value)}
+                  />
+                  {(() => {
+                    const query = newPackageQuery.trim().toLowerCase()
+                    const filtered = query
+                      ? serviceOptions.filter((option) =>
+                          option.name.toLowerCase().includes(query)
+                        )
+                      : serviceOptions
+                    return (
+                      <div className="max-h-40 space-y-2 overflow-y-auto rounded-md border border-input bg-background p-3 text-sm">
+                        {filtered.length ? (
+                          filtered.map((option) => (
+                          <label
+                            key={option.id}
+                            className="flex items-center gap-2 text-sm"
+                          >
+                        <input
+                          type="checkbox"
+                          checked={newService.packageItemIds.includes(option.id)}
+                          onChange={(event) => {
+                            const checked = event.target.checked
+                            setNewService((prev) => ({
+                              ...prev,
+                              packageItemIds: checked
+                                ? [...prev.packageItemIds, option.id]
+                                : prev.packageItemIds.filter((id) => id !== option.id),
+                            }))
+                          }}
+                            />
+                            <span>{option.name}</span>
+                          </label>
+                        ))
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            No eligible services found.
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })()}
+                </div>
+              </FormField>
+            ) : null}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
@@ -648,12 +865,13 @@ export default function ServicesPage() {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Edit service</DialogTitle>
             <DialogDescription>Update service details.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4">
+          <div className="flex-1 overflow-y-auto">
+            <div className="grid gap-4">
             <FormField id="edit-service-name" label="Name" error={editErrors.name}>
               <Input
                 id="edit-service-name"
@@ -753,6 +971,84 @@ export default function ServicesPage() {
                 ))}
               </select>
             </FormField>
+            <FormField id="edit-service-type" label="Type" error={editErrors.type}>
+              <select
+                id="edit-service-type"
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={editValues.type}
+                onChange={(event) =>
+                  setEditValues((prev) => ({
+                    ...prev,
+                    type: event.target.value as ServiceType,
+                    packageItemIds:
+                      event.target.value === "PACKAGE"
+                        ? prev.packageItemIds
+                        : [],
+                  }))
+                }
+              >
+                {typeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            {editValues.type === "PACKAGE" ? (
+              <FormField
+                id="edit-package-items"
+                label="Package items"
+                error={editErrors.packageItemIds}
+              >
+                <div className="space-y-3">
+                  <Input
+                    placeholder="Search services..."
+                    value={editPackageQuery}
+                    onChange={(event) => setEditPackageQuery(event.target.value)}
+                  />
+                  {(() => {
+                    const query = editPackageQuery.trim().toLowerCase()
+                    const filtered = query
+                      ? serviceOptions.filter((option) =>
+                          option.name.toLowerCase().includes(query)
+                        )
+                      : serviceOptions
+                    return (
+                      <div className="max-h-40 space-y-2 overflow-y-auto rounded-md border border-input bg-background p-3 text-sm">
+                        {filtered.length ? (
+                          filtered.map((option) => (
+                          <label
+                            key={option.id}
+                            className="flex items-center gap-2 text-sm"
+                          >
+                        <input
+                          type="checkbox"
+                          checked={editValues.packageItemIds.includes(option.id)}
+                          onChange={(event) => {
+                            const checked = event.target.checked
+                            setEditValues((prev) => ({
+                              ...prev,
+                              packageItemIds: checked
+                                ? [...prev.packageItemIds, option.id]
+                                : prev.packageItemIds.filter((id) => id !== option.id),
+                            }))
+                          }}
+                            />
+                            <span>{option.name}</span>
+                          </label>
+                        ))
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            No eligible services found.
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })()}
+                </div>
+              </FormField>
+            ) : null}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>

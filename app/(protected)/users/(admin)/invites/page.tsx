@@ -274,6 +274,7 @@ export default function InvitesPage() {
     []
   )
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: invites,
     columns,
@@ -323,14 +324,15 @@ export default function InvitesPage() {
       <DataTablePagination table={table} totalRows={totalRows} />
 
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Invite user</DialogTitle>
             <DialogDescription>
               Send a secure invite link to set a password.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4">
+          <div className="flex-1 overflow-y-auto">
+            <div className="grid gap-4">
             <FormField id="invite-email" label="Email" error={inviteErrors.email}>
               <Input
                 id="invite-email"
@@ -360,6 +362,7 @@ export default function InvitesPage() {
                 ))}
               </select>
             </FormField>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setInviteOpen(false)}>

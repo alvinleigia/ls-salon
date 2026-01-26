@@ -81,18 +81,13 @@ export async function DELETE(
     where: { categoryId: id },
   })
   if (linkedServices > 0) {
-    return NextResponse.json(
-      {
-        error: "Category is in use. Deactivate services or move them first.",
-      },
-      { status: 409 }
-    )
+    await prisma.serviceCategory.update({
+      where: { id },
+      data: { status: "INACTIVE" },
+    })
+  } else {
+    await prisma.serviceCategory.delete({ where: { id } })
   }
-
-  await prisma.serviceCategory.update({
-    where: { id },
-    data: { status: "INACTIVE" },
-  })
 
   return NextResponse.json({ ok: true })
 }

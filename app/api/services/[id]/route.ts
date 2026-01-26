@@ -28,32 +28,65 @@ export async function PATCH(
 
   const data = parsed.data
 
-  const item = await prisma.service.update({
-    where: { id },
-    data: {
-      ...(data.name?.trim() ? { name: data.name.trim() } : {}),
-      ...(data.description?.trim()
-        ? { description: data.description.trim() }
-        : data.description === ""
-          ? { description: null }
+  if (data.type === "PACKAGE" && data.packageItemIds?.length === 0) {
+    return NextResponse.json(
+      { error: "Package items are required." },
+      { status: 400 }
+    )
+  }
+
+  const item = await prisma.$transaction(async (tx) => {
+    const updated = await tx.service.update({
+      where: { id },
+      data: {
+        ...(data.name?.trim() ? { name: data.name.trim() } : {}),
+        ...(data.description?.trim()
+          ? { description: data.description.trim() }
+          : data.description === ""
+            ? { description: null }
+            : {}),
+        ...(data.categoryId ? { categoryId: data.categoryId } : {}),
+        ...(typeof data.durationMinutes === "number"
+          ? { durationMinutes: data.durationMinutes }
           : {}),
-      ...(data.categoryId ? { categoryId: data.categoryId } : {}),
-      ...(typeof data.durationMinutes === "number"
-        ? { durationMinutes: data.durationMinutes }
-        : {}),
-      ...(typeof data.priceCents === "number" ? { priceCents: data.priceCents } : {}),
-      ...(data.status ? { status: data.status } : {}),
-    },
-    select: {
-      id: true,
-      name: true,
-      description: true,
-      durationMinutes: true,
-      priceCents: true,
-      status: true,
-      createdAt: true,
-      category: { select: { id: true, name: true } },
-    },
+        ...(typeof data.priceCents === "number"
+          ? { priceCents: data.priceCents }
+          : {}),
+        ...(data.status ? { status: data.status } : {}),
+        ...(data.type ? { type: data.type } : {}),
+      },
+    })
+
+    if (data.packageItemIds) {
+      await tx.servicePackageItem.deleteMany({ where: { packageId: id } })
+      if (data.packageItemIds.length > 0) {
+        await tx.servicePackageItem.createMany({
+          data: data.packageItemIds.map((itemServiceId, index) => ({
+            packageId: id,
+            itemServiceId,
+            sortOrder: index,
+          })),
+        })
+      }
+    }
+
+    return tx.service.findUnique({
+      where: { id: updated.id },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        durationMinutes: true,
+        priceCents: true,
+        status: true,
+        type: true,
+        createdAt: true,
+        category: { select: { id: true, name: true } },
+        packageItems: {
+          select: { itemService: { select: { id: true, name: true } } },
+        },
+      },
+    })
   })
 
   return NextResponse.json({ item })
@@ -71,10 +104,20 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  await prisma.service.update({
-    where: { id },
-    data: { status: "INACTIVE" },
+  const associations = await prisma.servicePackageItem.count({
+    where: {
+      OR: [{ packageId: id }, { itemServiceId: id }],
+    },
   })
+
+  if (associations > 0) {
+    await prisma.service.update({
+      where: { id },
+      data: { status: "INACTIVE" },
+    })
+  } else {
+    await prisma.service.delete({ where: { id } })
+  }
 
   return NextResponse.json({ ok: true })
 }

@@ -13,14 +13,103 @@ type SettingsForm = {
   currency: string
   timeZone: string
   dateFormat: string
+  workingHours: WorkingDay[]
+  overrides: OverrideDay[]
 }
+
+type Weekday =
+  | "MONDAY"
+  | "TUESDAY"
+  | "WEDNESDAY"
+  | "THURSDAY"
+  | "FRIDAY"
+  | "SATURDAY"
+  | "SUNDAY"
+
+type WorkingPeriod = {
+  id?: string
+  kind: "WORK" | "BREAK"
+  startTime: string
+  endTime: string
+  sortOrder?: number
+}
+
+type WorkingDay = {
+  id?: string
+  day: Weekday
+  isOpen: boolean
+  periods: WorkingPeriod[]
+}
+
+type OverrideDay = {
+  id?: string
+  date: string
+  isOpen: boolean
+  periods: WorkingPeriod[]
+}
+
+const WEEKDAYS: { value: Weekday; label: string }[] = [
+  { value: "MONDAY", label: "Monday" },
+  { value: "TUESDAY", label: "Tuesday" },
+  { value: "WEDNESDAY", label: "Wednesday" },
+  { value: "THURSDAY", label: "Thursday" },
+  { value: "FRIDAY", label: "Friday" },
+  { value: "SATURDAY", label: "Saturday" },
+  { value: "SUNDAY", label: "Sunday" },
+]
+
+const DEFAULT_PERIOD: WorkingPeriod = {
+  kind: "WORK",
+  startTime: "09:00",
+  endTime: "18:00",
+}
+
+const defaultWorkingHours: WorkingDay[] = WEEKDAYS.map((day) => ({
+  day: day.value,
+  isOpen: true,
+  periods: [{ ...DEFAULT_PERIOD }],
+}))
 
 const defaultSettings: SettingsForm = {
   locale: "en-US",
   currency: "USD",
   timeZone: "America/New_York",
   dateFormat: "MM/dd/yyyy",
+  workingHours: defaultWorkingHours,
+  overrides: [],
 }
+
+const normalizeWorkingHours = (workingHours?: WorkingDay[]) => {
+  const map = new Map(workingHours?.map((day) => [day.day, day]) ?? [])
+  return WEEKDAYS.map((day) => {
+    const existing = map.get(day.value)
+    if (!existing) {
+      return {
+        day: day.value,
+        isOpen: true,
+        periods: [{ ...DEFAULT_PERIOD }],
+      }
+    }
+    const periods =
+      existing.periods?.length > 0
+        ? existing.periods
+        : existing.isOpen
+          ? [{ ...DEFAULT_PERIOD }]
+          : []
+    return { ...existing, periods }
+  })
+}
+
+const normalizeOverrides = (overrides?: OverrideDay[]) =>
+  overrides?.map((override) => ({
+    ...override,
+    periods:
+      override.periods?.length > 0
+        ? override.periods
+        : override.isOpen
+          ? [{ ...DEFAULT_PERIOD }]
+          : [],
+  })) ?? []
 
 export default function SettingsPage() {
   const [loading, setLoading] = React.useState(true)
@@ -37,8 +126,13 @@ export default function SettingsPage() {
         setLoading(false)
         return
       }
-      const data = (await response.json()) as { settings: SettingsForm }
-      setForm(data.settings ?? defaultSettings)
+      const data = (await response.json()) as { settings?: SettingsForm }
+      const settings = data.settings ?? defaultSettings
+      setForm({
+        ...settings,
+        workingHours: normalizeWorkingHours(settings.workingHours),
+        overrides: normalizeOverrides(settings.overrides),
+      })
       setLoading(false)
     }
     void load()
@@ -46,6 +140,124 @@ export default function SettingsPage() {
 
   const updateField = (key: keyof SettingsForm, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const updateWorkingDay = (
+    dayIndex: number,
+    updater: (day: WorkingDay) => WorkingDay
+  ) => {
+    setForm((prev) => ({
+      ...prev,
+      workingHours: prev.workingHours.map((day, index) =>
+        index === dayIndex ? updater(day) : day
+      ),
+    }))
+  }
+
+  const updatePeriod = (
+    dayIndex: number,
+    periodIndex: number,
+    updater: (period: WorkingPeriod) => WorkingPeriod
+  ) => {
+    updateWorkingDay(dayIndex, (day) => ({
+      ...day,
+      periods: day.periods.map((period, index) =>
+        index === periodIndex ? updater(period) : period
+      ),
+    }))
+  }
+
+  const addPeriod = (dayIndex: number, kind: WorkingPeriod["kind"]) => {
+    updateWorkingDay(dayIndex, (day) => ({
+      ...day,
+      periods: [
+        ...day.periods,
+        {
+          kind,
+          startTime: "09:00",
+          endTime: "18:00",
+        },
+      ],
+    }))
+  }
+
+  const removePeriod = (dayIndex: number, periodIndex: number) => {
+    updateWorkingDay(dayIndex, (day) => ({
+      ...day,
+      periods: day.periods.filter((_, index) => index !== periodIndex),
+    }))
+  }
+
+  const updateOverride = (
+    overrideIndex: number,
+    updater: (override: OverrideDay) => OverrideDay
+  ) => {
+    setForm((prev) => ({
+      ...prev,
+      overrides: prev.overrides.map((override, index) =>
+        index === overrideIndex ? updater(override) : override
+      ),
+    }))
+  }
+
+  const updateOverridePeriod = (
+    overrideIndex: number,
+    periodIndex: number,
+    updater: (period: WorkingPeriod) => WorkingPeriod
+  ) => {
+    updateOverride(overrideIndex, (override) => ({
+      ...override,
+      periods: override.periods.map((period, index) =>
+        index === periodIndex ? updater(period) : period
+      ),
+    }))
+  }
+
+  const addOverride = () => {
+    const today = new Date().toISOString().slice(0, 10)
+    if (form.overrides.some((override) => override.date === today)) {
+      toast.error("An override for today already exists.")
+      return
+    }
+    setForm((prev) => ({
+      ...prev,
+      overrides: [
+        ...prev.overrides,
+        {
+          date: today,
+          isOpen: true,
+          periods: [{ ...DEFAULT_PERIOD }],
+        },
+      ],
+    }))
+  }
+
+  const removeOverride = (overrideIndex: number) => {
+    setForm((prev) => ({
+      ...prev,
+      overrides: prev.overrides.filter((_, index) => index !== overrideIndex),
+    }))
+  }
+
+  const addOverridePeriod = (overrideIndex: number, kind: WorkingPeriod["kind"]) => {
+    updateOverride(overrideIndex, (override) => ({
+      ...override,
+      periods: [
+        ...override.periods,
+        {
+          kind,
+          startTime: "09:00",
+          endTime: "18:00",
+        },
+      ],
+    }))
+  }
+
+  const removeOverridePeriod = (overrideIndex: number, periodIndex: number) => {
+    updateOverride(overrideIndex, (override) => ({
+      ...override,
+      periods: override.periods.filter((_, index) => index !== periodIndex),
+    }))
   }
 
   const save = async () => {
@@ -126,11 +338,266 @@ export default function SettingsPage() {
             />
           </FormField>
         </div>
-        <div className="mt-6 flex justify-end">
-          <Button onClick={save} disabled={saving}>
-            {saving ? "Saving..." : "Save settings"}
+      </div>
+
+      <div className="rounded-xl border bg-card p-6">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold">Working hours</h2>
+          <p className="text-sm text-muted-foreground">
+            Configure daily hours and add break periods.
+          </p>
+        </div>
+
+        <div className="mt-4 space-y-4">
+          {form.workingHours.map((day, dayIndex) => (
+            <div key={day.day} className="rounded-lg border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm font-medium">
+                  {WEEKDAYS.find((item) => item.value === day.day)?.label ?? day.day}
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={day.isOpen}
+                    onChange={(event) =>
+                      updateWorkingDay(dayIndex, (current) => ({
+                        ...current,
+                        isOpen: event.target.checked,
+                        periods: event.target.checked
+                          ? current.periods.length
+                            ? current.periods
+                            : [{ ...DEFAULT_PERIOD }]
+                          : [],
+                      }))
+                    }
+                  />
+                  Open
+                </label>
+              </div>
+
+              {day.isOpen ? (
+                <div className="mt-4 space-y-3">
+                  {day.periods.map((period, periodIndex) => (
+                    <div
+                      key={`${day.day}-${periodIndex}`}
+                      className="grid gap-3 sm:grid-cols-[140px_1fr_1fr_auto] sm:items-end"
+                    >
+                      <select
+                        className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                        value={period.kind}
+                        onChange={(event) =>
+                          updatePeriod(dayIndex, periodIndex, (current) => ({
+                            ...current,
+                            kind: event.target.value as WorkingPeriod["kind"],
+                          }))
+                        }
+                      >
+                        <option value="WORK">Work</option>
+                        <option value="BREAK">Break</option>
+                      </select>
+                      <Input
+                        type="time"
+                        value={period.startTime}
+                        onChange={(event) =>
+                          updatePeriod(dayIndex, periodIndex, (current) => ({
+                            ...current,
+                            startTime: event.target.value,
+                          }))
+                        }
+                      />
+                      <Input
+                        type="time"
+                        value={period.endTime}
+                        onChange={(event) =>
+                          updatePeriod(dayIndex, periodIndex, (current) => ({
+                            ...current,
+                            endTime: event.target.value,
+                          }))
+                        }
+                      />
+                      <Button
+                        variant="outline"
+                        onClick={() => removePeriod(dayIndex, periodIndex)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => addPeriod(dayIndex, "WORK")}
+                    >
+                      Add work period
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => addPeriod(dayIndex, "BREAK")}
+                    >
+                      Add break
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Closed for this day.
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-card p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Special hours</h2>
+            <p className="text-sm text-muted-foreground">
+              Override working hours for specific dates.
+            </p>
+          </div>
+          <Button variant="outline" onClick={addOverride}>
+            Add override
           </Button>
         </div>
+
+        {form.overrides.length ? (
+          <div className="mt-4 space-y-4">
+            {form.overrides.map((override, overrideIndex) => (
+              <div key={`${override.date}-${overrideIndex}`} className="rounded-lg border p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <Input
+                    type="date"
+                    value={override.date}
+                    onChange={(event) => {
+                      const nextDate = event.target.value
+                      if (
+                        form.overrides.some(
+                          (item, index) =>
+                            index !== overrideIndex && item.date === nextDate
+                        )
+                      ) {
+                        toast.error("That date already has an override.")
+                        return
+                      }
+                      updateOverride(overrideIndex, (current) => ({
+                        ...current,
+                        date: nextDate,
+                      }))
+                    }}
+                  />
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={override.isOpen}
+                        onChange={(event) =>
+                          updateOverride(overrideIndex, (current) => ({
+                            ...current,
+                            isOpen: event.target.checked,
+                            periods: event.target.checked
+                              ? current.periods.length
+                                ? current.periods
+                                : [{ ...DEFAULT_PERIOD }]
+                              : [],
+                          }))
+                        }
+                      />
+                      Open
+                    </label>
+                    <Button
+                      variant="outline"
+                      onClick={() => removeOverride(overrideIndex)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+
+                {override.isOpen ? (
+                  <div className="mt-4 space-y-3">
+                    {override.periods.map((period, periodIndex) => (
+                      <div
+                        key={`${override.date}-${periodIndex}`}
+                        className="grid gap-3 sm:grid-cols-[140px_1fr_1fr_auto] sm:items-end"
+                      >
+                        <select
+                          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                          value={period.kind}
+                          onChange={(event) =>
+                            updateOverridePeriod(overrideIndex, periodIndex, (current) => ({
+                              ...current,
+                              kind: event.target.value as WorkingPeriod["kind"],
+                            }))
+                          }
+                        >
+                          <option value="WORK">Work</option>
+                          <option value="BREAK">Break</option>
+                        </select>
+                        <Input
+                          type="time"
+                          value={period.startTime}
+                          onChange={(event) =>
+                            updateOverridePeriod(overrideIndex, periodIndex, (current) => ({
+                              ...current,
+                              startTime: event.target.value,
+                            }))
+                          }
+                        />
+                        <Input
+                          type="time"
+                          value={period.endTime}
+                          onChange={(event) =>
+                            updateOverridePeriod(overrideIndex, periodIndex, (current) => ({
+                              ...current,
+                              endTime: event.target.value,
+                            }))
+                          }
+                        />
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            removeOverridePeriod(overrideIndex, periodIndex)
+                          }
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => addOverridePeriod(overrideIndex, "WORK")}
+                      >
+                        Add work period
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => addOverridePeriod(overrideIndex, "BREAK")}
+                      >
+                        Add break
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Closed for this day.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">
+            No overrides yet.
+          </p>
+        )}
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={save} disabled={saving}>
+          {saving ? "Saving..." : "Save settings"}
+        </Button>
       </div>
     </div>
   )

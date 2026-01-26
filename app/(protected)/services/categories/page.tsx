@@ -81,6 +81,9 @@ export default function ServiceCategoriesPage() {
   const [editOpen, setEditOpen] = React.useState(false)
   const [editingCategory, setEditingCategory] = React.useState<CategoryRow | null>(null)
   const [saving, setSaving] = React.useState(false)
+  const [deleteOpen, setDeleteOpen] = React.useState(false)
+  const [deleteTarget, setDeleteTarget] = React.useState<CategoryRow | null>(null)
+  const [deleting, setDeleting] = React.useState(false)
 
   const {
     errors: createErrors,
@@ -199,7 +202,7 @@ export default function ServiceCategoriesPage() {
     await loadCategories()
   }
 
-  const startEdit = (category: CategoryRow) => {
+  const startEdit = React.useCallback((category: CategoryRow) => {
     setEditingCategory(category)
     clearEditErrors()
     setEditValues({
@@ -209,7 +212,7 @@ export default function ServiceCategoriesPage() {
       sortOrder: category.sortOrder,
     })
     setEditOpen(true)
-  }
+  }, [clearEditErrors])
 
   const saveEdit = async () => {
     if (!editingCategory) return
@@ -237,6 +240,30 @@ export default function ServiceCategoriesPage() {
     setEditingCategory(null)
     await loadCategories()
   }
+
+  const requestDelete = React.useCallback((category: CategoryRow) => {
+    setDeleteTarget(category)
+    setDeleteOpen(true)
+  }, [])
+
+  const confirmDelete = React.useCallback(async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    const response = await fetch(`/api/service-categories/${deleteTarget.id}`, {
+      method: "DELETE",
+    })
+    if (!response.ok) {
+      const data = (await response.json()) as { error?: string }
+      toast.error(data.error ?? "Unable to delete category.")
+      setDeleting(false)
+      return
+    }
+    toast.success("Category deleted.")
+    setDeleting(false)
+    setDeleteOpen(false)
+    setDeleteTarget(null)
+    await loadCategories()
+  }, [deleteTarget, loadCategories])
 
   const columns = React.useMemo<ColumnDef<CategoryRow>[]>(
     () => [
@@ -333,14 +360,21 @@ export default function ServiceCategoriesPage() {
               <DropdownMenuItem onSelect={() => startEdit(row.original)}>
                 Edit
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => requestDelete(row.original)}
+                className="text-destructive"
+              >
+                Delete
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         ),
       },
     ],
-    []
+    [requestDelete, startEdit]
   )
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: categories,
     columns,
@@ -396,13 +430,48 @@ export default function ServiceCategoriesPage() {
 
       <DataTablePagination table={table} totalRows={totalRows} />
 
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open)
+          if (!open) {
+            setDeleteTarget(null)
+            setDeleting(false)
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete category</DialogTitle>
+            <DialogDescription>
+              {deleteTarget
+                ? `Delete "${deleteTarget.name}"? This cannot be undone.`
+                : "Delete this category? This cannot be undone."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>New category</DialogTitle>
             <DialogDescription>Create a service category.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4">
+          <div className="flex-1 overflow-y-auto">
+            <div className="grid gap-4">
             <FormField id="category-name" label="Name" error={createErrors.name}>
               <Input
                 id="category-name"
@@ -465,6 +534,7 @@ export default function ServiceCategoriesPage() {
                 }
               />
             </FormField>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
@@ -487,12 +557,13 @@ export default function ServiceCategoriesPage() {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Edit category</DialogTitle>
             <DialogDescription>Update category details.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4">
+          <div className="flex-1 overflow-y-auto">
+            <div className="grid gap-4">
             <FormField id="edit-name" label="Name" error={editErrors.name}>
               <Input
                 id="edit-name"
@@ -551,6 +622,7 @@ export default function ServiceCategoriesPage() {
                 }
               />
             </FormField>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>

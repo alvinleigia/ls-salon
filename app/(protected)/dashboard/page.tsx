@@ -3,7 +3,7 @@ export default function DashboardPage() {
     <div className="grid gap-6 lg:grid-cols-3">
       <section className="lg:col-span-2 space-y-6">
         <div className="rounded-xl border bg-card p-6">
-          <h2 className="text-lg font-semibold">Today's bookings</h2>
+          <h2 className="text-lg font-semibold">Today&apos;s bookings</h2>
           <p className="mt-2 text-sm text-muted-foreground">
             14 appointments - 3 walk-ins - 2 VIP slots left
           </p>

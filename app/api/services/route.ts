@@ -2,20 +2,34 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
-import { createServiceSchema, serviceStatusSchema } from "@/lib/validation"
+import {
+  createServiceSchema,
+  serviceStatusSchema,
+  serviceTypeSchema,
+} from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
 
 const listSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   sort: z
-    .enum(["createdAt", "name", "status", "durationMinutes", "priceCents"])
+    .enum([
+      "createdAt",
+      "name",
+      "status",
+      "durationMinutes",
+      "priceCents",
+      "type",
+      "category",
+    ])
     .optional(),
   order: z.enum(["asc", "desc"]).optional(),
   q: z.string().trim().optional(),
   status: serviceStatusSchema.optional(),
   categoryId: z.string().trim().optional(),
+  type: serviceTypeSchema.optional(),
 })
 
 export async function GET(request: Request) {
@@ -35,24 +49,29 @@ export async function GET(request: Request) {
     )
   }
 
-  const { page, pageSize, sort, order, q, status, categoryId } = parsed.data
+  const { page, pageSize, sort, order, q, status, categoryId, type } = parsed.data
   const skip = (page - 1) * pageSize
-  const orderBy = sort
-    ? { [sort]: order ?? "asc" }
-    : { createdAt: "desc" as const }
+  const sortDir = order ?? "asc"
+  const orderBy =
+    sort === "category"
+      ? { category: { name: sortDir } }
+      : sort
+        ? { [sort]: sortDir }
+        : { createdAt: "desc" as const }
   const trimmedSearch = q?.trim()
 
   const where = {
     ...(trimmedSearch
       ? {
           OR: [
-            { name: { contains: trimmedSearch, mode: "insensitive" } },
-            { description: { contains: trimmedSearch, mode: "insensitive" } },
+            { name: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
+            { description: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
           ],
         }
       : {}),
     ...(status ? { status } : {}),
     ...(categoryId ? { categoryId } : {}),
+    ...(type ? { type } : {}),
   }
 
   const [total, items] = await prisma.$transaction([
@@ -69,8 +88,12 @@ export async function GET(request: Request) {
         durationMinutes: true,
         priceCents: true,
         status: true,
+        type: true,
         createdAt: true,
         category: { select: { id: true, name: true } },
+        packageItems: {
+          select: { itemService: { select: { id: true, name: true } } },
+        },
       },
     }),
   ])
@@ -97,8 +120,23 @@ export async function POST(request: Request) {
     )
   }
 
-  const { name, description, categoryId, durationMinutes, priceCents, status } =
-    parsed.data
+  const {
+    name,
+    description,
+    categoryId,
+    durationMinutes,
+    priceCents,
+    status,
+    type,
+    packageItemIds,
+  } = parsed.data
+
+  if (type === "PACKAGE" && (!packageItemIds || packageItemIds.length === 0)) {
+    return NextResponse.json(
+      { error: "Package items are required." },
+      { status: 400 }
+    )
+  }
 
   const item = await prisma.service.create({
     data: {
@@ -108,6 +146,16 @@ export async function POST(request: Request) {
       durationMinutes,
       priceCents,
       status: status ?? "ACTIVE",
+      type: type ?? "STANDARD",
+      packageItems:
+        type === "PACKAGE" && packageItemIds?.length
+          ? {
+              create: packageItemIds.map((itemServiceId, index) => ({
+                itemServiceId,
+                sortOrder: index,
+              })),
+            }
+          : undefined,
     },
     select: {
       id: true,
@@ -116,8 +164,12 @@ export async function POST(request: Request) {
       durationMinutes: true,
       priceCents: true,
       status: true,
+      type: true,
       createdAt: true,
       category: { select: { id: true, name: true } },
+      packageItems: {
+        select: { itemService: { select: { id: true, name: true } } },
+      },
     },
   })
 

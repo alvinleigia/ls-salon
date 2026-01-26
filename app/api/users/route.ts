@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { createUserSchema } from "@/lib/validation"
 import { canInvite, canManageUsers, type Role } from "@/lib/permissions"
@@ -66,9 +67,9 @@ export async function GET(request: Request) {
     ...(trimmedSearch
       ? {
           OR: [
-            { name: { contains: trimmedSearch, mode: "insensitive" } },
-            { email: { contains: trimmedSearch, mode: "insensitive" } },
-            { phone: { contains: trimmedSearch, mode: "insensitive" } },
+            { name: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
+            { email: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
+            { phone: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
           ],
         }
       : {}),
@@ -146,6 +147,7 @@ export async function POST(request: Request) {
     dateOfBirth,
     gender,
     status,
+    eligibleServiceIds,
     marketingOptIn,
     addressLine1,
     addressLine2,
@@ -164,6 +166,10 @@ export async function POST(request: Request) {
   }
 
   const passwordHash = await bcrypt.hash(password, 10)
+  const normalizedEligibleServiceIds =
+    userRole === "STAFF" && eligibleServiceIds
+      ? Array.from(new Set(eligibleServiceIds))
+      : []
 
   const user = await prisma.user.create({
     data: {
@@ -176,13 +182,20 @@ export async function POST(request: Request) {
       dateOfBirth,
       gender,
       status: status ?? "ACTIVE",
-      marketingOptIn: marketingOptIn ?? false,
+      marketingOptIn: userRole === "STAFF" ? false : marketingOptIn ?? false,
       addressLine1: addressLine1 || undefined,
       addressLine2: addressLine2 || undefined,
       city: city || undefined,
       state: state || undefined,
       postalCode: postalCode || undefined,
       country: country || undefined,
+      eligibleServices: normalizedEligibleServiceIds.length
+        ? {
+            createMany: {
+              data: normalizedEligibleServiceIds.map((serviceId) => ({ serviceId })),
+            },
+          }
+        : undefined,
     },
     select: {
       id: true,

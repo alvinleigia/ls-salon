@@ -3,6 +3,7 @@ import crypto from "crypto"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { inviteUserSchema } from "@/lib/validation"
 import { mailer, mailFrom } from "@/lib/mailer"
@@ -103,7 +104,7 @@ export async function GET(request: Request) {
   const trimmedSearch = q?.trim()
   const where = {
     ...(trimmedSearch
-      ? { email: { contains: trimmedSearch, mode: "insensitive" } }
+      ? { email: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } }
       : {}),
     ...(status === "accepted" ? { acceptedAt: { not: null } } : {}),
     ...(status === "pending" ? { acceptedAt: null, expiresAt: { gt: new Date() } } : {}),

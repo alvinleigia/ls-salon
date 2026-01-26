@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient();
@@ -154,6 +155,8 @@ const services = [
     priceCents: 12000,
     status: "ACTIVE",
     category: "Packages",
+    type: "PACKAGE",
+    items: ["Women's Haircut", "Blowout", "Deep Conditioning"],
   },
 ];
 
@@ -175,6 +178,7 @@ async function main() {
         durationMinutes: service.durationMinutes,
         priceCents: service.priceCents,
         status: service.status,
+        type: service.type || "STANDARD",
         categoryId,
       };
     })
@@ -187,6 +191,35 @@ async function main() {
     data,
     skipDuplicates: true,
   });
+
+  const packageDefinitions = services.filter((service) => service.type === "PACKAGE");
+  if (!packageDefinitions.length) return;
+
+  const createdServices = await prisma.service.findMany({
+    select: { id: true, name: true },
+  });
+  const serviceMap = new Map(
+    createdServices.map((service) => [service.name, service.id])
+  );
+
+  for (const pack of packageDefinitions) {
+    const packageId = serviceMap.get(pack.name);
+    if (!packageId || !pack.items) continue;
+    const packageItems = pack.items
+      .map((name, index) => {
+        const itemServiceId = serviceMap.get(name);
+        if (!itemServiceId) return null;
+        return { packageId, itemServiceId, sortOrder: index };
+      })
+      .filter((item) => item !== null);
+
+    if (packageItems.length) {
+      await prisma.servicePackageItem.createMany({
+        data: packageItems,
+        skipDuplicates: true,
+      });
+    }
+  }
 }
 
 main()
