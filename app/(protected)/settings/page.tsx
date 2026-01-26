@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { FormField } from "@/components/form-field"
+import { Label } from "@/components/ui/label"
 import { useFormErrors } from "@/hooks/use-form-errors"
 
 type SettingsForm = {
@@ -112,6 +113,18 @@ const normalizeOverrides = (overrides?: OverrideDay[]) =>
   })) ?? []
 
 export default function SettingsPage() {
+  const InlineField = ({
+    label,
+    children,
+  }: {
+    label: string
+    children: React.ReactNode
+  }) => (
+    <div className="space-y-1">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      {children}
+    </div>
+  )
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
   const [form, setForm] = React.useState<SettingsForm>(defaultSettings)
@@ -382,39 +395,45 @@ export default function SettingsPage() {
                       key={`${day.day}-${periodIndex}`}
                       className="grid gap-3 sm:grid-cols-[140px_1fr_1fr_auto] sm:items-end"
                     >
-                      <select
-                        className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                        value={period.kind}
-                        onChange={(event) =>
-                          updatePeriod(dayIndex, periodIndex, (current) => ({
-                            ...current,
-                            kind: event.target.value as WorkingPeriod["kind"],
-                          }))
-                        }
-                      >
-                        <option value="WORK">Work</option>
-                        <option value="BREAK">Break</option>
-                      </select>
-                      <Input
-                        type="time"
-                        value={period.startTime}
-                        onChange={(event) =>
-                          updatePeriod(dayIndex, periodIndex, (current) => ({
-                            ...current,
-                            startTime: event.target.value,
-                          }))
-                        }
-                      />
-                      <Input
-                        type="time"
-                        value={period.endTime}
-                        onChange={(event) =>
-                          updatePeriod(dayIndex, periodIndex, (current) => ({
-                            ...current,
-                            endTime: event.target.value,
-                          }))
-                        }
-                      />
+                      <InlineField label="Type">
+                        <select
+                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          value={period.kind}
+                          onChange={(event) =>
+                            updatePeriod(dayIndex, periodIndex, (current) => ({
+                              ...current,
+                              kind: event.target.value as WorkingPeriod["kind"],
+                            }))
+                          }
+                        >
+                          <option value="WORK">Work</option>
+                          <option value="BREAK">Break</option>
+                        </select>
+                      </InlineField>
+                      <InlineField label="Start">
+                        <Input
+                          type="time"
+                          value={period.startTime}
+                          onChange={(event) =>
+                            updatePeriod(dayIndex, periodIndex, (current) => ({
+                              ...current,
+                              startTime: event.target.value,
+                            }))
+                          }
+                        />
+                      </InlineField>
+                      <InlineField label="End">
+                        <Input
+                          type="time"
+                          value={period.endTime}
+                          onChange={(event) =>
+                            updatePeriod(dayIndex, periodIndex, (current) => ({
+                              ...current,
+                              endTime: event.target.value,
+                            }))
+                          }
+                        />
+                      </InlineField>
                       <Button
                         variant="outline"
                         onClick={() => removePeriod(dayIndex, periodIndex)}
@@ -466,26 +485,28 @@ export default function SettingsPage() {
             {form.overrides.map((override, overrideIndex) => (
               <div key={`${override.date}-${overrideIndex}`} className="rounded-lg border p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <Input
-                    type="date"
-                    value={override.date}
-                    onChange={(event) => {
-                      const nextDate = event.target.value
-                      if (
-                        form.overrides.some(
-                          (item, index) =>
-                            index !== overrideIndex && item.date === nextDate
-                        )
-                      ) {
-                        toast.error("That date already has an override.")
-                        return
-                      }
-                      updateOverride(overrideIndex, (current) => ({
-                        ...current,
-                        date: nextDate,
-                      }))
-                    }}
-                  />
+                  <InlineField label="Date">
+                    <Input
+                      type="date"
+                      value={override.date}
+                      onChange={(event) => {
+                        const nextDate = event.target.value
+                        if (
+                          form.overrides.some(
+                            (item, index) =>
+                              index !== overrideIndex && item.date === nextDate
+                          )
+                        ) {
+                          toast.error("That date already has an override.")
+                          return
+                        }
+                        updateOverride(overrideIndex, (current) => ({
+                          ...current,
+                          date: nextDate,
+                        }))
+                      }}
+                    />
+                  </InlineField>
                   <div className="flex items-center gap-3">
                     <label className="flex items-center gap-2 text-sm">
                       <input
@@ -521,39 +542,57 @@ export default function SettingsPage() {
                         key={`${override.date}-${periodIndex}`}
                         className="grid gap-3 sm:grid-cols-[140px_1fr_1fr_auto] sm:items-end"
                       >
-                        <select
-                          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                          value={period.kind}
-                          onChange={(event) =>
-                            updateOverridePeriod(overrideIndex, periodIndex, (current) => ({
-                              ...current,
-                              kind: event.target.value as WorkingPeriod["kind"],
-                            }))
-                          }
-                        >
-                          <option value="WORK">Work</option>
-                          <option value="BREAK">Break</option>
-                        </select>
-                        <Input
-                          type="time"
-                          value={period.startTime}
-                          onChange={(event) =>
-                            updateOverridePeriod(overrideIndex, periodIndex, (current) => ({
-                              ...current,
-                              startTime: event.target.value,
-                            }))
-                          }
-                        />
-                        <Input
-                          type="time"
-                          value={period.endTime}
-                          onChange={(event) =>
-                            updateOverridePeriod(overrideIndex, periodIndex, (current) => ({
-                              ...current,
-                              endTime: event.target.value,
-                            }))
-                          }
-                        />
+                        <InlineField label="Type">
+                          <select
+                            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                            value={period.kind}
+                            onChange={(event) =>
+                              updateOverridePeriod(
+                                overrideIndex,
+                                periodIndex,
+                                (current) => ({
+                                  ...current,
+                                  kind: event.target.value as WorkingPeriod["kind"],
+                                })
+                              )
+                            }
+                          >
+                            <option value="WORK">Work</option>
+                            <option value="BREAK">Break</option>
+                          </select>
+                        </InlineField>
+                        <InlineField label="Start">
+                          <Input
+                            type="time"
+                            value={period.startTime}
+                            onChange={(event) =>
+                              updateOverridePeriod(
+                                overrideIndex,
+                                periodIndex,
+                                (current) => ({
+                                  ...current,
+                                  startTime: event.target.value,
+                                })
+                              )
+                            }
+                          />
+                        </InlineField>
+                        <InlineField label="End">
+                          <Input
+                            type="time"
+                            value={period.endTime}
+                            onChange={(event) =>
+                              updateOverridePeriod(
+                                overrideIndex,
+                                periodIndex,
+                                (current) => ({
+                                  ...current,
+                                  endTime: event.target.value,
+                                })
+                              )
+                            }
+                          />
+                        </InlineField>
                         <Button
                           variant="outline"
                           onClick={() =>

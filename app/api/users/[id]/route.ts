@@ -141,6 +141,28 @@ export async function PATCH(
                 validTo: true,
               },
             },
+            rosterOverrides: {
+              select: {
+                id: true,
+                date: true,
+                isOpen: true,
+                periods: {
+                  select: { id: true, kind: true, startTime: true, endTime: true, sortOrder: true },
+                },
+              },
+              orderBy: { date: "asc" },
+            },
+            weeklyOverrides: {
+              select: {
+                id: true,
+                day: true,
+                isOpen: true,
+                periods: {
+                  select: { id: true, kind: true, startTime: true, endTime: true, sortOrder: true },
+                },
+              },
+              orderBy: { day: "asc" },
+            },
             certifications: {
               select: { id: true, title: true, issuer: true, issuedAt: true, expiresAt: true },
             },
@@ -194,6 +216,68 @@ export async function PATCH(
                   : null,
               })),
             })
+          }
+        }
+
+        if (staffProfileInput.rosterOverrides) {
+          await tx.staffRosterOverridePeriod.deleteMany({
+            where: { override: { staffProfileId: profile.id } },
+          })
+          await tx.staffRosterOverride.deleteMany({
+            where: { staffProfileId: profile.id },
+          })
+          if (staffProfileInput.rosterOverrides.length) {
+            for (const override of staffProfileInput.rosterOverrides) {
+              const overrideRecord = await tx.staffRosterOverride.create({
+                data: {
+                  staffProfileId: profile.id,
+                  date: new Date(`${override.date}T00:00:00.000Z`),
+                  isOpen: override.isOpen,
+                },
+              })
+              if (override.periods.length) {
+                await tx.staffRosterOverridePeriod.createMany({
+                  data: override.periods.map((period, index) => ({
+                    overrideId: overrideRecord.id,
+                    kind: period.kind,
+                    startTime: period.startTime,
+                    endTime: period.endTime,
+                    sortOrder: period.sortOrder ?? index,
+                  })),
+                })
+              }
+            }
+          }
+        }
+
+        if (staffProfileInput.weeklyOverrides) {
+          await tx.staffRosterWeeklyPeriod.deleteMany({
+            where: { override: { staffProfileId: profile.id } },
+          })
+          await tx.staffRosterWeeklyOverride.deleteMany({
+            where: { staffProfileId: profile.id },
+          })
+          if (staffProfileInput.weeklyOverrides.length) {
+            for (const override of staffProfileInput.weeklyOverrides) {
+              const weeklyRecord = await tx.staffRosterWeeklyOverride.create({
+                data: {
+                  staffProfileId: profile.id,
+                  day: override.day,
+                  isOpen: override.isOpen,
+                },
+              })
+              if (override.periods.length) {
+                await tx.staffRosterWeeklyPeriod.createMany({
+                  data: override.periods.map((period, index) => ({
+                    overrideId: weeklyRecord.id,
+                    kind: period.kind,
+                    startTime: period.startTime,
+                    endTime: period.endTime,
+                    sortOrder: period.sortOrder ?? index,
+                  })),
+                })
+              }
+            }
           }
         }
 
@@ -280,6 +364,28 @@ export async function GET(
               validFrom: true,
               validTo: true,
             },
+          },
+          rosterOverrides: {
+            select: {
+              id: true,
+              date: true,
+              isOpen: true,
+              periods: {
+                select: { id: true, kind: true, startTime: true, endTime: true, sortOrder: true },
+              },
+            },
+            orderBy: { date: "asc" },
+          },
+          weeklyOverrides: {
+            select: {
+              id: true,
+              day: true,
+              isOpen: true,
+              periods: {
+                select: { id: true, kind: true, startTime: true, endTime: true, sortOrder: true },
+              },
+            },
+            orderBy: { day: "asc" },
           },
           certifications: {
             select: { id: true, title: true, issuer: true, issuedAt: true, expiresAt: true },

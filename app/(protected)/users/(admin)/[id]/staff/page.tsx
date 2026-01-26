@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { canManageUsers, type Role } from "@/lib/permissions"
 
 type ServiceOption = { id: string; name: string }
@@ -33,6 +34,30 @@ type StaffUser = {
       validFrom: string | null
       validTo: string | null
     }[]
+    rosterOverrides?: {
+      id: string
+      date: string
+      isOpen: boolean
+      periods: {
+        id: string
+        kind: "WORK" | "BREAK"
+        startTime: string
+        endTime: string
+        sortOrder: number
+      }[]
+    }[]
+    weeklyOverrides?: {
+      id: string
+      day: "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY"
+      isOpen: boolean
+      periods: {
+        id: string
+        kind: "WORK" | "BREAK"
+        startTime: string
+        endTime: string
+        sortOrder: number
+      }[]
+    }[]
   } | null
 }
 
@@ -52,6 +77,30 @@ type StaffProfileForm = {
     validFrom: string
     validTo: string
   }[]
+  rosterOverrides: {
+    id?: string
+    date: string
+    isOpen: boolean
+    periods: {
+      id?: string
+      kind: "WORK" | "BREAK"
+      startTime: string
+      endTime: string
+      sortOrder?: number
+    }[]
+  }[]
+  weeklyOverrides: {
+    id?: string
+    day: "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY"
+    isOpen: boolean
+    periods: {
+      id?: string
+      kind: "WORK" | "BREAK"
+      startTime: string
+      endTime: string
+      sortOrder?: number
+    }[]
+  }[]
 }
 
 export default function StaffProfilePage() {
@@ -70,6 +119,8 @@ export default function StaffProfilePage() {
   const [profile, setProfile] = React.useState<StaffProfileForm>({
     certifications: [],
     documents: [],
+    rosterOverrides: [],
+    weeklyOverrides: [],
   })
 
   React.useEffect(() => {
@@ -119,6 +170,32 @@ export default function StaffProfilePage() {
               ? new Date(doc.validTo).toISOString().slice(0, 10)
               : "",
           })) ?? [],
+        rosterOverrides:
+          userRecord?.staffProfile?.rosterOverrides?.map((override) => ({
+            id: override.id,
+            date: new Date(override.date).toISOString().slice(0, 10),
+            isOpen: override.isOpen,
+            periods: override.periods.map((period) => ({
+              id: period.id,
+              kind: period.kind,
+              startTime: period.startTime,
+              endTime: period.endTime,
+              sortOrder: period.sortOrder,
+            })),
+          })) ?? [],
+        weeklyOverrides:
+          userRecord?.staffProfile?.weeklyOverrides?.map((override) => ({
+            id: override.id,
+            day: override.day,
+            isOpen: override.isOpen,
+            periods: override.periods.map((period) => ({
+              id: period.id,
+              kind: period.kind,
+              startTime: period.startTime,
+              endTime: period.endTime,
+              sortOrder: period.sortOrder,
+            })),
+          })) ?? [],
       })
 
       if (servicesRes.ok) {
@@ -158,6 +235,30 @@ export default function StaffProfilePage() {
             imageUrl: doc.imageUrl,
             validFrom: doc.validFrom,
             validTo: doc.validTo,
+          })),
+          rosterOverrides: profile.rosterOverrides.map((override) => ({
+            id: override.id,
+            date: override.date,
+            isOpen: override.isOpen,
+            periods: override.periods.map((period) => ({
+              id: period.id,
+              kind: period.kind,
+              startTime: period.startTime,
+              endTime: period.endTime,
+              sortOrder: period.sortOrder,
+            })),
+          })),
+          weeklyOverrides: profile.weeklyOverrides.map((override) => ({
+            id: override.id,
+            day: override.day,
+            isOpen: override.isOpen,
+            periods: override.periods.map((period) => ({
+              id: period.id,
+              kind: period.kind,
+              startTime: period.startTime,
+              endTime: period.endTime,
+              sortOrder: period.sortOrder,
+            })),
           })),
           certifications: profile.certifications.map((cert) => ({
             id: cert.id,
@@ -270,6 +371,520 @@ export default function StaffProfilePage() {
       <div className="rounded-xl border bg-card p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Roster overrides</h2>
+            <p className="text-sm text-muted-foreground">
+              Inherits global hours. Add date overrides for this staff member.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => {
+              const today = new Date().toISOString().slice(0, 10)
+              if (profile.rosterOverrides.some((override) => override.date === today)) {
+                toast.error("An override for today already exists.")
+                return
+              }
+              setProfile((prev) => ({
+                ...prev,
+                rosterOverrides: [
+                  ...prev.rosterOverrides,
+                  {
+                    date: today,
+                    isOpen: true,
+                    periods: [{ kind: "WORK", startTime: "09:00", endTime: "18:00" }],
+                  },
+                ],
+              }))
+            }}
+          >
+            Add override
+          </Button>
+        </div>
+
+        {profile.rosterOverrides.length ? (
+          <div className="mt-4 space-y-4">
+            {profile.rosterOverrides.map((override, overrideIndex) => (
+              <div key={`${override.date}-${overrideIndex}`} className="rounded-lg border p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Date</Label>
+                    <Input
+                      type="date"
+                      value={override.date}
+                      onChange={(event) => {
+                        const nextDate = event.target.value
+                        if (
+                          profile.rosterOverrides.some(
+                            (item, index) =>
+                              index !== overrideIndex && item.date === nextDate
+                          )
+                        ) {
+                          toast.error("That date already has an override.")
+                          return
+                        }
+                        setProfile((prev) => ({
+                          ...prev,
+                          rosterOverrides: prev.rosterOverrides.map((item, idx) =>
+                            idx === overrideIndex ? { ...item, date: nextDate } : item
+                          ),
+                        }))
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={override.isOpen}
+                        onChange={(event) =>
+                          setProfile((prev) => ({
+                            ...prev,
+                            rosterOverrides: prev.rosterOverrides.map((item, idx) =>
+                              idx === overrideIndex
+                                ? {
+                                    ...item,
+                                    isOpen: event.target.checked,
+                                    periods: event.target.checked
+                                      ? item.periods.length
+                                        ? item.periods
+                                        : [{ kind: "WORK", startTime: "09:00", endTime: "18:00" }]
+                                      : [],
+                                  }
+                                : item
+                            ),
+                          }))
+                        }
+                      />
+                      Open
+                    </label>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        setProfile((prev) => ({
+                          ...prev,
+                          rosterOverrides: prev.rosterOverrides.filter((_, idx) => idx !== overrideIndex),
+                        }))
+                      }
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+
+                {override.isOpen ? (
+                  <div className="mt-4 space-y-3">
+                    {override.periods.map((period, periodIndex) => (
+                      <div
+                        key={`${override.date}-${periodIndex}`}
+                        className="grid gap-3 sm:grid-cols-[140px_1fr_1fr_auto] sm:items-end"
+                      >
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Type</Label>
+                          <select
+                            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                            value={period.kind}
+                            onChange={(event) =>
+                              setProfile((prev) => ({
+                                ...prev,
+                                rosterOverrides: prev.rosterOverrides.map((item, idx) =>
+                                  idx === overrideIndex
+                                    ? {
+                                        ...item,
+                                        periods: item.periods.map((p, pIdx) =>
+                                          pIdx === periodIndex
+                                            ? {
+                                                ...p,
+                                                kind: event.target.value as StaffProfileForm["rosterOverrides"][number]["periods"][number]["kind"],
+                                              }
+                                            : p
+                                        ),
+                                      }
+                                    : item
+                                ),
+                              }))
+                            }
+                          >
+                            <option value="WORK">Work</option>
+                            <option value="BREAK">Break</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Start</Label>
+                          <Input
+                            type="time"
+                            value={period.startTime}
+                            onChange={(event) =>
+                              setProfile((prev) => ({
+                                ...prev,
+                                rosterOverrides: prev.rosterOverrides.map((item, idx) =>
+                                  idx === overrideIndex
+                                    ? {
+                                        ...item,
+                                        periods: item.periods.map((p, pIdx) =>
+                                          pIdx === periodIndex
+                                            ? { ...p, startTime: event.target.value }
+                                            : p
+                                        ),
+                                      }
+                                    : item
+                                ),
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">End</Label>
+                          <Input
+                            type="time"
+                            value={period.endTime}
+                            onChange={(event) =>
+                              setProfile((prev) => ({
+                                ...prev,
+                                rosterOverrides: prev.rosterOverrides.map((item, idx) =>
+                                  idx === overrideIndex
+                                    ? {
+                                        ...item,
+                                        periods: item.periods.map((p, pIdx) =>
+                                          pIdx === periodIndex
+                                            ? { ...p, endTime: event.target.value }
+                                            : p
+                                        ),
+                                      }
+                                    : item
+                                ),
+                              }))
+                            }
+                          />
+                        </div>
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            setProfile((prev) => ({
+                              ...prev,
+                              rosterOverrides: prev.rosterOverrides.map((item, idx) =>
+                                idx === overrideIndex
+                                  ? {
+                                      ...item,
+                                      periods: item.periods.filter((_, pIdx) => pIdx !== periodIndex),
+                                    }
+                                  : item
+                              ),
+                            }))
+                          }
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          setProfile((prev) => ({
+                            ...prev,
+                            rosterOverrides: prev.rosterOverrides.map((item, idx) =>
+                              idx === overrideIndex
+                                ? {
+                                    ...item,
+                                    periods: [
+                                      ...item.periods,
+                                      { kind: "WORK", startTime: "09:00", endTime: "18:00" },
+                                    ],
+                                  }
+                                : item
+                            ),
+                          }))
+                        }
+                      >
+                        Add work period
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          setProfile((prev) => ({
+                            ...prev,
+                            rosterOverrides: prev.rosterOverrides.map((item, idx) =>
+                              idx === overrideIndex
+                                ? {
+                                    ...item,
+                                    periods: [
+                                      ...item.periods,
+                                      { kind: "BREAK", startTime: "12:00", endTime: "13:00" },
+                                    ],
+                                  }
+                                : item
+                            ),
+                          }))
+                        }
+                      >
+                        Add break
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Closed for this day.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">
+            No overrides yet.
+          </p>
+        )}
+      </div>
+
+      <div className="rounded-xl border bg-card p-6">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold">Weekly availability</h2>
+          <p className="text-sm text-muted-foreground">
+            Override weekly hours for this staff member (leave empty to inherit).
+          </p>
+        </div>
+
+        <div className="mt-4 space-y-4">
+          {(["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"] as const).map(
+            (day) => {
+              const overrideIndex = profile.weeklyOverrides.findIndex((item) => item.day === day)
+              const override =
+                overrideIndex >= 0
+                  ? profile.weeklyOverrides[overrideIndex]
+                  : null
+              return (
+                <div key={day} className="rounded-lg border p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-sm font-medium">
+                      {day.charAt(0) + day.slice(1).toLowerCase()}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={override?.isOpen ?? false}
+                          onChange={(event) => {
+                            if (overrideIndex === -1) {
+                              setProfile((prev) => ({
+                                ...prev,
+                                weeklyOverrides: [
+                                  ...prev.weeklyOverrides,
+                                  {
+                                    day,
+                                    isOpen: event.target.checked,
+                                    periods: event.target.checked
+                                      ? [{ kind: "WORK", startTime: "09:00", endTime: "18:00" }]
+                                      : [],
+                                  },
+                                ],
+                              }))
+                              return
+                            }
+                            setProfile((prev) => ({
+                              ...prev,
+                              weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
+                                idx === overrideIndex
+                                  ? {
+                                      ...item,
+                                      isOpen: event.target.checked,
+                                      periods: event.target.checked
+                                        ? item.periods.length
+                                          ? item.periods
+                                          : [{ kind: "WORK", startTime: "09:00", endTime: "18:00" }]
+                                        : [],
+                                    }
+                                  : item
+                              ),
+                            }))
+                          }}
+                        />
+                        Override
+                      </label>
+                      {override ? (
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            setProfile((prev) => ({
+                              ...prev,
+                              weeklyOverrides: prev.weeklyOverrides.filter((item) => item.day !== day),
+                            }))
+                          }
+                        >
+                          Clear
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {override && override.isOpen ? (
+                    <div className="mt-4 space-y-3">
+                      {override.periods.map((period, periodIndex) => (
+                        <div
+                          key={`${day}-${periodIndex}`}
+                          className="grid gap-3 sm:grid-cols-[140px_1fr_1fr_auto] sm:items-end"
+                        >
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Type</Label>
+                            <select
+                              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                              value={period.kind}
+                              onChange={(event) =>
+                                setProfile((prev) => ({
+                                  ...prev,
+                                  weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
+                                    idx === overrideIndex
+                                      ? {
+                                          ...item,
+                                          periods: item.periods.map((p, pIdx) =>
+                                            pIdx === periodIndex
+                                              ? {
+                                                  ...p,
+                                                  kind: event.target.value as StaffProfileForm["weeklyOverrides"][number]["periods"][number]["kind"],
+                                                }
+                                              : p
+                                          ),
+                                        }
+                                      : item
+                                  ),
+                                }))
+                              }
+                            >
+                              <option value="WORK">Work</option>
+                              <option value="BREAK">Break</option>
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Start</Label>
+                            <Input
+                              type="time"
+                              value={period.startTime}
+                              onChange={(event) =>
+                                setProfile((prev) => ({
+                                  ...prev,
+                                  weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
+                                    idx === overrideIndex
+                                      ? {
+                                          ...item,
+                                          periods: item.periods.map((p, pIdx) =>
+                                            pIdx === periodIndex
+                                              ? { ...p, startTime: event.target.value }
+                                              : p
+                                          ),
+                                        }
+                                      : item
+                                  ),
+                                }))
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">End</Label>
+                            <Input
+                              type="time"
+                              value={period.endTime}
+                              onChange={(event) =>
+                                setProfile((prev) => ({
+                                  ...prev,
+                                  weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
+                                    idx === overrideIndex
+                                      ? {
+                                          ...item,
+                                          periods: item.periods.map((p, pIdx) =>
+                                            pIdx === periodIndex
+                                              ? { ...p, endTime: event.target.value }
+                                              : p
+                                          ),
+                                        }
+                                      : item
+                                  ),
+                                }))
+                              }
+                            />
+                          </div>
+                          <Button
+                            variant="outline"
+                            onClick={() =>
+                              setProfile((prev) => ({
+                                ...prev,
+                                weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
+                                  idx === overrideIndex
+                                    ? {
+                                        ...item,
+                                        periods: item.periods.filter((_, pIdx) => pIdx !== periodIndex),
+                                      }
+                                    : item
+                                ),
+                              }))
+                            }
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      ))}
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            setProfile((prev) => ({
+                              ...prev,
+                              weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
+                                idx === overrideIndex
+                                  ? {
+                                      ...item,
+                                      periods: [
+                                        ...item.periods,
+                                        { kind: "WORK", startTime: "09:00", endTime: "18:00" },
+                                      ],
+                                    }
+                                  : item
+                              ),
+                            }))
+                          }
+                        >
+                          Add work period
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            setProfile((prev) => ({
+                              ...prev,
+                              weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
+                                idx === overrideIndex
+                                  ? {
+                                      ...item,
+                                      periods: [
+                                        ...item.periods,
+                                        { kind: "BREAK", startTime: "12:00", endTime: "13:00" },
+                                      ],
+                                    }
+                                  : item
+                              ),
+                            }))
+                          }
+                        >
+                          Add break
+                        </Button>
+                      </div>
+                    </div>
+                  ) : override ? (
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      Closed for this day.
+                    </p>
+                  ) : (
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      Inherits global hours.
+                    </p>
+                  )}
+                </div>
+              )
+            }
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-card p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
             <h2 className="text-lg font-semibold">Documents</h2>
             <p className="text-sm text-muted-foreground">
               Add document links with type, number, and validity dates.
@@ -298,77 +913,90 @@ export default function StaffProfilePage() {
                 key={`${doc.type}-${index}`}
                 className="grid gap-3 sm:grid-cols-[140px_1fr_1fr_1fr_1fr_auto] sm:items-end"
               >
-                <select
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                  value={doc.type}
-                  onChange={(event) =>
-                    setProfile((prev) => ({
-                      ...prev,
-                      documents: prev.documents.map((item, idx) =>
-                        idx === index
-                          ? {
-                              ...item,
-                              type: event.target.value as StaffProfileForm["documents"][number]["type"],
-                            }
-                          : item
-                      ),
-                    }))
-                  }
-                >
-                  <option value="ID">ID</option>
-                  <option value="ADDRESS">Address</option>
-                  <option value="OTHER">Other</option>
-                </select>
-                <Input
-                  placeholder="Document number"
-                  value={doc.number}
-                  onChange={(event) =>
-                    setProfile((prev) => ({
-                      ...prev,
-                      documents: prev.documents.map((item, idx) =>
-                        idx === index ? { ...item, number: event.target.value } : item
-                      ),
-                    }))
-                  }
-                />
-                <Input
-                  placeholder="Image URL"
-                  value={doc.imageUrl}
-                  onChange={(event) =>
-                    setProfile((prev) => ({
-                      ...prev,
-                      documents: prev.documents.map((item, idx) =>
-                        idx === index ? { ...item, imageUrl: event.target.value } : item
-                      ),
-                    }))
-                  }
-                />
-                <Input
-                  type="date"
-                  placeholder="Valid from"
-                  value={doc.validFrom}
-                  onChange={(event) =>
-                    setProfile((prev) => ({
-                      ...prev,
-                      documents: prev.documents.map((item, idx) =>
-                        idx === index ? { ...item, validFrom: event.target.value } : item
-                      ),
-                    }))
-                  }
-                />
-                <Input
-                  type="date"
-                  placeholder="Valid to"
-                  value={doc.validTo}
-                  onChange={(event) =>
-                    setProfile((prev) => ({
-                      ...prev,
-                      documents: prev.documents.map((item, idx) =>
-                        idx === index ? { ...item, validTo: event.target.value } : item
-                      ),
-                    }))
-                  }
-                />
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Type</Label>
+                  <select
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={doc.type}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        documents: prev.documents.map((item, idx) =>
+                          idx === index
+                            ? {
+                                ...item,
+                                type: event.target.value as StaffProfileForm["documents"][number]["type"],
+                              }
+                            : item
+                        ),
+                      }))
+                    }
+                  >
+                    <option value="ID">ID</option>
+                    <option value="ADDRESS">Address</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Number</Label>
+                  <Input
+                    placeholder="Document number"
+                    value={doc.number}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        documents: prev.documents.map((item, idx) =>
+                          idx === index ? { ...item, number: event.target.value } : item
+                        ),
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Link</Label>
+                  <Input
+                    placeholder="Image URL"
+                    value={doc.imageUrl}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        documents: prev.documents.map((item, idx) =>
+                          idx === index ? { ...item, imageUrl: event.target.value } : item
+                        ),
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Valid from</Label>
+                  <Input
+                    type="date"
+                    value={doc.validFrom}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        documents: prev.documents.map((item, idx) =>
+                          idx === index ? { ...item, validFrom: event.target.value } : item
+                        ),
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Valid to</Label>
+                  <Input
+                    type="date"
+                    value={doc.validTo}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        documents: prev.documents.map((item, idx) =>
+                          idx === index ? { ...item, validTo: event.target.value } : item
+                        ),
+                      }))
+                    }
+                  />
+                </div>
                 <Button
                   variant="outline"
                   onClick={() =>
@@ -421,56 +1049,66 @@ export default function StaffProfilePage() {
                 key={`${cert.title}-${index}`}
                 className="grid gap-3 sm:grid-cols-[1.5fr_1fr_1fr_1fr_auto] sm:items-end"
               >
-                <Input
-                  placeholder="Certification"
-                  value={cert.title}
-                  onChange={(event) =>
-                    setProfile((prev) => ({
-                      ...prev,
-                      certifications: prev.certifications.map((item, idx) =>
-                        idx === index ? { ...item, title: event.target.value } : item
-                      ),
-                    }))
-                  }
-                />
-                <Input
-                  placeholder="Issuer"
-                  value={cert.issuer}
-                  onChange={(event) =>
-                    setProfile((prev) => ({
-                      ...prev,
-                      certifications: prev.certifications.map((item, idx) =>
-                        idx === index ? { ...item, issuer: event.target.value } : item
-                      ),
-                    }))
-                  }
-                />
-                <Input
-                  type="date"
-                  placeholder="Issue date"
-                  value={cert.issuedAt}
-                  onChange={(event) =>
-                    setProfile((prev) => ({
-                      ...prev,
-                      certifications: prev.certifications.map((item, idx) =>
-                        idx === index ? { ...item, issuedAt: event.target.value } : item
-                      ),
-                    }))
-                  }
-                />
-                <Input
-                  type="date"
-                  placeholder="Expiry date"
-                  value={cert.expiresAt}
-                  onChange={(event) =>
-                    setProfile((prev) => ({
-                      ...prev,
-                      certifications: prev.certifications.map((item, idx) =>
-                        idx === index ? { ...item, expiresAt: event.target.value } : item
-                      ),
-                    }))
-                  }
-                />
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Certification</Label>
+                  <Input
+                    placeholder="Certification"
+                    value={cert.title}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        certifications: prev.certifications.map((item, idx) =>
+                          idx === index ? { ...item, title: event.target.value } : item
+                        ),
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Issuer</Label>
+                  <Input
+                    placeholder="Issuer"
+                    value={cert.issuer}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        certifications: prev.certifications.map((item, idx) =>
+                          idx === index ? { ...item, issuer: event.target.value } : item
+                        ),
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Issue date</Label>
+                  <Input
+                    type="date"
+                    value={cert.issuedAt}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        certifications: prev.certifications.map((item, idx) =>
+                          idx === index ? { ...item, issuedAt: event.target.value } : item
+                        ),
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Expiry date</Label>
+                  <Input
+                    type="date"
+                    value={cert.expiresAt}
+                    onChange={(event) =>
+                      setProfile((prev) => ({
+                        ...prev,
+                        certifications: prev.certifications.map((item, idx) =>
+                          idx === index ? { ...item, expiresAt: event.target.value } : item
+                        ),
+                      }))
+                    }
+                  />
+                </div>
                 <Button
                   variant="outline"
                   onClick={() =>

@@ -77,6 +77,8 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Staff eligibility: default allow all services; if any eligible services are stored, treat as an allow-list.
 - Manage staff eligibility in the staff profile page (not in the general user create/edit form).
 - Staff profile includes documents list (type/number/link/validity), and certifications list (with issue + expiry dates).
+- Staff roster overrides inherit global hours; per-staff date overrides stored with WORK/BREAK periods.
+- Staff weekly overrides allow per-day overrides (open/closed + periods); empty = inherit global hours.
 - List pageSize max is 100 unless explicitly raised (align UI requests accordingly).
 - Seed helpers live in `scripts/` (use `seed-service-categories.js` for defaults).
 - Services seed: `scripts/seed-services.js` (requires categories).

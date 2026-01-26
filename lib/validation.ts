@@ -103,6 +103,42 @@ export const updateUserSchema = z.object({
           })
         )
         .optional(),
+      rosterOverrides: z
+        .array(
+          z.object({
+            id: z.string().optional(),
+            date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+            isOpen: z.boolean(),
+            periods: z.array(
+              z.object({
+                id: z.string().optional(),
+                kind: appSettingPeriodTypeSchema,
+                startTime: z.string().regex(/^\d{2}:\d{2}$/),
+                endTime: z.string().regex(/^\d{2}:\d{2}$/),
+                sortOrder: z.coerce.number().int().min(0).optional(),
+              })
+            ),
+          })
+        )
+        .optional(),
+      weeklyOverrides: z
+        .array(
+          z.object({
+            id: z.string().optional(),
+            day: weekdaySchema,
+            isOpen: z.boolean(),
+            periods: z.array(
+              z.object({
+                id: z.string().optional(),
+                kind: appSettingPeriodTypeSchema,
+                startTime: z.string().regex(/^\d{2}:\d{2}$/),
+                endTime: z.string().regex(/^\d{2}:\d{2}$/),
+                sortOrder: z.coerce.number().int().min(0).optional(),
+              })
+            ),
+          })
+        )
+        .optional(),
       certifications: z
         .array(
           z.object({
@@ -117,6 +153,80 @@ export const updateUserSchema = z.object({
     })
     .optional(),
 })
+  .superRefine((values, ctx) => {
+    const overrides = values.staffProfile?.rosterOverrides
+    if (!overrides) return
+    overrides.forEach((override, overrideIndex) => {
+      if (!override.isOpen) return
+      if (override.periods.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Add at least one period for open days.",
+          path: ["staffProfile", "rosterOverrides", overrideIndex, "periods"],
+        })
+        return
+      }
+      override.periods.forEach((period, periodIndex) => {
+        if (toMinutes(period.startTime) >= toMinutes(period.endTime)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Start time must be before end time.",
+            path: [
+              "staffProfile",
+              "rosterOverrides",
+              overrideIndex,
+              "periods",
+              periodIndex,
+              "startTime",
+            ],
+          })
+        }
+      })
+    if (hasOverlaps(override.periods)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Periods cannot overlap.",
+        path: ["staffProfile", "rosterOverrides", overrideIndex, "periods"],
+      })
+    }
+  })
+    const weeklyOverrides = values.staffProfile?.weeklyOverrides
+    if (!weeklyOverrides) return
+    weeklyOverrides.forEach((override, overrideIndex) => {
+      if (!override.isOpen) return
+      if (override.periods.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Add at least one period for open days.",
+          path: ["staffProfile", "weeklyOverrides", overrideIndex, "periods"],
+        })
+        return
+      }
+      override.periods.forEach((period, periodIndex) => {
+        if (toMinutes(period.startTime) >= toMinutes(period.endTime)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Start time must be before end time.",
+            path: [
+              "staffProfile",
+              "weeklyOverrides",
+              overrideIndex,
+              "periods",
+              periodIndex,
+              "startTime",
+            ],
+          })
+        }
+      })
+      if (hasOverlaps(override.periods)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Periods cannot overlap.",
+          path: ["staffProfile", "weeklyOverrides", overrideIndex, "periods"],
+        })
+      }
+    })
+  })
 
 export const inviteUserSchema = z.object({
   email: z.string().trim().email(),

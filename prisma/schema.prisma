@@ -228,6 +228,8 @@ model StaffProfile {
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   certifications     StaffCertification[]
   documents          StaffDocument[]
+  rosterOverrides    StaffRosterOverride[]
+  weeklyOverrides    StaffRosterWeeklyOverride[]
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
@@ -257,6 +259,56 @@ model StaffDocument {
   createdAt      DateTime @default(now())
 
   @@index([staffProfileId])
+}
+
+model StaffRosterOverride {
+  id             String   @id @default(cuid())
+  staffProfileId String
+  date           DateTime
+  isOpen         Boolean  @default(true)
+  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  periods        StaffRosterOverridePeriod[]
+  createdAt      DateTime @default(now())
+
+  @@unique([staffProfileId, date])
+  @@index([staffProfileId])
+  @@index([date])
+}
+
+model StaffRosterOverridePeriod {
+  id         String   @id @default(cuid())
+  overrideId String
+  kind       AppSettingPeriodType
+  startTime  String
+  endTime    String
+  sortOrder  Int      @default(0)
+  override   StaffRosterOverride @relation(fields: [overrideId], references: [id], onDelete: Cascade)
+
+  @@index([overrideId])
+}
+
+model StaffRosterWeeklyOverride {
+  id             String   @id @default(cuid())
+  staffProfileId String
+  day            Weekday
+  isOpen         Boolean  @default(true)
+  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  periods        StaffRosterWeeklyPeriod[]
+
+  @@unique([staffProfileId, day])
+  @@index([staffProfileId])
+}
+
+model StaffRosterWeeklyPeriod {
+  id         String   @id @default(cuid())
+  overrideId String
+  kind       AppSettingPeriodType
+  startTime  String
+  endTime    String
+  sortOrder  Int      @default(0)
+  override   StaffRosterWeeklyOverride @relation(fields: [overrideId], references: [id], onDelete: Cascade)
+
+  @@index([overrideId])
 }
 
 model Account {
