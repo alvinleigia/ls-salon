@@ -328,8 +328,24 @@ export async function GET(
     !session?.user ||
     (!canManageUsers(role as Role) && sessionUserId !== id)
   ) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    return NextResponse.json(
+      { error: "Unauthorized. Please sign in and try again." },
+      { status: 401 }
+    )
   }
+
+  const ensureStaffProfile = async () => {
+    const target = await prisma.user.findUnique({
+      where: { id },
+      select: { role: true, staffProfile: { select: { id: true } } },
+    })
+    if (!target || target.role !== "STAFF" || target.staffProfile) {
+      return
+    }
+    await prisma.staffProfile.create({ data: { userId: id } })
+  }
+
+  await ensureStaffProfile()
 
   const user = await prisma.user.findUnique({
     where: { id },
@@ -396,7 +412,10 @@ export async function GET(
   })
 
   if (!user) {
-    return NextResponse.json({ error: "User not found." }, { status: 404 })
+    return NextResponse.json(
+      { error: "User not found. Please refresh and try again." },
+      { status: 404 }
+    )
   }
 
   return NextResponse.json({

@@ -1,3 +1,12 @@
+@import "@syncfusion/ej2-base/styles/material.css";
+@import "@syncfusion/ej2-buttons/styles/material.css";
+@import "@syncfusion/ej2-calendars/styles/material.css";
+@import "@syncfusion/ej2-dropdowns/styles/material.css";
+@import "@syncfusion/ej2-inputs/styles/material.css";
+@import "@syncfusion/ej2-lists/styles/material.css";
+@import "@syncfusion/ej2-navigations/styles/material.css";
+@import "@syncfusion/ej2-popups/styles/material.css";
+@import "@syncfusion/ej2-schedule/styles/material.css";
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -122,4 +131,18 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Syncfusion popups and dialogs above app chrome */
+.e-popup,
+.e-popup-open,
+.e-dialog,
+.e-schedule-popup,
+.e-quick-popup-wrapper {
+  z-index: 9999;
+}
+
+/* Avoid clipping Syncfusion popups inside cards/containers */
+.e-schedule {
+  overflow: visible;
 }

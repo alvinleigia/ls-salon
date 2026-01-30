@@ -79,6 +79,8 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Staff profile includes documents list (type/number/link/validity), and certifications list (with issue + expiry dates).
 - Staff roster overrides inherit global hours; per-staff date overrides stored with WORK/BREAK periods.
 - Staff weekly overrides allow per-day overrides (open/closed + periods); empty = inherit global hours.
+- Roster UI lives under `/appointments` and uses Syncfusion Scheduler (timeline views).
+- Scheduler hides non-business hours with `showNonBusiness: false` and business hour bounds.
 - List pageSize max is 100 unless explicitly raised (align UI requests accordingly).
 - Seed helpers live in `scripts/` (use `seed-service-categories.js` for defaults).
 - Services seed: `scripts/seed-services.js` (requires categories).
