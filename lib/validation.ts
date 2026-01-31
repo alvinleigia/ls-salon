@@ -380,6 +380,7 @@ export const shiftScheduleSchema = z
   .object({
     name: z.string().trim().max(120).optional().or(z.literal("")),
     staffIds: z.array(z.string().trim().min(1)),
+    isDefault: z.boolean().optional(),
     startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     weekOffDay1: weekdaySchema,
     weekOffDay2: weekdaySchema.optional().or(z.literal("")),
@@ -397,10 +398,17 @@ export const shiftScheduleSchema = z
     ),
   })
   .superRefine((values, ctx) => {
-    if (!values.staffIds.length) {
+    if (!values.isDefault && !values.staffIds.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Select at least one staff member.",
+        path: ["staffIds"],
+      })
+    }
+    if (values.isDefault && values.staffIds.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Default schedule should not target staff members.",
         path: ["staffIds"],
       })
     }

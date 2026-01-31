@@ -228,6 +228,17 @@ export function AppSidebar() {
                         </Link>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/shifts/roster"}
+                      >
+                        <Link href="/shifts/roster">
+                          <CalendarClockIcon className="h-4 w-4" />
+                          <span>Roster</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
                   </SidebarMenuSub>
                 </SidebarMenuItem>
               ) : null}

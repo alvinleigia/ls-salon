@@ -78,6 +78,7 @@ type ShiftScheduleBlock = {
 type ShiftScheduleRow = {
   id: string
   name: string | null
+  isDefault?: boolean
   startDate: string
   weekOffDay1: Weekday
   weekOffDay2: Weekday | null
@@ -91,6 +92,7 @@ type ShiftScheduleRow = {
 type ShiftScheduleForm = {
   name: string
   staffIds: string[]
+  isDefault: boolean
   startDate: string
   weekOffDay1: Weekday
   weekOffDay2: Weekday | ""
@@ -170,6 +172,7 @@ export default function ShiftSchedulesPage() {
   const defaultForm: ShiftScheduleForm = {
     name: "",
     staffIds: [],
+    isDefault: false,
     startDate: today,
     weekOffDay1: "SUNDAY",
     weekOffDay2: "",
@@ -311,7 +314,7 @@ export default function ShiftSchedulesPage() {
   }
 
   const createSchedule = async () => {
-    if (!newSchedule.staffIds.length) {
+    if (!newSchedule.isDefault && !newSchedule.staffIds.length) {
       toast.error("Select at least one staff member.")
       return
     }
@@ -348,6 +351,7 @@ export default function ShiftSchedulesPage() {
       setEditSchedule({
         name: schedule.name ?? "",
         staffIds: schedule.staffProfile?.user?.id ? [schedule.staffProfile.user.id] : [],
+        isDefault: Boolean(schedule.isDefault),
         startDate: toDateInputValue(schedule.startDate),
         weekOffDay1: schedule.weekOffDay1,
         weekOffDay2: schedule.weekOffDay2 ?? "",
@@ -369,7 +373,7 @@ export default function ShiftSchedulesPage() {
 
   const saveEdit = async () => {
     if (!editingSchedule) return
-    if (!editSchedule.staffIds.length) {
+    if (!editSchedule.isDefault && !editSchedule.staffIds.length) {
       toast.error("Select a staff member.")
       return
     }
@@ -439,9 +443,16 @@ export default function ShiftSchedulesPage() {
         ),
         cell: ({ row }) => (
           <div className="flex flex-col">
-            <span className="font-medium">
-              {row.original.name || "Shift schedule"}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="font-medium">
+                {row.original.name || "Shift schedule"}
+              </span>
+              {row.original.isDefault ? (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                  Default
+                </span>
+              ) : null}
+            </div>
             <span className="text-xs text-muted-foreground">
               {row.original.startDate
                 ? new Date(row.original.startDate).toLocaleDateString()
@@ -612,8 +623,27 @@ export default function ShiftSchedulesPage() {
             onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
           />
         </FormField>
+        <div className="flex items-center gap-2">
+          <input
+            id="schedule-default"
+            type="checkbox"
+            checked={form.isDefault}
+            onChange={(event) =>
+              setForm((prev) => ({
+                ...prev,
+                isDefault: event.target.checked,
+                staffIds: event.target.checked ? [] : prev.staffIds,
+              }))
+            }
+          />
+          <Label htmlFor="schedule-default">Make this the default schedule</Label>
+        </div>
         <FormField id="schedule-staff" label="Staff" error={errors.staffIds}>
-          {allowMultiStaff ? (
+          {form.isDefault ? (
+            <div className="rounded-md border border-dashed border-input bg-background p-3 text-xs text-muted-foreground">
+              Default schedules apply to all staff without an explicit schedule.
+            </div>
+          ) : allowMultiStaff ? (
             <div className="space-y-2 rounded-md border border-input bg-background p-3">
               <div className="text-xs text-muted-foreground">
                 Select one or more staff members.

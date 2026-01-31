@@ -88,12 +88,13 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Staff scheduling uses shift schedules (start date + shift blocks) assigned to staff.
 - Shift schedules use week off day 1 and optional week off day 2 with week-of-month selection.
 - Repeat day counts skip week off dates; staff has one schedule at a time.
+- A single global default shift schedule can be marked and applies to staff without explicit schedules.
 - Staff shift schedules override global hours; when unassigned, staff inherits global hours.
 - Shifts module lives under `/shifts` with admin/manager access and uses standard list params/response.
 - Shift schedules live under `/shifts/schedules` with admin/manager access.
 - Shift templates store a single shift start/end with optional breaks and are reusable across staff assignments.
 - Shift template deletion is blocked when assigned to staff (409 response).
-- Roster UI lives under `/appointments` and uses Syncfusion Scheduler (timeline views).
+- Roster UI lives under `/shifts/roster` and uses Syncfusion Scheduler (month view).
 - Scheduler hides non-business hours with `showNonBusiness: false` and business hour bounds.
 - List pageSize max is 100 unless explicitly raised (align UI requests accordingly).
 - Seed helpers live in `scripts/` (use `seed-service-categories.js` for defaults).

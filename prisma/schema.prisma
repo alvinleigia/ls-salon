@@ -293,13 +293,14 @@ model ShiftTemplateBreak {
 model ShiftSchedule {
   id             String   @id @default(cuid())
   name           String?
-  staffProfileId String   @unique
+  staffProfileId String?  @unique
+  isDefault      Boolean  @default(false)
   startDate      DateTime
   weekOffDay1    Weekday
   weekOffDay2    Weekday?
   weekOff2Weeks  Int[]
   blocks         ShiftScheduleBlock[]
-  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  staffProfile   StaffProfile? @relation(fields: [staffProfileId], references: [id], onDelete: SetNull)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

@@ -18,6 +18,7 @@ export async function GET(request: Request) {
   const searchParams = url.searchParams
   const q = searchParams.get("q")?.trim()
   const staffId = searchParams.get("staffId")?.trim()
+  const isDefault = searchParams.get("isDefault") === "true"
   const startDate = searchParams.get("startDate")?.trim()
   const sort = searchParams.get("sort") ?? "startDate"
   const order = searchParams.get("order") === "desc" ? "desc" : "asc"
@@ -31,12 +32,16 @@ export async function GET(request: Request) {
 
   const where: {
     staffProfile?: { userId?: string }
+    isDefault?: boolean
     startDate?: { gte?: Date; lte?: Date }
     OR?: { name?: { contains: string; mode: "insensitive" } }[]
   } = {}
 
   if (staffId) {
     where.staffProfile = { userId: staffId }
+  }
+  if (isDefault) {
+    where.isDefault = true
   }
 
   if (startDate) {
@@ -107,8 +112,39 @@ export async function POST(request: Request) {
       : data.weekOff2Weeks ?? []
   const staffIds = Array.from(new Set(data.staffIds.map((value) => value.trim())))
 
-  if (!staffIds.length) {
+  if (!data.isDefault && !staffIds.length) {
     return NextResponse.json({ error: "Select at least one staff member." }, { status: 400 })
+  }
+
+  if (data.isDefault) {
+    await prisma.shiftSchedule.updateMany({ data: { isDefault: false } })
+    const schedule = await prisma.shiftSchedule.create({
+      data: {
+        name: data.name?.trim() || null,
+        staffProfileId: null,
+        isDefault: true,
+        startDate: new Date(`${data.startDate}T00:00:00.000Z`),
+        weekOffDay1: data.weekOffDay1,
+        weekOffDay2: data.weekOffDay2 ? data.weekOffDay2 : null,
+        weekOff2Weeks,
+        blocks: {
+          create: data.blocks.map((block, index) => ({
+            templateId: block.templateId,
+            repeatDays: block.repeatDays,
+            sortOrder: block.sortOrder ?? index,
+          })),
+        },
+      },
+      include: {
+        blocks: {
+          orderBy: { sortOrder: "asc" },
+          include: { template: { select: { id: true, name: true } } },
+        },
+        staffProfile: { select: { user: { select: { id: true, name: true, email: true } } } },
+      },
+    })
+
+    return NextResponse.json({ schedule })
   }
 
   const staffProfiles = await prisma.staffProfile.findMany({
@@ -164,6 +200,7 @@ export async function POST(request: Request) {
   const scheduleData = targets.map((profile) => ({
     name: data.name?.trim() || null,
     staffProfileId: profile.id,
+    isDefault: false,
     startDate: new Date(`${data.startDate}T00:00:00.000Z`),
     weekOffDay1: data.weekOffDay1,
     weekOffDay2: data.weekOffDay2 ? data.weekOffDay2 : null,
