@@ -35,6 +35,7 @@ import {
 } from "@/components/data-table"
 import { FormField } from "@/components/form-field"
 import { useFormErrors } from "@/hooks/use-form-errors"
+import { useDateFormatter } from "@/hooks/use-date-formatter"
 import type { ListResponse } from "@/types/api"
 
 type CategoryStatus = "ACTIVE" | "INACTIVE"
@@ -57,6 +58,7 @@ const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
 }
 
 export default function ServiceCategoriesPage() {
+  const { formatDate } = useDateFormatter()
   type PaginationState = { pageIndex: number; pageSize: number }
 
   const [categories, setCategories] = React.useState<CategoryRow[]>([])
@@ -343,7 +345,7 @@ export default function ServiceCategoriesPage() {
             <SortIndicator value={column.getIsSorted()} />
           </button>
         ),
-        cell: ({ row }) => new Date(row.original.createdAt).toLocaleDateString(),
+        cell: ({ row }) => formatDate(row.original.createdAt),
       },
       {
         id: "actions",

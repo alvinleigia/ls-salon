@@ -103,39 +103,12 @@ export const updateUserSchema = z.object({
           })
         )
         .optional(),
-      rosterOverrides: z
-        .array(
-          z.object({
-            id: z.string().optional(),
-            date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-            isOpen: z.boolean(),
-            periods: z.array(
-              z.object({
-                id: z.string().optional(),
-                kind: appSettingPeriodTypeSchema,
-                startTime: z.string().regex(/^\d{2}:\d{2}$/),
-                endTime: z.string().regex(/^\d{2}:\d{2}$/),
-                sortOrder: z.coerce.number().int().min(0).optional(),
-              })
-            ),
-          })
-        )
-        .optional(),
-      weeklyOverrides: z
+      shiftAssignments: z
         .array(
           z.object({
             id: z.string().optional(),
             day: weekdaySchema,
-            isOpen: z.boolean(),
-            periods: z.array(
-              z.object({
-                id: z.string().optional(),
-                kind: appSettingPeriodTypeSchema,
-                startTime: z.string().regex(/^\d{2}:\d{2}$/),
-                endTime: z.string().regex(/^\d{2}:\d{2}$/),
-                sortOrder: z.coerce.number().int().min(0).optional(),
-              })
-            ),
+            templateId: z.string().trim().min(1),
           })
         )
         .optional(),
@@ -154,77 +127,19 @@ export const updateUserSchema = z.object({
     .optional(),
 })
   .superRefine((values, ctx) => {
-    const overrides = values.staffProfile?.rosterOverrides
-    if (!overrides) return
-    overrides.forEach((override, overrideIndex) => {
-      if (!override.isOpen) return
-      if (override.periods.length === 0) {
+    const assignments = values.staffProfile?.shiftAssignments
+    if (!assignments) return
+    const byDay = new Set<string>()
+    assignments.forEach((assignment, index) => {
+      const key = assignment.day
+      if (byDay.has(key)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Add at least one period for open days.",
-          path: ["staffProfile", "rosterOverrides", overrideIndex, "periods"],
-        })
-        return
-      }
-      override.periods.forEach((period, periodIndex) => {
-        if (toMinutes(period.startTime) >= toMinutes(period.endTime)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Start time must be before end time.",
-            path: [
-              "staffProfile",
-              "rosterOverrides",
-              overrideIndex,
-              "periods",
-              periodIndex,
-              "startTime",
-            ],
-          })
-        }
-      })
-    if (hasOverlaps(override.periods)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Periods cannot overlap.",
-        path: ["staffProfile", "rosterOverrides", overrideIndex, "periods"],
-      })
-    }
-  })
-    const weeklyOverrides = values.staffProfile?.weeklyOverrides
-    if (!weeklyOverrides) return
-    weeklyOverrides.forEach((override, overrideIndex) => {
-      if (!override.isOpen) return
-      if (override.periods.length === 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Add at least one period for open days.",
-          path: ["staffProfile", "weeklyOverrides", overrideIndex, "periods"],
-        })
-        return
-      }
-      override.periods.forEach((period, periodIndex) => {
-        if (toMinutes(period.startTime) >= toMinutes(period.endTime)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Start time must be before end time.",
-            path: [
-              "staffProfile",
-              "weeklyOverrides",
-              overrideIndex,
-              "periods",
-              periodIndex,
-              "startTime",
-            ],
-          })
-        }
-      })
-      if (hasOverlaps(override.periods)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Periods cannot overlap.",
-          path: ["staffProfile", "weeklyOverrides", overrideIndex, "periods"],
+          message: "Duplicate shift assignment for the same day.",
+          path: ["staffProfile", "shiftAssignments", index, "day"],
         })
       }
+      byDay.add(key)
     })
   })
 
@@ -403,3 +318,121 @@ export const appSettingsSchema = z
   })
 
 export type AppSettingsInput = z.infer<typeof appSettingsSchema>
+
+export const shiftTemplateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    description: z.string().trim().max(240).optional().or(z.literal("")),
+    color: z.string().trim().max(40).optional().or(z.literal("")),
+    isActive: z.boolean().optional(),
+    startTime: z.string().regex(/^\d{2}:\d{2}$/),
+    endTime: z.string().regex(/^\d{2}:\d{2}$/),
+    breaks: z.array(
+      z.object({
+        id: z.string().optional(),
+        startTime: z.string().regex(/^\d{2}:\d{2}$/),
+        endTime: z.string().regex(/^\d{2}:\d{2}$/),
+        sortOrder: z.coerce.number().int().min(0).optional(),
+      })
+    ),
+  })
+  .superRefine((values, ctx) => {
+    if (toMinutes(values.startTime) >= toMinutes(values.endTime)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Shift start time must be before end time.",
+        path: ["startTime"],
+      })
+    }
+    const shiftStart = toMinutes(values.startTime)
+    const shiftEnd = toMinutes(values.endTime)
+    values.breaks.forEach((period, index) => {
+      const breakStart = toMinutes(period.startTime)
+      const breakEnd = toMinutes(period.endTime)
+      if (breakStart >= breakEnd) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Break start time must be before end time.",
+          path: ["breaks", index, "startTime"],
+        })
+        return
+      }
+      if (breakStart < shiftStart || breakEnd > shiftEnd) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Breaks must be within the shift range.",
+          path: ["breaks", index, "startTime"],
+        })
+      }
+    })
+    if (hasOverlaps(values.breaks)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Breaks cannot overlap.",
+        path: ["breaks"],
+      })
+    }
+  })
+
+export type ShiftTemplateInput = z.infer<typeof shiftTemplateSchema>
+
+export const shiftScheduleSchema = z
+  .object({
+    name: z.string().trim().max(120).optional().or(z.literal("")),
+    staffIds: z.array(z.string().trim().min(1)),
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    weekOffDay1: weekdaySchema,
+    weekOffDay2: weekdaySchema.optional().or(z.literal("")),
+    weekOff2Weeks: z
+      .array(z.coerce.number().int().min(1).max(5))
+      .optional()
+      .default([]),
+    blocks: z.array(
+      z.object({
+        id: z.string().optional(),
+        templateId: z.string().trim().min(1),
+        repeatDays: z.coerce.number().int().min(1).max(366),
+        sortOrder: z.coerce.number().int().min(0).optional(),
+      })
+    ),
+  })
+  .superRefine((values, ctx) => {
+    if (!values.staffIds.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Select at least one staff member.",
+        path: ["staffIds"],
+      })
+    }
+    if (!values.blocks.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Add at least one shift block.",
+        path: ["blocks"],
+      })
+    }
+    if (values.weekOffDay2) {
+      if (!values.weekOff2Weeks.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Select weeks for the second week off day.",
+          path: ["weekOff2Weeks"],
+        })
+      }
+      if (values.weekOffDay2 === values.weekOffDay1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Week off day 2 must be different from week off day 1.",
+          path: ["weekOffDay2"],
+        })
+      }
+    } else if (values.weekOff2Weeks.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Week off day 2 is required when selecting week off 2 weeks.",
+        path: ["weekOffDay2"],
+      })
+    }
+  })
+
+export type ShiftScheduleInput = z.infer<typeof shiftScheduleSchema>

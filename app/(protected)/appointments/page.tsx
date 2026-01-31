@@ -13,6 +13,8 @@ import {
 } from "@syncfusion/ej2-react-schedule"
 import { toast } from "sonner"
 
+import { formatDateForDisplay, toISODate } from "@/lib/date"
+
 type StaffOption = {
   id: string
   name: string | null
@@ -40,13 +42,59 @@ type WorkingOverride = {
 
 type SettingsPayload = {
   timeZone?: string
+  dateFormat?: string
   workingHours: WorkingDay[]
   overrides: WorkingOverride[]
 }
 
-type StaffOverrides = {
-  rosterOverrides: WorkingOverride[]
-  weeklyOverrides: WorkingDay[]
+type ShiftTemplateBreak = {
+  id?: string
+  startTime: string
+  endTime: string
+  sortOrder?: number
+}
+
+type ShiftTemplate = {
+  id: string
+  name: string
+  description?: string | null
+  color?: string | null
+  isActive?: boolean
+  startTime: string
+  endTime: string
+  breaks: ShiftTemplateBreak[]
+}
+
+type TimeRange = {
+  startTime: string
+  endTime: string
+}
+
+type StaffShiftAssignment = {
+  id?: string
+  day: string
+  templateId: string
+}
+
+type ShiftScheduleBlock = {
+  id?: string
+  templateId: string
+  repeatDays: number
+  sortOrder?: number
+}
+
+type ShiftSchedule = {
+  id: string
+  startDate: string
+  weekOffDay1: string
+  weekOffDay2?: string | null
+  weekOff2Weeks?: number[]
+  blocks: ShiftScheduleBlock[]
+}
+
+type StaffProfile = {
+  shiftAssignments?: StaffShiftAssignment[]
+  shiftSchedule?: ShiftSchedule | null
 }
 
 type RangeMinutes = {
@@ -79,8 +127,12 @@ export default function AppointmentsPage() {
     workingHours: [],
     overrides: [],
   })
-  const [staffOverrides, setStaffOverrides] = React.useState<
-    Record<string, StaffOverrides>
+  const [templates, setTemplates] = React.useState<ShiftTemplate[]>([])
+  const [staffAssignments, setStaffAssignments] = React.useState<
+    Record<string, StaffShiftAssignment[]>
+  >({})
+  const [staffSchedules, setStaffSchedules] = React.useState<
+    Record<string, ShiftSchedule | null>
   >({})
 
   const loadStaff = React.useCallback(async () => {
@@ -110,6 +162,7 @@ export default function AppointmentsPage() {
           workingHours: nextSettings.workingHours ?? [],
           overrides: nextSettings.overrides ?? [],
           timeZone: nextSettings.timeZone,
+          dateFormat: nextSettings.dateFormat,
         })
       }
     } catch (error) {
@@ -117,34 +170,43 @@ export default function AppointmentsPage() {
     }
   }, [])
 
-  const loadStaffOverrides = React.useCallback(
-    async (staffId: string) => {
-      if (staffOverrides[staffId]) {
-        return
+  const loadTemplates = React.useCallback(async () => {
+    try {
+      const response = await fetch("/api/shifts/templates?includeInactive=true", {
+        cache: "no-store",
+      })
+      if (!response.ok) {
+        throw new Error("Failed to load shift templates.")
       }
-      try {
-        const response = await fetch(`/api/users/${staffId}`)
-        if (!response.ok) {
-          throw new Error("Failed to load staff profile.")
-        }
-        const data = (await response.json()) as {
-          user?: { staffProfile?: StaffOverrides }
-        }
-        const profile = data.user?.staffProfile
-        setStaffOverrides((prev) => ({
-          ...prev,
-          [staffId]: {
-            rosterOverrides: profile?.rosterOverrides ?? [],
-            weeklyOverrides: profile?.weeklyOverrides ?? [],
-          },
-        }))
-      } catch (error) {
-        console.error(error)
-        toast.error("Unable to load staff overrides.")
+      const data = (await response.json()) as { items?: ShiftTemplate[] }
+      setTemplates(data.items ?? [])
+    } catch (error) {
+      console.error(error)
+      toast.error("Unable to load shift templates.")
+    }
+  }, [])
+
+  const loadStaffAssignments = React.useCallback(async (staffId: string) => {
+    try {
+      const response = await fetch(`/api/users/${staffId}`, { cache: "no-store" })
+      if (!response.ok) {
+        throw new Error("Failed to load staff profile.")
       }
-    },
-    [staffOverrides]
-  )
+      const data = (await response.json()) as { user?: { staffProfile?: StaffProfile } }
+      const profile = data.user?.staffProfile
+      setStaffAssignments((prev) => ({
+        ...prev,
+        [staffId]: profile?.shiftAssignments ?? [],
+      }))
+      setStaffSchedules((prev) => ({
+        ...prev,
+        [staffId]: profile?.shiftSchedule ?? null,
+      }))
+    } catch (error) {
+      console.error(error)
+      toast.error("Unable to load staff assignments.")
+    }
+  }, [])
 
   React.useEffect(() => {
     void loadStaff()
@@ -155,10 +217,21 @@ export default function AppointmentsPage() {
   }, [loadSettings])
 
   React.useEffect(() => {
-    if (staffFilter !== "all") {
-      void loadStaffOverrides(staffFilter)
+    void loadTemplates()
+  }, [loadTemplates])
+
+  const refreshStaffAssignments = React.useCallback(() => {
+    if (staffFilter === "all") {
+      if (!staff.length) return
+      void Promise.all(staff.map((member) => loadStaffAssignments(member.id)))
+      return
     }
-  }, [loadStaffOverrides, staffFilter])
+    void loadStaffAssignments(staffFilter)
+  }, [loadStaffAssignments, staff, staffFilter])
+
+  React.useEffect(() => {
+    refreshStaffAssignments()
+  }, [refreshStaffAssignments, staffFilter])
 
   const filteredStaff = React.useMemo(() => {
     if (staffFilter === "all") {
@@ -166,20 +239,6 @@ export default function AppointmentsPage() {
     }
     return staff.filter((member) => member.id === staffFilter)
   }, [staff, staffFilter])
-
-  React.useEffect(() => {
-    if (staffFilter !== "all") {
-      return
-    }
-    if (!filteredStaff.length) {
-      return
-    }
-    void Promise.all(
-      filteredStaff.map(async (member) => {
-        await loadStaffOverrides(member.id)
-      })
-    )
-  }, [filteredStaff, loadStaffOverrides, staffFilter])
 
   const availabilityDates = React.useMemo(() => {
     const current = new Date(date)
@@ -226,10 +285,7 @@ export default function AppointmentsPage() {
   }, [])
 
   const formatDateKey = React.useCallback((value: Date) => {
-    const year = value.getFullYear()
-    const month = String(value.getMonth() + 1).padStart(2, "0")
-    const day = String(value.getDate()).padStart(2, "0")
-    return `${year}-${month}-${day}`
+    return toISODate(value)
   }, [])
 
   const formatClockTime = React.useCallback((totalMinutes: number) => {
@@ -239,13 +295,114 @@ export default function AppointmentsPage() {
     return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
   }, [])
 
+  const templateMap = React.useMemo(() => {
+    const map: Record<string, ShiftTemplate> = {}
+    for (const template of templates) {
+      map[template.id] = template
+    }
+    return map
+  }, [templates])
+
+  const buildShiftSegments = React.useCallback((template: ShiftTemplate): TimeRange[] => {
+    const shiftStart = template.startTime
+    const shiftEnd = template.endTime
+    const breaks = [...(template.breaks ?? [])].sort(
+      (a, b) => parseMinutes(a.startTime) - parseMinutes(b.startTime)
+    )
+    const segments: TimeRange[] = []
+    let cursor = shiftStart
+    for (const breakPeriod of breaks) {
+      if (parseMinutes(breakPeriod.startTime) > parseMinutes(cursor)) {
+        segments.push({ startTime: cursor, endTime: breakPeriod.startTime })
+      }
+      cursor = breakPeriod.endTime
+    }
+    if (parseMinutes(cursor) < parseMinutes(shiftEnd)) {
+      segments.push({ startTime: cursor, endTime: shiftEnd })
+    }
+    return segments
+  }, [parseMinutes])
+
+  const getWeekOfMonth = React.useCallback((value: Date) => {
+    return Math.floor((value.getDate() - 1) / 7) + 1
+  }, [])
+
+  const isScheduleWeekOff = React.useCallback(
+    (value: Date, schedule: ShiftSchedule) => {
+      const weekday = resolveDayKey(value)
+      if (weekday === schedule.weekOffDay1) return true
+      if (schedule.weekOffDay2 && weekday === schedule.weekOffDay2) {
+        const weeks = schedule.weekOff2Weeks ?? []
+        return weeks.includes(getWeekOfMonth(value))
+      }
+      return false
+    },
+    [getWeekOfMonth, resolveDayKey]
+  )
+
+  const buildScheduleMap = React.useCallback(
+    (schedule: ShiftSchedule, dates: Date[]) => {
+      if (!schedule.blocks?.length) {
+        return {} as Record<string, string | null>
+      }
+      const sortedBlocks = [...schedule.blocks].sort(
+        (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
+      )
+      const startDate = new Date(schedule.startDate)
+      if (Number.isNaN(startDate.getTime())) {
+        return {} as Record<string, string | null>
+      }
+      const lastDate = dates.length ? dates[dates.length - 1] : null
+      if (!lastDate) {
+        return {} as Record<string, string | null>
+      }
+      const map: Record<string, string | null> = {}
+      let blockIndex = 0
+      let dayInBlock = 0
+      const cursor = new Date(startDate)
+
+      while (cursor <= lastDate && blockIndex < sortedBlocks.length) {
+        const dateKey = formatDateKey(cursor)
+        if (isScheduleWeekOff(cursor, schedule)) {
+          map[dateKey] = null
+        } else {
+          map[dateKey] = sortedBlocks[blockIndex]?.templateId ?? null
+          dayInBlock += 1
+          if (dayInBlock >= sortedBlocks[blockIndex].repeatDays) {
+            blockIndex += 1
+            dayInBlock = 0
+          }
+        }
+        cursor.setDate(cursor.getDate() + 1)
+      }
+
+      return map
+    },
+    [formatDateKey, isScheduleWeekOff]
+  )
+
+  const scheduleMaps = React.useMemo(() => {
+    const maps: Record<string, Record<string, string | null>> = {}
+    for (const member of filteredStaff) {
+      const schedule = staffSchedules[member.id]
+      if (!schedule) continue
+      maps[member.id] = buildScheduleMap(schedule, availabilityDates)
+    }
+    return maps
+  }, [availabilityDates, buildScheduleMap, filteredStaff, staffSchedules])
+
   const getGlobalPeriodsForDate = React.useCallback(
     (value: Date) => {
       const dateKey = formatDateKey(value)
       const override = settings.overrides.find((item) => item.date === dateKey)
       if (override) {
         return override.isOpen
-          ? override.periods.filter((period) => period.kind === "WORK")
+          ? override.periods
+              .filter((period) => period.kind === "WORK")
+              .map((period) => ({
+                startTime: period.startTime,
+                endTime: period.endTime,
+              }))
           : []
       }
       const weekday = resolveDayKey(value)
@@ -253,9 +410,42 @@ export default function AppointmentsPage() {
       if (!dayConfig || !dayConfig.isOpen) {
         return []
       }
-      return dayConfig.periods.filter((period) => period.kind === "WORK")
+      return dayConfig.periods
+        .filter((period) => period.kind === "WORK")
+        .map((period) => ({
+          startTime: period.startTime,
+          endTime: period.endTime,
+        }))
     },
     [formatDateKey, resolveDayKey, settings.overrides, settings.workingHours]
+  )
+
+  const getStaffTemplateForDate = React.useCallback(
+    (value: Date, staffId?: string) => {
+      if (!staffId) return null
+      const dateKey = formatDateKey(value)
+      const scheduleMap = scheduleMaps[staffId]
+      if (scheduleMap && Object.prototype.hasOwnProperty.call(scheduleMap, dateKey)) {
+        const templateId = scheduleMap[dateKey]
+        return templateId ? templateMap[templateId] ?? null : null
+      }
+      if (staffSchedules[staffId]) {
+        return null
+      }
+      const weekday = resolveDayKey(value)
+      const assignments = staffAssignments[staffId] ?? []
+      const assignment = assignments.find((item) => item.day === weekday)
+      if (!assignment) return null
+      return templateMap[assignment.templateId] ?? null
+    },
+    [
+      formatDateKey,
+      resolveDayKey,
+      scheduleMaps,
+      staffAssignments,
+      staffSchedules,
+      templateMap,
+    ]
   )
 
   const getStaffPeriodsForDate = React.useCallback(
@@ -263,31 +453,34 @@ export default function AppointmentsPage() {
       if (!staffId) {
         return getGlobalPeriodsForDate(value)
       }
-      const overrides = staffOverrides[staffId]
-      if (!overrides) {
+      const dateKey = formatDateKey(value)
+      const scheduleMap = scheduleMaps[staffId]
+      if (scheduleMap && Object.prototype.hasOwnProperty.call(scheduleMap, dateKey)) {
+        const templateId = scheduleMap[dateKey]
+        if (!templateId) {
+          return []
+        }
+        const template = templateMap[templateId]
+        return template ? buildShiftSegments(template) : []
+      }
+      if (staffSchedules[staffId]) {
         return getGlobalPeriodsForDate(value)
       }
-      const dateKey = formatDateKey(value)
-      const dateOverride = overrides.rosterOverrides.find(
-        (item) => item.date === dateKey
-      )
-      if (dateOverride) {
-        return dateOverride.isOpen
-          ? dateOverride.periods.filter((period) => period.kind === "WORK")
-          : []
-      }
-      const weekday = resolveDayKey(value)
-      const weeklyOverride = overrides.weeklyOverrides.find(
-        (item) => item.day === weekday
-      )
-      if (weeklyOverride) {
-        return weeklyOverride.isOpen
-          ? weeklyOverride.periods.filter((period) => period.kind === "WORK")
-          : []
+      const template = getStaffTemplateForDate(value, staffId)
+      if (template) {
+        return buildShiftSegments(template)
       }
       return getGlobalPeriodsForDate(value)
     },
-    [formatDateKey, getGlobalPeriodsForDate, resolveDayKey, staffOverrides]
+    [
+      buildShiftSegments,
+      formatDateKey,
+      getGlobalPeriodsForDate,
+      getStaffTemplateForDate,
+      scheduleMaps,
+      staffSchedules,
+      templateMap,
+    ]
   )
 
   const calendarEvents = React.useMemo(() => {
@@ -296,12 +489,14 @@ export default function AppointmentsPage() {
     for (const day of availabilityDates) {
       for (const member of filteredStaff) {
         const periods = getStaffPeriodsForDate(day, member.id)
+        const template = getStaffTemplateForDate(day, member.id)
+        const label = template?.name ?? "Working hours"
         for (const period of periods) {
           const start = toDateTime(day, period.startTime)
           const end = toDateTime(day, period.endTime)
           list.push({
             Id: `${member.id}-${formatDateKey(day)}-${period.startTime}`,
-            Subject: "Working hours",
+            Subject: label,
             StartTime: start,
             EndTime: end,
             staffId: member.id,
@@ -316,6 +511,7 @@ export default function AppointmentsPage() {
     filteredStaff,
     formatDateKey,
     getStaffPeriodsForDate,
+    getStaffTemplateForDate,
     toDateTime,
   ])
 
@@ -338,15 +534,15 @@ export default function AppointmentsPage() {
     }
 
     return { start: min, end: max }
-  }, [
-    availabilityDates,
-    getStaffPeriodsForDate,
-    parseMinutes,
-    filteredStaff,
-  ])
+  }, [availabilityDates, getStaffPeriodsForDate, parseMinutes, filteredStaff])
 
   const startHour = formatClockTime(calendarRange.start)
   const endHour = formatClockTime(calendarRange.end)
+  const scheduleKey = React.useMemo(
+    () => `${date.toDateString()}-${currentView}-${staffFilter}-${calendarEvents.length}`,
+    [calendarEvents.length, currentView, date, staffFilter]
+  )
+
   React.useEffect(() => {
     scheduleRef.current?.refreshEvents?.()
   }, [calendarEvents])
@@ -366,11 +562,7 @@ export default function AppointmentsPage() {
       return null
     }
     const formatShort = (value: Date) =>
-      value.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })
+      formatDateForDisplay(value, settings.dateFormat)
     const byStaff = filteredStaff.map((member) => ({
       staff: member.name?.trim() || member.email,
       dates: availabilityDates.map((day) => ({
@@ -396,8 +588,6 @@ export default function AppointmentsPage() {
     filteredStaff,
     getStaffPeriodsForDate,
   ])
-
-
 
   const syncSelectedDate = React.useCallback(() => {
     const next = scheduleRef.current?.selectedDate
@@ -481,6 +671,7 @@ export default function AppointmentsPage() {
       <div className="rounded-xl border bg-card p-3 shadow-sm">
         <div className="min-h-[540px]">
           <ScheduleComponent
+            key={scheduleKey}
             ref={scheduleRef}
             currentView={currentView}
             selectedDate={date}

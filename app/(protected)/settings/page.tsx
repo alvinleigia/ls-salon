@@ -488,9 +488,12 @@ export default function SettingsPage() {
                   <InlineField label="Date">
                     <Input
                       type="date"
-                      value={override.date}
-                      onChange={(event) => {
-                        const nextDate = event.target.value
+                      defaultValue={override.date}
+                      onBlur={(event) => {
+                        const nextDate = event.currentTarget.value
+                        if (!nextDate || nextDate === override.date) {
+                          return
+                        }
                         if (
                           form.overrides.some(
                             (item, index) =>
@@ -498,6 +501,7 @@ export default function SettingsPage() {
                           )
                         ) {
                           toast.error("That date already has an override.")
+                          event.currentTarget.value = override.date
                           return
                         }
                         updateOverride(overrideIndex, (current) => ({

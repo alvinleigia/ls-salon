@@ -12,6 +12,50 @@ import { canManageUsers, type Role } from "@/lib/permissions"
 
 type ServiceOption = { id: string; name: string }
 
+type Weekday =
+  | "MONDAY"
+  | "TUESDAY"
+  | "WEDNESDAY"
+  | "THURSDAY"
+  | "FRIDAY"
+  | "SATURDAY"
+  | "SUNDAY"
+
+const WEEKDAYS: { value: Weekday; label: string }[] = [
+  { value: "MONDAY", label: "Monday" },
+  { value: "TUESDAY", label: "Tuesday" },
+  { value: "WEDNESDAY", label: "Wednesday" },
+  { value: "THURSDAY", label: "Thursday" },
+  { value: "FRIDAY", label: "Friday" },
+  { value: "SATURDAY", label: "Saturday" },
+  { value: "SUNDAY", label: "Sunday" },
+]
+
+type ShiftTemplateBreak = {
+  id?: string
+  startTime: string
+  endTime: string
+  sortOrder?: number
+}
+
+type ShiftTemplate = {
+  id: string
+  name: string
+  description?: string | null
+  color?: string | null
+  isActive: boolean
+  startTime: string
+  endTime: string
+  breaks: ShiftTemplateBreak[]
+}
+
+type StaffShiftAssignment = {
+  id?: string
+  day: Weekday
+  templateId: string
+  template?: { id: string; name: string; color?: string | null }
+}
+
 type StaffUser = {
   id: string
   name: string | null
@@ -34,30 +78,7 @@ type StaffUser = {
       validFrom: string | null
       validTo: string | null
     }[]
-    rosterOverrides?: {
-      id: string
-      date: string
-      isOpen: boolean
-      periods: {
-        id: string
-        kind: "WORK" | "BREAK"
-        startTime: string
-        endTime: string
-        sortOrder: number
-      }[]
-    }[]
-    weeklyOverrides?: {
-      id: string
-      day: "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY"
-      isOpen: boolean
-      periods: {
-        id: string
-        kind: "WORK" | "BREAK"
-        startTime: string
-        endTime: string
-        sortOrder: number
-      }[]
-    }[]
+    shiftAssignments?: StaffShiftAssignment[]
   } | null
 }
 
@@ -77,30 +98,31 @@ type StaffProfileForm = {
     validFrom: string
     validTo: string
   }[]
-  rosterOverrides: {
-    id?: string
-    date: string
-    isOpen: boolean
-    periods: {
-      id?: string
-      kind: "WORK" | "BREAK"
-      startTime: string
-      endTime: string
-      sortOrder?: number
-    }[]
+  shiftAssignments: {
+    day: Weekday
+    templateId: string
   }[]
-  weeklyOverrides: {
-    id?: string
-    day: "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY"
-    isOpen: boolean
-    periods: {
-      id?: string
-      kind: "WORK" | "BREAK"
-      startTime: string
-      endTime: string
-      sortOrder?: number
-    }[]
-  }[]
+}
+
+const normalizeAssignments = (
+  assignments?: StaffShiftAssignment[]
+): StaffProfileForm["shiftAssignments"] => {
+  return WEEKDAYS.map((day) => {
+    const match = assignments?.find((assignment) => assignment.day === day.value)
+    return {
+      day: day.value,
+      templateId: match?.templateId ?? "",
+    }
+  })
+}
+
+const summarizeTemplate = (template?: ShiftTemplate) => {
+  if (!template) return ""
+  const breaks =
+    template.breaks?.length > 0
+      ? template.breaks.map((period) => `${period.startTime}-${period.endTime}`).join(" - ")
+      : "No breaks"
+  return `Shift ${template.startTime}-${template.endTime} - ${breaks}`
 }
 
 export default function StaffProfilePage() {
@@ -116,26 +138,33 @@ export default function StaffProfilePage() {
   const [serviceOptions, setServiceOptions] = React.useState<ServiceOption[]>([])
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [query, setQuery] = React.useState("")
+  const [templates, setTemplates] = React.useState<ShiftTemplate[]>([])
+  const [templatesLoading, setTemplatesLoading] = React.useState(true)
   const [profile, setProfile] = React.useState<StaffProfileForm>({
     certifications: [],
     documents: [],
-    rosterOverrides: [],
-    weeklyOverrides: [],
+    shiftAssignments: normalizeAssignments(),
   })
+
+  const templateMap = React.useMemo(() => {
+    return new Map(templates.map((template) => [template.id, template]))
+  }, [templates])
 
   React.useEffect(() => {
     if (!params.id) return
     const load = async () => {
       setLoading(true)
-      const [userRes, servicesRes] = await Promise.all([
+      const [userRes, servicesRes, templatesRes] = await Promise.all([
         fetch(`/api/users/${params.id}`, { cache: "no-store" }),
         fetch("/api/services?page=1&pageSize=100&sort=name&order=asc&status=ACTIVE", {
           cache: "no-store",
         }),
+        fetch("/api/shifts/templates?includeInactive=true", { cache: "no-store" }),
       ])
 
       if (!userRes.ok) {
         toast.error("Unable to load staff profile.")
+        setTemplatesLoading(false)
         setLoading(false)
         return
       }
@@ -170,32 +199,7 @@ export default function StaffProfilePage() {
               ? new Date(doc.validTo).toISOString().slice(0, 10)
               : "",
           })) ?? [],
-        rosterOverrides:
-          userRecord?.staffProfile?.rosterOverrides?.map((override) => ({
-            id: override.id,
-            date: new Date(override.date).toISOString().slice(0, 10),
-            isOpen: override.isOpen,
-            periods: override.periods.map((period) => ({
-              id: period.id,
-              kind: period.kind,
-              startTime: period.startTime,
-              endTime: period.endTime,
-              sortOrder: period.sortOrder,
-            })),
-          })) ?? [],
-        weeklyOverrides:
-          userRecord?.staffProfile?.weeklyOverrides?.map((override) => ({
-            id: override.id,
-            day: override.day,
-            isOpen: override.isOpen,
-            periods: override.periods.map((period) => ({
-              id: period.id,
-              kind: period.kind,
-              startTime: period.startTime,
-              endTime: period.endTime,
-              sortOrder: period.sortOrder,
-            })),
-          })) ?? [],
+        shiftAssignments: normalizeAssignments(userRecord?.staffProfile?.shiftAssignments),
       })
 
       if (servicesRes.ok) {
@@ -207,6 +211,13 @@ export default function StaffProfilePage() {
         setServiceOptions([])
       }
 
+      if (templatesRes.ok) {
+        const data = (await templatesRes.json()) as { items?: ShiftTemplate[] }
+        setTemplates(data.items ?? [])
+      } else {
+        setTemplates([])
+      }
+      setTemplatesLoading(false)
       setLoading(false)
     }
 
@@ -217,6 +228,15 @@ export default function StaffProfilePage() {
     setSelectedIds((prev) =>
       checked ? [...prev, serviceId] : prev.filter((id) => id !== serviceId)
     )
+  }
+
+  const updateAssignment = (day: Weekday, templateId: string) => {
+    setProfile((prev) => ({
+      ...prev,
+      shiftAssignments: prev.shiftAssignments.map((assignment) =>
+        assignment.day === day ? { ...assignment, templateId } : assignment
+      ),
+    }))
   }
 
   const save = async () => {
@@ -236,30 +256,12 @@ export default function StaffProfilePage() {
             validFrom: doc.validFrom,
             validTo: doc.validTo,
           })),
-          rosterOverrides: profile.rosterOverrides.map((override) => ({
-            id: override.id,
-            date: override.date,
-            isOpen: override.isOpen,
-            periods: override.periods.map((period) => ({
-              id: period.id,
-              kind: period.kind,
-              startTime: period.startTime,
-              endTime: period.endTime,
-              sortOrder: period.sortOrder,
+          shiftAssignments: profile.shiftAssignments
+            .filter((assignment) => assignment.templateId)
+            .map((assignment) => ({
+              day: assignment.day,
+              templateId: assignment.templateId,
             })),
-          })),
-          weeklyOverrides: profile.weeklyOverrides.map((override) => ({
-            id: override.id,
-            day: override.day,
-            isOpen: override.isOpen,
-            periods: override.periods.map((period) => ({
-              id: period.id,
-              kind: period.kind,
-              startTime: period.startTime,
-              endTime: period.endTime,
-              sortOrder: period.sortOrder,
-            })),
-          })),
           certifications: profile.certifications.map((cert) => ({
             id: cert.id,
             title: cert.title,
@@ -278,7 +280,7 @@ export default function StaffProfilePage() {
       return
     }
 
-    toast.success("Staff eligibility updated.")
+    toast.success("Staff profile updated.")
     setSaving(false)
   }
 
@@ -369,517 +371,69 @@ export default function StaffProfilePage() {
       </div>
 
       <div className="rounded-xl border bg-card p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold">Roster overrides</h2>
-            <p className="text-sm text-muted-foreground">
-              Inherits global hours. Add date overrides for this staff member.
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            onClick={() => {
-              const today = new Date().toISOString().slice(0, 10)
-              if (profile.rosterOverrides.some((override) => override.date === today)) {
-                toast.error("An override for today already exists.")
-                return
-              }
-              setProfile((prev) => ({
-                ...prev,
-                rosterOverrides: [
-                  ...prev.rosterOverrides,
-                  {
-                    date: today,
-                    isOpen: true,
-                    periods: [{ kind: "WORK", startTime: "09:00", endTime: "18:00" }],
-                  },
-                ],
-              }))
-            }}
-          >
-            Add override
-          </Button>
+        <div className="space-y-2">
+          <div className="text-lg font-semibold">Shift assignments</div>
+          <p className="text-sm text-muted-foreground">
+            Assign a shift template to each weekday. Leave empty to use global hours.
+          </p>
         </div>
-
-        {profile.rosterOverrides.length ? (
-          <div className="mt-4 space-y-4">
-            {profile.rosterOverrides.map((override, overrideIndex) => (
-              <div key={`${override.date}-${overrideIndex}`} className="rounded-lg border p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Date</Label>
-                    <Input
-                      type="date"
-                      value={override.date}
-                      onChange={(event) => {
-                        const nextDate = event.target.value
-                        if (
-                          profile.rosterOverrides.some(
-                            (item, index) =>
-                              index !== overrideIndex && item.date === nextDate
-                          )
-                        ) {
-                          toast.error("That date already has an override.")
-                          return
-                        }
-                        setProfile((prev) => ({
-                          ...prev,
-                          rosterOverrides: prev.rosterOverrides.map((item, idx) =>
-                            idx === overrideIndex ? { ...item, date: nextDate } : item
-                          ),
-                        }))
-                      }}
-                    />
+        {templatesLoading ? (
+          <p className="mt-4 text-sm text-muted-foreground">Loading templates...</p>
+        ) : templates.length ? (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            {profile.shiftAssignments.map((assignment) => {
+              const template = assignment.templateId
+                ? templateMap.get(assignment.templateId)
+                : undefined
+              return (
+                <div key={assignment.day} className="rounded-lg border p-4">
+                  <div className="text-sm font-medium">
+                    {WEEKDAYS.find((day) => day.value === assignment.day)?.label}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={override.isOpen}
-                        onChange={(event) =>
-                          setProfile((prev) => ({
-                            ...prev,
-                            rosterOverrides: prev.rosterOverrides.map((item, idx) =>
-                              idx === overrideIndex
-                                ? {
-                                    ...item,
-                                    isOpen: event.target.checked,
-                                    periods: event.target.checked
-                                      ? item.periods.length
-                                        ? item.periods
-                                        : [{ kind: "WORK", startTime: "09:00", endTime: "18:00" }]
-                                      : [],
-                                  }
-                                : item
-                            ),
-                          }))
-                        }
-                      />
-                      Open
-                    </label>
-                    <Button
-                      variant="outline"
-                      onClick={() =>
-                        setProfile((prev) => ({
-                          ...prev,
-                          rosterOverrides: prev.rosterOverrides.filter((_, idx) => idx !== overrideIndex),
-                        }))
+                  <div className="mt-2 space-y-2">
+                    <select
+                      className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      value={assignment.templateId}
+                      onChange={(event) =>
+                        updateAssignment(assignment.day, event.target.value)
                       }
                     >
-                      Remove
-                    </Button>
-                  </div>
-                </div>
-
-                {override.isOpen ? (
-                  <div className="mt-4 space-y-3">
-                    {override.periods.map((period, periodIndex) => (
-                      <div
-                        key={`${override.date}-${periodIndex}`}
-                        className="grid gap-3 sm:grid-cols-[140px_1fr_1fr_auto] sm:items-end"
-                      >
-                        <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Type</Label>
-                          <select
-                            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                            value={period.kind}
-                            onChange={(event) =>
-                              setProfile((prev) => ({
-                                ...prev,
-                                rosterOverrides: prev.rosterOverrides.map((item, idx) =>
-                                  idx === overrideIndex
-                                    ? {
-                                        ...item,
-                                        periods: item.periods.map((p, pIdx) =>
-                                          pIdx === periodIndex
-                                            ? {
-                                                ...p,
-                                                kind: event.target.value as StaffProfileForm["rosterOverrides"][number]["periods"][number]["kind"],
-                                              }
-                                            : p
-                                        ),
-                                      }
-                                    : item
-                                ),
-                              }))
-                            }
-                          >
-                            <option value="WORK">Work</option>
-                            <option value="BREAK">Break</option>
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Start</Label>
-                          <Input
-                            type="time"
-                            value={period.startTime}
-                            onChange={(event) =>
-                              setProfile((prev) => ({
-                                ...prev,
-                                rosterOverrides: prev.rosterOverrides.map((item, idx) =>
-                                  idx === overrideIndex
-                                    ? {
-                                        ...item,
-                                        periods: item.periods.map((p, pIdx) =>
-                                          pIdx === periodIndex
-                                            ? { ...p, startTime: event.target.value }
-                                            : p
-                                        ),
-                                      }
-                                    : item
-                                ),
-                              }))
-                            }
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">End</Label>
-                          <Input
-                            type="time"
-                            value={period.endTime}
-                            onChange={(event) =>
-                              setProfile((prev) => ({
-                                ...prev,
-                                rosterOverrides: prev.rosterOverrides.map((item, idx) =>
-                                  idx === overrideIndex
-                                    ? {
-                                        ...item,
-                                        periods: item.periods.map((p, pIdx) =>
-                                          pIdx === periodIndex
-                                            ? { ...p, endTime: event.target.value }
-                                            : p
-                                        ),
-                                      }
-                                    : item
-                                ),
-                              }))
-                            }
-                          />
-                        </div>
-                        <Button
-                          variant="outline"
-                          onClick={() =>
-                            setProfile((prev) => ({
-                              ...prev,
-                              rosterOverrides: prev.rosterOverrides.map((item, idx) =>
-                                idx === overrideIndex
-                                  ? {
-                                      ...item,
-                                      periods: item.periods.filter((_, pIdx) => pIdx !== periodIndex),
-                                    }
-                                  : item
-                              ),
-                            }))
-                          }
-                        >
-                          Remove
-                        </Button>
-                      </div>
-                    ))}
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() =>
-                          setProfile((prev) => ({
-                            ...prev,
-                            rosterOverrides: prev.rosterOverrides.map((item, idx) =>
-                              idx === overrideIndex
-                                ? {
-                                    ...item,
-                                    periods: [
-                                      ...item.periods,
-                                      { kind: "WORK", startTime: "09:00", endTime: "18:00" },
-                                    ],
-                                  }
-                                : item
-                            ),
-                          }))
-                        }
-                      >
-                        Add work period
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() =>
-                          setProfile((prev) => ({
-                            ...prev,
-                            rosterOverrides: prev.rosterOverrides.map((item, idx) =>
-                              idx === overrideIndex
-                                ? {
-                                    ...item,
-                                    periods: [
-                                      ...item.periods,
-                                      { kind: "BREAK", startTime: "12:00", endTime: "13:00" },
-                                    ],
-                                  }
-                                : item
-                            ),
-                          }))
-                        }
-                      >
-                        Add break
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    Closed for this day.
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-muted-foreground">
-            No overrides yet.
-          </p>
-        )}
-      </div>
-
-      <div className="rounded-xl border bg-card p-6">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Weekly availability</h2>
-          <p className="text-sm text-muted-foreground">
-            Override weekly hours for this staff member (leave empty to inherit).
-          </p>
-        </div>
-
-        <div className="mt-4 space-y-4">
-          {(["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"] as const).map(
-            (day) => {
-              const overrideIndex = profile.weeklyOverrides.findIndex((item) => item.day === day)
-              const override =
-                overrideIndex >= 0
-                  ? profile.weeklyOverrides[overrideIndex]
-                  : null
-              return (
-                <div key={day} className="rounded-lg border p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="text-sm font-medium">
-                      {day.charAt(0) + day.slice(1).toLowerCase()}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={override?.isOpen ?? false}
-                          onChange={(event) => {
-                            if (overrideIndex === -1) {
-                              setProfile((prev) => ({
-                                ...prev,
-                                weeklyOverrides: [
-                                  ...prev.weeklyOverrides,
-                                  {
-                                    day,
-                                    isOpen: event.target.checked,
-                                    periods: event.target.checked
-                                      ? [{ kind: "WORK", startTime: "09:00", endTime: "18:00" }]
-                                      : [],
-                                  },
-                                ],
-                              }))
-                              return
-                            }
-                            setProfile((prev) => ({
-                              ...prev,
-                              weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
-                                idx === overrideIndex
-                                  ? {
-                                      ...item,
-                                      isOpen: event.target.checked,
-                                      periods: event.target.checked
-                                        ? item.periods.length
-                                          ? item.periods
-                                          : [{ kind: "WORK", startTime: "09:00", endTime: "18:00" }]
-                                        : [],
-                                    }
-                                  : item
-                              ),
-                            }))
-                          }}
-                        />
-                        Override
-                      </label>
-                      {override ? (
-                        <Button
-                          variant="outline"
-                          onClick={() =>
-                            setProfile((prev) => ({
-                              ...prev,
-                              weeklyOverrides: prev.weeklyOverrides.filter((item) => item.day !== day),
-                            }))
-                          }
-                        >
-                          Clear
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {override && override.isOpen ? (
-                    <div className="mt-4 space-y-3">
-                      {override.periods.map((period, periodIndex) => (
-                        <div
-                          key={`${day}-${periodIndex}`}
-                          className="grid gap-3 sm:grid-cols-[140px_1fr_1fr_auto] sm:items-end"
-                        >
-                          <div className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">Type</Label>
-                            <select
-                              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                              value={period.kind}
-                              onChange={(event) =>
-                                setProfile((prev) => ({
-                                  ...prev,
-                                  weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
-                                    idx === overrideIndex
-                                      ? {
-                                          ...item,
-                                          periods: item.periods.map((p, pIdx) =>
-                                            pIdx === periodIndex
-                                              ? {
-                                                  ...p,
-                                                  kind: event.target.value as StaffProfileForm["weeklyOverrides"][number]["periods"][number]["kind"],
-                                                }
-                                              : p
-                                          ),
-                                        }
-                                      : item
-                                  ),
-                                }))
-                              }
-                            >
-                              <option value="WORK">Work</option>
-                              <option value="BREAK">Break</option>
-                            </select>
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">Start</Label>
-                            <Input
-                              type="time"
-                              value={period.startTime}
-                              onChange={(event) =>
-                                setProfile((prev) => ({
-                                  ...prev,
-                                  weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
-                                    idx === overrideIndex
-                                      ? {
-                                          ...item,
-                                          periods: item.periods.map((p, pIdx) =>
-                                            pIdx === periodIndex
-                                              ? { ...p, startTime: event.target.value }
-                                              : p
-                                          ),
-                                        }
-                                      : item
-                                  ),
-                                }))
-                              }
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">End</Label>
-                            <Input
-                              type="time"
-                              value={period.endTime}
-                              onChange={(event) =>
-                                setProfile((prev) => ({
-                                  ...prev,
-                                  weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
-                                    idx === overrideIndex
-                                      ? {
-                                          ...item,
-                                          periods: item.periods.map((p, pIdx) =>
-                                            pIdx === periodIndex
-                                              ? { ...p, endTime: event.target.value }
-                                              : p
-                                          ),
-                                        }
-                                      : item
-                                  ),
-                                }))
-                              }
-                            />
-                          </div>
-                          <Button
-                            variant="outline"
-                            onClick={() =>
-                              setProfile((prev) => ({
-                                ...prev,
-                                weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
-                                  idx === overrideIndex
-                                    ? {
-                                        ...item,
-                                        periods: item.periods.filter((_, pIdx) => pIdx !== periodIndex),
-                                      }
-                                    : item
-                                ),
-                              }))
-                            }
-                          >
-                            Remove
-                          </Button>
-                        </div>
+                      <option value="">Use global hours</option>
+                      {templates.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                          {item.isActive ? "" : " (inactive)"}
+                        </option>
                       ))}
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          onClick={() =>
-                            setProfile((prev) => ({
-                              ...prev,
-                              weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
-                                idx === overrideIndex
-                                  ? {
-                                      ...item,
-                                      periods: [
-                                        ...item.periods,
-                                        { kind: "WORK", startTime: "09:00", endTime: "18:00" },
-                                      ],
-                                    }
-                                  : item
-                              ),
-                            }))
-                          }
-                        >
-                          Add work period
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={() =>
-                            setProfile((prev) => ({
-                              ...prev,
-                              weeklyOverrides: prev.weeklyOverrides.map((item, idx) =>
-                                idx === overrideIndex
-                                  ? {
-                                      ...item,
-                                      periods: [
-                                        ...item.periods,
-                                        { kind: "BREAK", startTime: "12:00", endTime: "13:00" },
-                                      ],
-                                    }
-                                  : item
-                              ),
-                            }))
-                          }
-                        >
-                          Add break
-                        </Button>
+                    </select>
+                    {template ? (
+                      <div className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+                          <span
+                            className="h-2 w-2 rounded-full"
+                            style={{ backgroundColor: template.color ?? "#64748b" }}
+                          />
+                          {template.name}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {summarizeTemplate(template)}
+                        </div>
                       </div>
-                    </div>
-                  ) : override ? (
-                    <p className="mt-3 text-sm text-muted-foreground">
-                      Closed for this day.
-                    </p>
-                  ) : (
-                    <p className="mt-3 text-sm text-muted-foreground">
-                      Inherits global hours.
-                    </p>
-                  )}
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        No template assigned.
+                      </p>
+                    )}
+                  </div>
                 </div>
               )
-            }
-          )}
-        </div>
+            })}
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-muted-foreground">
+            No shift templates available. Create one in Settings to assign shifts.
+          </p>
+        )}
       </div>
 
       <div className="rounded-xl border bg-card p-6">

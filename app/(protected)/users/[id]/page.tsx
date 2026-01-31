@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useDateFormatter } from "@/hooks/use-date-formatter"
 import { canManageUsers, type Role } from "@/lib/permissions"
 
 type Gender = "MALE" | "FEMALE" | "NON_BINARY" | "OTHER" | "PREFER_NOT_TO_SAY"
@@ -33,10 +34,8 @@ type UserProfile = {
   updatedAt: string
 }
 
-const formatDate = (value?: string | null) =>
-  value ? new Date(value).toLocaleDateString() : "-"
-
 export default function UserProfilePage() {
+  const { formatDate } = useDateFormatter()
   const router = useRouter()
   const { data: session } = useSession()
   const currentRole = (session?.user as { role?: Role })?.role

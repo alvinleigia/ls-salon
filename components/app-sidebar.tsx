@@ -7,6 +7,7 @@ import { signOut, useSession } from "next-auth/react"
 import { useTheme } from "next-themes"
 import {
   CalendarClockIcon,
+  ClockIcon,
   LayoutDashboardIcon,
   LogOutIcon,
   MailIcon,
@@ -183,6 +184,50 @@ export function AppSidebar() {
                         </SidebarMenuSubButton>
                       </SidebarMenuSubItem>
                     ) : null}
+                  </SidebarMenuSub>
+                </SidebarMenuItem>
+              ) : null}
+              {canManageUsers(role ?? null) ? (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    data-active={pathname.startsWith("/shifts")}
+                  >
+                    <Link href="/shifts" className="flex w-full items-center">
+                      <ClockIcon className="h-4 w-4" />
+                      <span>Shifts</span>
+                      <span
+                        className={`ml-auto h-2 w-2 rounded-full ${
+                          pathname.startsWith("/shifts")
+                            ? "bg-sidebar-primary"
+                            : "bg-transparent"
+                        }`}
+                      />
+                    </Link>
+                  </SidebarMenuButton>
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/shifts"}
+                      >
+                        <Link href="/shifts">
+                          <ClockIcon className="h-4 w-4" />
+                          <span>Templates</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/shifts/schedules"}
+                      >
+                        <Link href="/shifts/schedules">
+                          <CalendarClockIcon className="h-4 w-4" />
+                          <span>Schedules</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
                   </SidebarMenuSub>
                 </SidebarMenuItem>
               ) : null}

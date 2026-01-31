@@ -106,21 +106,23 @@ export function DataTableToolbar<TData>({
 }: DataTableToolbarProps<TData>) {
   const globalFilter = String(table.getState().globalFilter ?? "")
   const columnVisibility = table.getState().columnVisibility as VisibilityState
+  const leftContent = showSearch ? (
+    <Input
+      placeholder={searchPlaceholder}
+      value={globalFilter}
+      onChange={(event) => table.setGlobalFilter(event.target.value)}
+      className="max-w-sm"
+    />
+  ) : (
+    children ?? <div />
+  )
+  const rightContent = showSearch ? children : null
 
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      {showSearch ? (
-        <Input
-          placeholder={searchPlaceholder}
-          value={globalFilter}
-          onChange={(event) => table.setGlobalFilter(event.target.value)}
-          className="max-w-sm"
-        />
-      ) : (
-        <div />
-      )}
+      {leftContent}
       <div className="flex flex-wrap items-center gap-2">
-        {children}
+        {rightContent}
         {showColumnToggle ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

@@ -28,6 +28,7 @@ import {
 } from "@/components/data-table"
 import { FormField } from "@/components/form-field"
 import { useFormErrors } from "@/hooks/use-form-errors"
+import { useDateFormatter } from "@/hooks/use-date-formatter"
 import type { Role } from "@/lib/permissions"
 import type { ListResponse } from "@/types/api"
 
@@ -51,6 +52,7 @@ const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
 }
 
 export default function InvitesPage() {
+  const { formatDate } = useDateFormatter()
   type PaginationState = { pageIndex: number; pageSize: number }
 
   const [inviteOpen, setInviteOpen] = React.useState(false)
@@ -216,7 +218,7 @@ export default function InvitesPage() {
             <SortIndicator value={column.getIsSorted()} />
           </button>
         ),
-        cell: ({ row }) => new Date(row.original.createdAt).toLocaleDateString(),
+        cell: ({ row }) => formatDate(row.original.createdAt),
       },
       {
         accessorKey: "expiresAt",
@@ -231,7 +233,7 @@ export default function InvitesPage() {
             <SortIndicator value={column.getIsSorted()} />
           </button>
         ),
-        cell: ({ row }) => new Date(row.original.expiresAt).toLocaleDateString(),
+        cell: ({ row }) => formatDate(row.original.expiresAt),
       },
       {
         id: "status",
