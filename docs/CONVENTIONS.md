@@ -87,9 +87,9 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Staff profile includes documents list (type/number/link/validity), and certifications list (with issue + expiry dates).
 - Staff scheduling uses shift schedules (start date + shift blocks) assigned to staff.
 - Shift schedules use week off day 1 and optional week off day 2 with week-of-month selection.
-- Repeat day counts skip week off dates; staff has one schedule at a time.
+- Repeat day counts skip week off dates; shift blocks loop in order indefinitely until an explicit end date is added.
 - A single global default shift schedule can be marked and applies to staff without explicit schedules.
-- Staff shift schedules override global hours; when unassigned, staff inherits global hours.
+- Roster displays only shift schedules; if no staff schedule and no default schedule, show empty.
 - Shifts module lives under `/shifts` with admin/manager access and uses standard list params/response.
 - Shift schedules live under `/shifts/schedules` with admin/manager access.
 - Shift templates store a single shift start/end with optional breaks and are reusable across staff assignments.

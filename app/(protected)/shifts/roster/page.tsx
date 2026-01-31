@@ -70,12 +70,6 @@ type TimeRange = {
   endTime: string
 }
 
-type StaffShiftAssignment = {
-  id?: string
-  day: string
-  templateId: string
-}
-
 type ShiftScheduleBlock = {
   id?: string
   templateId: string
@@ -85,6 +79,7 @@ type ShiftScheduleBlock = {
 
 type ShiftSchedule = {
   id: string
+  isDefault?: boolean
   startDate: string
   weekOffDay1: string
   weekOffDay2?: string | null
@@ -93,7 +88,6 @@ type ShiftSchedule = {
 }
 
 type StaffProfile = {
-  shiftAssignments?: StaffShiftAssignment[]
   shiftSchedule?: ShiftSchedule | null
 }
 
@@ -113,6 +107,7 @@ export default function RosterPage() {
   const debugEnabled = searchParams.get("debug") === "1"
   const scheduleRef = React.useRef<ScheduleComponent | null>(null)
   const [date, setDate] = React.useState(() => new Date())
+  const [viewDates, setViewDates] = React.useState<Date[]>([])
   const [staff, setStaff] = React.useState<StaffOption[]>([])
   const [staffFilter, setStaffFilter] = React.useState<string>("all")
   const [settings, setSettings] = React.useState<SettingsPayload>({
@@ -120,9 +115,6 @@ export default function RosterPage() {
     overrides: [],
   })
   const [templates, setTemplates] = React.useState<ShiftTemplate[]>([])
-  const [staffAssignments, setStaffAssignments] = React.useState<
-    Record<string, StaffShiftAssignment[]>
-  >({})
   const [staffSchedules, setStaffSchedules] = React.useState<
     Record<string, ShiftSchedule | null>
   >({})
@@ -135,7 +127,8 @@ export default function RosterPage() {
         throw new Error("Failed to load staff.")
       }
       const data = (await response.json()) as { items?: StaffOption[] }
-      setStaff(data.items ?? [])
+      const items = data.items ?? []
+      setStaff(items)
     } catch (error) {
       console.error(error)
       toast.error("Unable to load staff.")
@@ -172,7 +165,8 @@ export default function RosterPage() {
         throw new Error("Failed to load shift templates.")
       }
       const data = (await response.json()) as { items?: ShiftTemplate[] }
-      setTemplates(data.items ?? [])
+      const items = data.items ?? []
+      setTemplates(items)
     } catch (error) {
       console.error(error)
       toast.error("Unable to load shift templates.")
@@ -189,7 +183,8 @@ export default function RosterPage() {
         throw new Error("Failed to load default schedule.")
       }
       const data = (await response.json()) as { items?: ShiftSchedule[] }
-      setDefaultSchedule(data.items?.[0] ?? null)
+      const defaultItem = data.items?.[0] ?? null
+      setDefaultSchedule(defaultItem)
     } catch (error) {
       console.error(error)
       setDefaultSchedule(null)
@@ -204,10 +199,6 @@ export default function RosterPage() {
       }
       const data = (await response.json()) as { user?: { staffProfile?: StaffProfile } }
       const profile = data.user?.staffProfile
-      setStaffAssignments((prev) => ({
-        ...prev,
-        [staffId]: profile?.shiftAssignments ?? [],
-      }))
       setStaffSchedules((prev) => ({
         ...prev,
         [staffId]: profile?.shiftSchedule ?? null,
@@ -245,7 +236,7 @@ export default function RosterPage() {
 
   React.useEffect(() => {
     refreshStaffAssignments()
-  }, [refreshStaffAssignments, staffFilter])
+  }, [refreshStaffAssignments, staffFilter, staff])
 
   const filteredStaff = React.useMemo(() => {
     if (staffFilter === "all") {
@@ -255,6 +246,9 @@ export default function RosterPage() {
   }, [staff, staffFilter])
 
   const availabilityDates = React.useMemo(() => {
+    if (viewDates.length) {
+      return viewDates
+    }
     const current = new Date(date)
     const start = new Date(current.getFullYear(), current.getMonth(), 1)
     const dayIndex = start.getDay()
@@ -264,7 +258,7 @@ export default function RosterPage() {
       next.setDate(start.getDate() + index)
       return next
     })
-  }, [date])
+  }, [date, viewDates])
 
   const resolveDayKey = React.useCallback((value: Date) => {
     const mapping = [
@@ -364,6 +358,9 @@ export default function RosterPage() {
           if (dayInBlock >= sortedBlocks[blockIndex].repeatDays) {
             blockIndex += 1
             dayInBlock = 0
+            if (blockIndex >= sortedBlocks.length) {
+              blockIndex = 0
+            }
           }
         }
         cursor.setDate(cursor.getDate() + 1)
@@ -384,35 +381,6 @@ export default function RosterPage() {
     return maps
   }, [availabilityDates, buildScheduleMap, defaultSchedule, filteredStaff, staffSchedules])
 
-  const getGlobalPeriodsForDate = React.useCallback(
-    (value: Date) => {
-      const dateKey = formatDateKey(value)
-      const override = settings.overrides.find((item) => item.date === dateKey)
-      if (override) {
-        return override.isOpen
-          ? override.periods
-              .filter((period) => period.kind === "WORK")
-              .map((period) => ({
-                startTime: period.startTime,
-                endTime: period.endTime,
-              }))
-          : []
-      }
-      const weekday = resolveDayKey(value)
-      const dayConfig = settings.workingHours.find((day) => day.day === weekday)
-      if (!dayConfig || !dayConfig.isOpen) {
-        return []
-      }
-      return dayConfig.periods
-        .filter((period) => period.kind === "WORK")
-        .map((period) => ({
-          startTime: period.startTime,
-          endTime: period.endTime,
-        }))
-    },
-    [formatDateKey, resolveDayKey, settings.overrides, settings.workingHours]
-  )
-
   const getStaffTemplateForDate = React.useCallback(
     (value: Date, staffId?: string) => {
       if (!staffId) return null
@@ -422,20 +390,11 @@ export default function RosterPage() {
         const templateId = scheduleMap[dateKey]
         return templateId ? templateMap[templateId] ?? null : null
       }
-      if (staffSchedules[staffId] || defaultSchedule) {
-        return null
-      }
-      const weekday = resolveDayKey(value)
-      const assignments = staffAssignments[staffId] ?? []
-      const assignment = assignments.find((item) => item.day === weekday)
-      if (!assignment) return null
-      return templateMap[assignment.templateId] ?? null
+      return null
     },
     [
       formatDateKey,
-      resolveDayKey,
       scheduleMaps,
-      staffAssignments,
       staffSchedules,
       defaultSchedule,
       templateMap,
@@ -445,7 +404,7 @@ export default function RosterPage() {
   const getStaffPeriodsForDate = React.useCallback(
     (value: Date, staffId?: string) => {
       if (!staffId) {
-        return getGlobalPeriodsForDate(value)
+        return []
       }
       const dateKey = formatDateKey(value)
       const scheduleMap = scheduleMaps[staffId]
@@ -457,25 +416,9 @@ export default function RosterPage() {
         const template = templateMap[templateId]
         return template ? buildShiftSegments(template) : []
       }
-      if (staffSchedules[staffId] || defaultSchedule) {
-        return getGlobalPeriodsForDate(value)
-      }
-      const template = getStaffTemplateForDate(value, staffId)
-      if (template) {
-        return buildShiftSegments(template)
-      }
-      return getGlobalPeriodsForDate(value)
+      return []
     },
-    [
-      buildShiftSegments,
-      formatDateKey,
-      getGlobalPeriodsForDate,
-      getStaffTemplateForDate,
-      scheduleMaps,
-      staffSchedules,
-      defaultSchedule,
-      templateMap,
-    ]
+    [buildShiftSegments, formatDateKey, scheduleMaps, templateMap]
   )
 
   const calendarEvents = React.useMemo(() => {
@@ -506,7 +449,14 @@ export default function RosterPage() {
   }, [availabilityDates, filteredStaff, formatDateKey, getStaffPeriodsForDate, getStaffTemplateForDate])
 
   React.useEffect(() => {
-    scheduleRef.current?.refreshEvents?.()
+    if (scheduleRef.current) {
+      scheduleRef.current.eventSettings = {
+        ...scheduleRef.current.eventSettings,
+        dataSource: calendarEvents,
+      }
+      scheduleRef.current.dataBind()
+      scheduleRef.current.refreshEvents?.()
+    }
   }, [calendarEvents])
 
   const staffResources = React.useMemo(
@@ -551,11 +501,38 @@ export default function RosterPage() {
     settings.dateFormat,
   ])
 
-  const handleNavigate = React.useCallback((args: { currentDate?: Date }) => {
-    if (args?.currentDate) {
+  const syncViewDates = React.useCallback(() => {
+    const dates = scheduleRef.current?.getCurrentViewDates?.() ?? []
+    const normalizedDates = dates.map(
+      (value) => new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()))
+    )
+    if (normalizedDates.length) {
+      setViewDates(normalizedDates)
+    }
+    const selected = scheduleRef.current?.selectedDate
+    if (selected instanceof Date && !Number.isNaN(selected.getTime())) {
+      setDate(new Date(selected))
+    }
+  }, [])
+
+  const handleNavigate = React.useCallback((args: { currentDate?: Date | null }) => {
+    if (args?.currentDate instanceof Date && !Number.isNaN(args.currentDate.getTime())) {
       setDate(new Date(args.currentDate))
     }
   }, [])
+
+  const handleActionComplete = React.useCallback(
+    (args: { requestType?: string }) => {
+      if (
+        args?.requestType === "dateNavigate" ||
+        args?.requestType === "viewNavigate" ||
+        args?.requestType === "viewRender"
+      ) {
+        syncViewDates()
+      }
+  },
+    [calendarEvents.length, filteredStaff.length, syncViewDates]
+  )
 
   return (
     <div className="flex flex-col gap-6 px-6 py-6">
@@ -592,7 +569,6 @@ export default function RosterPage() {
           <ScheduleComponent
             ref={scheduleRef}
             currentView="Month"
-            selectedDate={date}
             firstDayOfWeek={0}
             eventSettings={{
               dataSource: calendarEvents,
@@ -610,6 +586,8 @@ export default function RosterPage() {
             allowDragAndDrop={false}
             allowResizing={false}
             navigating={handleNavigate}
+            actionComplete={handleActionComplete}
+            created={syncViewDates}
             height="auto"
           >
             <ViewsDirective>
