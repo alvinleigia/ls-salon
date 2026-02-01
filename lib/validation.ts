@@ -357,6 +357,8 @@ export const shiftScheduleSchema = z
     staffIds: z.array(z.string().trim().min(1)),
     isDefault: z.boolean().optional(),
     startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    assignmentStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
+    assignmentEndDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
     weekOffDay1: weekdaySchema,
     weekOffDay2: weekdaySchema.optional().or(z.literal("")),
     weekOff2Weeks: z
@@ -373,10 +375,32 @@ export const shiftScheduleSchema = z
     ),
   })
   .superRefine((values, ctx) => {
+    const today = new Date().toISOString().slice(0, 10)
+    if (values.startDate < today) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Schedule start date cannot be in the past.",
+        path: ["startDate"],
+      })
+    }
+    if (!values.isDefault && values.staffIds.length && !values.assignmentStartDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Assignment start date is required when assigning staff.",
+        path: ["assignmentStartDate"],
+      })
+    }
+    if (values.assignmentStartDate && values.assignmentStartDate < today) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Assignment start date cannot be in the past.",
+        path: ["assignmentStartDate"],
+      })
+    }
     if (!values.isDefault && !values.staffIds.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Select at least one staff member.",
+        message: "Select at least one staff member or mark as default.",
         path: ["staffIds"],
       })
     }
@@ -386,6 +410,15 @@ export const shiftScheduleSchema = z
         message: "Default schedule should not target staff members.",
         path: ["staffIds"],
       })
+    }
+    if (values.assignmentStartDate && values.assignmentEndDate) {
+      if (values.assignmentStartDate > values.assignmentEndDate) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Assignment start date must be before end date.",
+          path: ["assignmentStartDate"],
+        })
+      }
     }
     if (!values.blocks.length) {
       ctx.addIssue({

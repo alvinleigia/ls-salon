@@ -32,14 +32,13 @@ export async function GET(request: Request) {
   const pageSize = hasPagination ? Math.max(1, pageSizeParam) : undefined
 
   const where: {
-    staffProfile?: { userId?: string }
     isDefault?: boolean
     startDate?: { gte?: Date; lte?: Date }
+    assignments?: { some?: { staffProfile?: { userId?: string } } }
     OR?: { name?: { contains: string; mode: "insensitive" } }[]
   } = {}
-
   if (staffId) {
-    where.staffProfile = { userId: staffId }
+    where.assignments = { some: { staffProfile: { userId: staffId } } }
   }
   if (isDefault) {
     where.isDefault = true
@@ -69,7 +68,9 @@ export async function GET(request: Request) {
         orderBy: { sortOrder: "asc" },
         include: { template: { select: { id: true, name: true } } },
       },
-      staffProfile: { select: { user: { select: { id: true, name: true, email: true } } } },
+      assignments: {
+        include: { staffProfile: { select: { user: { select: { id: true, name: true, email: true } } } } },
+      },
     },
     orderBy,
     skip: pageSize ? (page - 1) * pageSize : undefined,
@@ -107,15 +108,24 @@ export async function POST(request: Request) {
   }
 
   const data = parsed.data
+  const today = new Date().toISOString().slice(0, 10)
+  if (data.startDate < today) {
+    return NextResponse.json(
+      { error: "Schedule start date cannot be in the past." },
+      { status: 400 }
+    )
+  }
+  if (data.assignmentStartDate && data.assignmentStartDate < today) {
+    return NextResponse.json(
+      { error: "Assignment start date cannot be in the past." },
+      { status: 400 }
+    )
+  }
   const weekOff2Weeks =
     data.weekOffDay2 && (!data.weekOff2Weeks || !data.weekOff2Weeks.length)
       ? [1, 2, 3, 4, 5]
       : data.weekOff2Weeks ?? []
   const staffIds = Array.from(new Set(data.staffIds.map((value) => value.trim())))
-
-  if (!data.isDefault && !staffIds.length) {
-    return NextResponse.json({ error: "Select at least one staff member." }, { status: 400 })
-  }
 
   if (data.isDefault) {
     try {
@@ -123,7 +133,6 @@ export async function POST(request: Request) {
       const schedule = await prisma.shiftSchedule.create({
         data: {
           name: data.name?.trim() || null,
-          staffProfileId: null,
           isDefault: true,
           startDate: new Date(data.startDate),
           weekOffDay1: data.weekOffDay1,
@@ -142,7 +151,9 @@ export async function POST(request: Request) {
             orderBy: { sortOrder: "asc" },
             include: { template: { select: { id: true, name: true } } },
           },
-          staffProfile: { select: { user: { select: { id: true, name: true, email: true } } } },
+          assignments: {
+            include: { staffProfile: { select: { user: { select: { id: true, name: true, email: true } } } } },
+          },
         },
       })
 
@@ -194,54 +205,62 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Staff profile not found." }, { status: 404 })
   }
 
-  const existingSchedules = await prisma.shiftSchedule.findMany({
-    where: { staffProfileId: { in: finalStaffProfiles.map((profile) => profile.id) } },
+  const assignmentStart = data.assignmentStartDate
+    ? new Date(data.assignmentStartDate)
+    : new Date(data.startDate)
+  const assignmentEnd = data.assignmentEndDate ? new Date(data.assignmentEndDate) : null
+
+  const existingAssignments = await prisma.staffScheduleAssignment.findMany({
+    where: {
+      staffProfileId: { in: finalStaffProfiles.map((profile) => profile.id) },
+      ...(assignmentEnd
+        ? { startDate: { lte: assignmentEnd } }
+        : {}),
+      OR: [{ endDate: null }, { endDate: { gte: assignmentStart } }],
+    },
     select: { staffProfileId: true },
   })
-  const existingSet = new Set(existingSchedules.map((item) => item.staffProfileId))
-  const targets = finalStaffProfiles.filter((profile) => !existingSet.has(profile.id))
 
-  if (!targets.length) {
+  if (existingAssignments.length) {
     return NextResponse.json(
-      { error: "Selected staff already have schedules assigned." },
+      { error: "Selected staff already have schedules assigned in this range." },
       { status: 409 }
     )
   }
 
-  const scheduleData = targets.map((profile) => ({
-    name: data.name?.trim() || null,
-    staffProfileId: profile.id,
-    isDefault: false,
-    startDate: new Date(data.startDate),
-    weekOffDay1: data.weekOffDay1,
-    weekOffDay2: data.weekOffDay2 ? data.weekOffDay2 : null,
-    weekOff2Weeks,
-    blocks: {
-      create: data.blocks.map((block, index) => ({
-        templateId: block.templateId,
-        repeatDays: block.repeatDays,
-        sortOrder: block.sortOrder ?? index,
-      })),
+  const schedule = await prisma.shiftSchedule.create({
+    data: {
+      name: data.name?.trim() || null,
+      isDefault: false,
+      startDate: new Date(data.startDate),
+      weekOffDay1: data.weekOffDay1,
+      weekOffDay2: data.weekOffDay2 ? data.weekOffDay2 : null,
+      weekOff2Weeks,
+      blocks: {
+        create: data.blocks.map((block, index) => ({
+          templateId: block.templateId,
+          repeatDays: block.repeatDays,
+          sortOrder: block.sortOrder ?? index,
+        })),
+      },
+      assignments: {
+        create: finalStaffProfiles.map((profile) => ({
+          staffProfileId: profile.id,
+          startDate: assignmentStart,
+          endDate: assignmentEnd,
+        })),
+      },
     },
-  }))
-
-  const schedules = await prisma.$transaction(async (tx) => {
-    const created: typeof scheduleData = []
-    for (const item of scheduleData) {
-      const schedule = await tx.shiftSchedule.create({
-        data: item,
-        include: {
-          blocks: {
-            orderBy: { sortOrder: "asc" },
-            include: { template: { select: { id: true, name: true } } },
-          },
-          staffProfile: { select: { user: { select: { id: true, name: true, email: true } } } },
-        },
-      })
-      created.push(schedule as typeof scheduleData[number])
-    }
-    return created
+    include: {
+      blocks: {
+        orderBy: { sortOrder: "asc" },
+        include: { template: { select: { id: true, name: true } } },
+      },
+      assignments: {
+        include: { staffProfile: { select: { user: { select: { id: true, name: true, email: true } } } } },
+      },
+    },
   })
 
-  return NextResponse.json({ schedules, createdCount: schedules.length })
+  return NextResponse.json({ schedule })
 }

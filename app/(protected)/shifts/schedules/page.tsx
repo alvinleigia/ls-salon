@@ -85,7 +85,12 @@ type ShiftScheduleRow = {
   weekOffDay2: Weekday | null
   weekOff2Weeks: number[]
   blocks: ShiftScheduleBlock[]
-  staffProfile?: { user?: StaffOption | null } | null
+  assignments?: {
+    id: string
+    startDate: string
+    endDate?: string | null
+    staffProfile?: { user?: StaffOption | null } | null
+  }[]
   createdAt: string
   updatedAt: string
 }
@@ -95,6 +100,8 @@ type ShiftScheduleForm = {
   staffIds: string[]
   isDefault: boolean
   startDate: string
+  assignmentStartDate: string
+  assignmentEndDate: string
   weekOffDay1: Weekday
   weekOffDay2: Weekday | ""
   weekOff2Weeks: number[]
@@ -133,6 +140,27 @@ const summarizeWeekOff = (schedule: ShiftScheduleRow) => {
   return `${day1} + ${day2}${weeks}`
 }
 
+const summarizeAssignments = (schedule: ShiftScheduleRow) => {
+  if (schedule.isDefault) return "All staff"
+  const assignments = schedule.assignments ?? []
+  const names = assignments
+    .map((assignment) => assignment.staffProfile?.user?.name || assignment.staffProfile?.user?.email)
+    .filter(Boolean) as string[]
+  if (!names.length) return "-"
+  if (names.length <= 2) return names.join(", ")
+  return `${names.slice(0, 2).join(", ")} +${names.length - 2}`
+}
+
+const summarizeAssignmentRange = (schedule: ShiftScheduleRow) => {
+  const assignments = schedule.assignments ?? []
+  if (!assignments.length) return "-"
+  const rangeStart = assignments[0]?.startDate
+  const rangeEnd = assignments[0]?.endDate
+  if (!rangeStart) return "-"
+  if (!rangeEnd) return `${formatDateForDisplay(rangeStart)} onward`
+  return `${formatDateForDisplay(rangeStart)} - ${formatDateForDisplay(rangeEnd)}`
+}
+
 export default function ShiftSchedulesPage() {
   type PaginationState = { pageIndex: number; pageSize: number }
 
@@ -167,12 +195,14 @@ export default function ShiftSchedulesPage() {
   const [deleteTarget, setDeleteTarget] = React.useState<ShiftScheduleRow | null>(null)
   const [editingSchedule, setEditingSchedule] = React.useState<ShiftScheduleRow | null>(null)
 
-  const today = React.useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const today = React.useMemo(() => toISODate(new Date()), [])
   const defaultForm: ShiftScheduleForm = {
     name: "",
     staffIds: [],
     isDefault: false,
     startDate: today,
+    assignmentStartDate: today,
+    assignmentEndDate: "",
     weekOffDay1: "SUNDAY",
     weekOffDay2: "",
     weekOff2Weeks: [],
@@ -346,12 +376,23 @@ export default function ShiftSchedulesPage() {
   const startEdit = React.useCallback(
     (schedule: ShiftScheduleRow) => {
       clearEditErrors()
+      const assignments = schedule.assignments ?? []
+      const assignmentStart = assignments[0]?.startDate
+        ? toDateInputValue(assignments[0].startDate)
+        : ""
+      const assignmentEnd = assignments[0]?.endDate
+        ? toDateInputValue(assignments[0].endDate)
+        : ""
       setEditingSchedule(schedule)
       setEditSchedule({
         name: schedule.name ?? "",
-        staffIds: schedule.staffProfile?.user?.id ? [schedule.staffProfile.user.id] : [],
+        staffIds: assignments
+          .map((assignment) => assignment.staffProfile?.user?.id)
+          .filter(Boolean) as string[],
         isDefault: Boolean(schedule.isDefault),
         startDate: toDateInputValue(schedule.startDate),
+        assignmentStartDate: assignmentStart || toDateInputValue(schedule.startDate),
+        assignmentEndDate: assignmentEnd,
         weekOffDay1: schedule.weekOffDay1,
         weekOffDay2: schedule.weekOffDay2 ?? "",
         weekOff2Weeks:
@@ -473,13 +514,14 @@ export default function ShiftSchedulesPage() {
             <SortIndicator value={column.getIsSorted()} />
           </button>
         ),
-        accessorFn: (row) => row.staffProfile?.user?.name ?? row.staffProfile?.user?.email,
+        accessorFn: (row) => summarizeAssignments(row),
         cell: ({ row }) => (
-          <span className="text-sm text-muted-foreground">
-            {row.original.staffProfile?.user?.name ||
-              row.original.staffProfile?.user?.email ||
-              "-"}
-          </span>
+          <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+            <span>{summarizeAssignments(row.original)}</span>
+            <span className="text-xs text-muted-foreground">
+              {summarizeAssignmentRange(row.original)}
+            </span>
+          </div>
         ),
       },
       {
@@ -692,13 +734,58 @@ export default function ShiftSchedulesPage() {
             </select>
           )}
         </FormField>
+        {!form.isDefault ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField
+              id="schedule-assign-start"
+              label="Assignment start date"
+              error={errors.assignmentStartDate}
+            >
+              <Input
+                id="schedule-assign-start"
+                type="date"
+                value={form.assignmentStartDate}
+                min={today}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, assignmentStartDate: event.target.value }))
+                }
+              />
+            </FormField>
+            <FormField
+              id="schedule-assign-end"
+              label="Assignment end date"
+              error={errors.assignmentEndDate}
+            >
+              <Input
+                id="schedule-assign-end"
+                type="date"
+                value={form.assignmentEndDate}
+                min={form.assignmentStartDate || today}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, assignmentEndDate: event.target.value }))
+                }
+              />
+            </FormField>
+          </div>
+        ) : null}
         <FormField id="schedule-start" label="Start date" error={errors.startDate}>
           <Input
             id="schedule-start"
             type="date"
             value={form.startDate}
+            min={today}
             onChange={(event) =>
-              setForm((prev) => ({ ...prev, startDate: event.target.value }))
+              setForm((prev) => {
+                const next = event.target.value
+                return {
+                  ...prev,
+                  startDate: next,
+                  assignmentStartDate:
+                    !prev.assignmentStartDate || prev.assignmentStartDate === prev.startDate
+                      ? next
+                      : prev.assignmentStartDate,
+                }
+              })
             }
           />
         </FormField>
@@ -956,7 +1043,7 @@ export default function ShiftSchedulesPage() {
             <DialogDescription>Update schedule details and blocks.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto">
-            {renderScheduleForm(editSchedule, setEditSchedule, editErrors, false)}
+            {renderScheduleForm(editSchedule, setEditSchedule, editErrors, true)}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>

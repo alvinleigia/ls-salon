@@ -85,12 +85,14 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Staff eligibility: default allow all services; if any eligible services are stored, treat as an allow-list.
 - Manage staff eligibility in the staff profile page (not in the general user create/edit form).
 - Staff profile includes documents list (type/number/link/validity), and certifications list (with issue + expiry dates).
-- Staff scheduling uses shift schedules (start date + shift blocks) assigned to staff.
+- Staff scheduling uses shift schedules (start date + shift blocks) and staff schedule assignments with date ranges.
 - Shift schedules use week off day 1 and optional week off day 2 with week-of-month selection.
-- Repeat day counts skip week off dates; shift blocks loop in order indefinitely until an explicit end date is added.
+- Do not allow schedules or assignments to start in the past.
+- Repeat day counts skip week off dates; shift blocks loop in order indefinitely, and assignments control when a schedule applies.
 - A single global default shift schedule can be marked and applies to staff without explicit schedules.
 - Roster displays only shift schedules; if no staff schedule and no default schedule, show empty.
 - Roster overrides apply shift templates or mark a date range unavailable for a staff member (skip holidays/week off optional).
+- Shift overrides must not conflict with booked appointments. Require a resolution action (cancel, reassign, or reschedule) before applying changes.
 - Shifts module lives under `/shifts` with admin/manager access and uses standard list params/response.
 - Shift schedules live under `/shifts/schedules` with admin/manager access.
 - Shift templates store a single shift start/end with optional breaks and are reusable across schedules/overrides.

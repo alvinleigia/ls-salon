@@ -141,25 +141,6 @@ export async function PATCH(
                 validTo: true,
               },
             },
-            shiftSchedule: {
-              select: {
-                id: true,
-                name: true,
-                startDate: true,
-                weekOffDay1: true,
-                weekOffDay2: true,
-                weekOff2Weeks: true,
-                blocks: {
-                  select: {
-                    id: true,
-                    templateId: true,
-                    repeatDays: true,
-                    sortOrder: true,
-                  },
-                  orderBy: { sortOrder: "asc" },
-                },
-              },
-            },
             certifications: {
               select: { id: true, title: true, issuer: true, issuedAt: true, expiresAt: true },
             },
@@ -314,25 +295,6 @@ export async function GET(
               imageUrl: true,
               validFrom: true,
               validTo: true,
-            },
-          },
-          shiftSchedule: {
-            select: {
-              id: true,
-              name: true,
-              startDate: true,
-              weekOffDay1: true,
-              weekOffDay2: true,
-              weekOff2Weeks: true,
-              blocks: {
-                select: {
-                  id: true,
-                  templateId: true,
-                  repeatDays: true,
-                  sortOrder: true,
-                },
-                orderBy: { sortOrder: "asc" },
-              },
             },
           },
           certifications: {

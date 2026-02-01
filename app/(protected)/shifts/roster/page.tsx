@@ -106,8 +106,14 @@ type ShiftSchedule = {
   blocks: ShiftScheduleBlock[]
 }
 
-type StaffProfile = {
-  shiftSchedule?: ShiftSchedule | null
+type StaffScheduleAssignment = {
+  id: string
+  staffId: string | null
+  staffProfileId: string
+  scheduleId: string
+  startDate: string
+  endDate?: string | null
+  schedule: ShiftSchedule
 }
 
 type AvailabilityEvent = {
@@ -122,6 +128,15 @@ type AvailabilityEvent = {
   templateBreaks?: string[]
   isUnavailable?: boolean
   CategoryColor?: string
+}
+
+type AppointmentConflict = {
+  id: string
+  startAt: string
+  endAt: string
+  customerName?: string | null
+  customerEmail?: string | null
+  serviceName?: string | null
 }
 
 const RESOURCE_COLORS = ["#64748b", "#64748b", "#64748b", "#64748b", "#64748b"]
@@ -151,8 +166,8 @@ export default function RosterPage() {
     overrides: [],
   })
   const [templates, setTemplates] = React.useState<ShiftTemplate[]>([])
-  const [staffSchedules, setStaffSchedules] = React.useState<
-    Record<string, ShiftSchedule | null>
+  const [staffAssignments, setStaffAssignments] = React.useState<
+    Record<string, StaffScheduleAssignment[]>
   >({})
   const [defaultSchedule, setDefaultSchedule] = React.useState<ShiftSchedule | null>(null)
   const [overrides, setOverrides] = React.useState<ShiftOverride[]>([])
@@ -163,6 +178,14 @@ export default function RosterPage() {
   const [overrideTemplateId, setOverrideTemplateId] = React.useState<string>("")
   const [overrideSkipWeekOff, setOverrideSkipWeekOff] = React.useState(false)
   const [overrideUnavailable, setOverrideUnavailable] = React.useState(false)
+  const [conflictsOpen, setConflictsOpen] = React.useState(false)
+  const [conflicts, setConflicts] = React.useState<AppointmentConflict[]>([])
+  const [conflictAction, setConflictAction] = React.useState<
+    "cancel" | "reassign" | "reschedule"
+  >("cancel")
+  const [conflictStaffId, setConflictStaffId] = React.useState("")
+  const [conflictRescheduleDate, setConflictRescheduleDate] = React.useState("")
+  const [conflictRescheduleTime, setConflictRescheduleTime] = React.useState("")
 
   const loadStaff = React.useCallback(async () => {
     try {
@@ -235,23 +258,35 @@ export default function RosterPage() {
     }
   }, [])
 
-  const loadStaffAssignments = React.useCallback(async (staffId: string) => {
-    try {
-      const response = await fetch(`/api/users/${staffId}`, { cache: "no-store" })
-      if (!response.ok) {
-        throw new Error("Failed to load staff profile.")
+  const loadStaffAssignments = React.useCallback(
+    async (staffIds: string[], rangeStart: string, rangeEnd: string) => {
+      try {
+        const response = await fetch(
+          `/api/shifts/assignments?startDate=${rangeStart}&endDate=${rangeEnd}&staffIds=${staffIds.join(
+            ","
+          )}`,
+          { cache: "no-store" }
+        )
+        if (!response.ok) {
+          throw new Error("Failed to load staff assignments.")
+        }
+        const data = (await response.json()) as { items?: StaffScheduleAssignment[] }
+        const grouped: Record<string, StaffScheduleAssignment[]> = {}
+        for (const assignment of data.items ?? []) {
+          if (!assignment.staffId) continue
+          if (!grouped[assignment.staffId]) {
+            grouped[assignment.staffId] = []
+          }
+          grouped[assignment.staffId].push(assignment)
+        }
+        setStaffAssignments(grouped)
+      } catch (error) {
+        console.error(error)
+        toast.error("Unable to load staff schedules.")
       }
-      const data = (await response.json()) as { user?: { staffProfile?: StaffProfile } }
-      const profile = data.user?.staffProfile
-      setStaffSchedules((prev) => ({
-        ...prev,
-        [staffId]: profile?.shiftSchedule ?? null,
-      }))
-    } catch (error) {
-      console.error(error)
-      toast.error("Unable to load staff schedule.")
-    }
-  }, [])
+    },
+    []
+  )
 
   React.useEffect(() => {
     void loadStaff()
@@ -269,18 +304,32 @@ export default function RosterPage() {
     void loadDefaultSchedule()
   }, [loadDefaultSchedule])
 
-  const refreshStaffAssignments = React.useCallback(() => {
-    if (staffFilter === "all") {
-      if (!staff.length) return
-      void Promise.all(staff.map((member) => loadStaffAssignments(member.id)))
-      return
+  const availabilityDates = React.useMemo(() => {
+    if (viewDates.length) {
+      return viewDates
     }
-    void loadStaffAssignments(staffFilter)
-  }, [loadStaffAssignments, staff, staffFilter])
+    const current = new Date(date)
+    const start = new Date(current.getFullYear(), current.getMonth(), 1)
+    const dayIndex = start.getDay()
+    start.setDate(start.getDate() - dayIndex)
+    return Array.from({ length: 42 }, (_, index) => {
+      const next = new Date(start)
+      next.setDate(start.getDate() + index)
+      return next
+    })
+  }, [date, viewDates])
 
   React.useEffect(() => {
-    refreshStaffAssignments()
-  }, [refreshStaffAssignments, staffFilter, staff])
+    if (!staff.length || !availabilityDates.length) return
+    const rangeStart = toISODate(availabilityDates[0])
+    const rangeEnd = toISODate(availabilityDates[availabilityDates.length - 1])
+    const staffIds =
+      staffFilter === "all"
+        ? staff.map((member) => member.id)
+        : staff.filter((member) => member.id === staffFilter).map((member) => member.id)
+    if (!staffIds.length) return
+    void loadStaffAssignments(staffIds, rangeStart, rangeEnd)
+  }, [availabilityDates, loadStaffAssignments, staff, staffFilter])
 
   const filteredStaff = React.useMemo(() => {
     if (staffFilter === "all") {
@@ -315,21 +364,6 @@ export default function RosterPage() {
   React.useEffect(() => {
     void loadOverrides()
   }, [loadOverrides])
-
-  const availabilityDates = React.useMemo(() => {
-    if (viewDates.length) {
-      return viewDates
-    }
-    const current = new Date(date)
-    const start = new Date(current.getFullYear(), current.getMonth(), 1)
-    const dayIndex = start.getDay()
-    start.setDate(start.getDate() - dayIndex)
-    return Array.from({ length: 42 }, (_, index) => {
-      const next = new Date(start)
-      next.setDate(start.getDate() + index)
-      return next
-    })
-  }, [date, viewDates])
 
   const resolveDayKey = React.useCallback((value: Date) => {
     const mapping = [
@@ -434,18 +468,18 @@ export default function RosterPage() {
   )
 
   const buildScheduleMap = React.useCallback(
-    (schedule: ShiftSchedule, dates: Date[]) => {
+    (schedule: ShiftSchedule, dates: Date[], startDateOverride?: Date, endDateOverride?: Date) => {
       if (!schedule.blocks?.length) {
         return {} as Record<string, string | null>
       }
       const sortedBlocks = [...schedule.blocks].sort(
         (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
       )
-      const startDate = parseISODate(schedule.startDate)
+      const startDate = startDateOverride ?? parseISODate(schedule.startDate)
       if (!startDate) {
         return {} as Record<string, string | null>
       }
-      const lastDate = dates.length ? dates[dates.length - 1] : null
+      const lastDate = endDateOverride ?? (dates.length ? dates[dates.length - 1] : null)
       if (!lastDate) {
         return {} as Record<string, string | null>
       }
@@ -453,6 +487,10 @@ export default function RosterPage() {
       let blockIndex = 0
       let dayInBlock = 0
       const cursor = new Date(startDate)
+
+      if (cursor > lastDate) {
+        return map
+      }
 
       while (cursor <= lastDate && blockIndex < sortedBlocks.length) {
         const dateKey = formatDateKey(cursor)
@@ -479,13 +517,31 @@ export default function RosterPage() {
 
   const scheduleMaps = React.useMemo(() => {
     const maps: Record<string, Record<string, string | null>> = {}
+    const viewEnd = availabilityDates[availabilityDates.length - 1]
+    const viewEndDate = viewEnd ? new Date(viewEnd) : null
     for (const member of filteredStaff) {
-      const schedule = staffSchedules[member.id] ?? defaultSchedule
-      const baseMap = schedule ? buildScheduleMap(schedule, availabilityDates) : {}
+      const assignments = staffAssignments[member.id] ?? []
+      const baseMap: Record<string, string | null> = {}
+      for (const assignment of assignments) {
+        const startDate = parseISODate(assignment.startDate)
+        if (!startDate) continue
+        const endDate = assignment.endDate ? parseISODate(assignment.endDate) : viewEndDate
+        if (!endDate) continue
+        const map = buildScheduleMap(
+          assignment.schedule,
+          availabilityDates,
+          startDate,
+          endDate
+        )
+        Object.assign(baseMap, map)
+      }
+      if (!assignments.length && defaultSchedule) {
+        Object.assign(baseMap, buildScheduleMap(defaultSchedule, availabilityDates))
+      }
       maps[member.id] = baseMap
     }
     return maps
-  }, [availabilityDates, buildScheduleMap, defaultSchedule, filteredStaff, staffSchedules])
+  }, [availabilityDates, buildScheduleMap, defaultSchedule, filteredStaff, staffAssignments])
 
   const overrideMap = React.useMemo(() => {
     const map: Record<string, Record<string, string | null>> = {}
@@ -515,14 +571,7 @@ export default function RosterPage() {
       }
       return null
     },
-    [
-      formatDateKey,
-      scheduleMaps,
-      staffSchedules,
-      defaultSchedule,
-      templateMap,
-      overrideMap,
-    ]
+    [formatDateKey, scheduleMaps, templateMap, overrideMap]
   )
 
   const getStaffPeriodsForDate = React.useCallback(
@@ -897,6 +946,11 @@ export default function RosterPage() {
       })
       if (!response.ok) {
         const error = await response.json().catch(() => ({}))
+        if (response.status === 409 && Array.isArray(error.conflicts)) {
+          setConflicts(error.conflicts)
+          setConflictsOpen(true)
+          throw new Error("Shift change conflicts with existing appointments.")
+        }
         throw new Error(error.error || "Failed to save override.")
       }
       const result = (await response.json()) as { createdCount?: number }
@@ -961,6 +1015,55 @@ export default function RosterPage() {
       )
     }
   }, [loadOverrides, overrideEndDate, overrideStaffId, overrideStartDate])
+
+  const resolveConflicts = React.useCallback(async () => {
+    if (!conflicts.length) {
+      setConflictsOpen(false)
+      return
+    }
+    if (conflictAction === "reassign" && !conflictStaffId) {
+      toast.error("Select a staff member.")
+      return
+    }
+    if (
+      conflictAction === "reschedule" &&
+      (!conflictRescheduleDate || !conflictRescheduleTime)
+    ) {
+      toast.error("Select a new date and time.")
+      return
+    }
+    try {
+      const response = await fetch("/api/appointments/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appointmentIds: conflicts.map((item) => item.id),
+          action: conflictAction,
+          targetStaffId: conflictAction === "reassign" ? conflictStaffId : undefined,
+          rescheduleDate: conflictAction === "reschedule" ? conflictRescheduleDate : undefined,
+          rescheduleTime: conflictAction === "reschedule" ? conflictRescheduleTime : undefined,
+        }),
+      })
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.error || "Unable to resolve conflicts.")
+      }
+      toast.success("Appointments updated.")
+      setConflictsOpen(false)
+      setConflicts([])
+      await loadOverrides()
+    } catch (error) {
+      console.error(error)
+      toast.error(error instanceof Error ? error.message : "Unable to resolve conflicts.")
+    }
+  }, [
+    conflicts,
+    conflictAction,
+    conflictRescheduleDate,
+    conflictRescheduleTime,
+    conflictStaffId,
+    loadOverrides,
+  ])
 
 
   return (
@@ -1137,6 +1240,91 @@ export default function RosterPage() {
               Clear override
             </Button>
             <Button onClick={submitOverride}>Save override</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={conflictsOpen} onOpenChange={setConflictsOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Resolve appointment conflicts</DialogTitle>
+            <DialogDescription>
+              The shift change overlaps existing appointments. Choose how to handle them.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-md border p-3 text-sm text-muted-foreground">
+              {conflicts.length} appointment{conflicts.length === 1 ? "" : "s"} in conflict.
+            </div>
+            <div className="space-y-2">
+              {conflicts.map((item) => (
+                <div key={item.id} className="rounded-md border p-3 text-xs">
+                  <div className="text-sm font-medium">
+                    {item.serviceName ?? "Service"}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {item.customerName || item.customerEmail || "Customer"} •{" "}
+                    {formatDateForDisplay(item.startAt, settings.dateFormat)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">Action</Label>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={conflictAction}
+                onChange={(event) =>
+                  setConflictAction(event.target.value as "cancel" | "reassign" | "reschedule")
+                }
+              >
+                <option value="cancel">Cancel appointments</option>
+                <option value="reassign">Reassign to another staff</option>
+                <option value="reschedule">Reschedule to another time</option>
+              </select>
+            </div>
+            {conflictAction === "reassign" ? (
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Reassign staff</Label>
+                <select
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={conflictStaffId}
+                  onChange={(event) => setConflictStaffId(event.target.value)}
+                >
+                  <option value="">Select staff</option>
+                  {staff.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.name?.trim() || member.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+            {conflictAction === "reschedule" ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">New date</Label>
+                  <Input
+                    type="date"
+                    value={conflictRescheduleDate}
+                    onChange={(event) => setConflictRescheduleDate(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">New time</Label>
+                  <Input
+                    type="time"
+                    value={conflictRescheduleTime}
+                    onChange={(event) => setConflictRescheduleTime(event.target.value)}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={() => setConflictsOpen(false)}>
+              Close
+            </Button>
+            <Button onClick={resolveConflicts}>Apply resolution</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

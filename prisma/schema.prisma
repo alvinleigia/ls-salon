@@ -50,6 +50,15 @@ enum ServiceType {
   PACKAGE
 }
 
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
+  NO_SHOW
+}
+
 enum StaffDocumentType {
   ADDRESS
   ID
@@ -97,6 +106,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   eligibleServices StaffServiceEligibility[]
   staffProfile  StaffProfile?
+  appointments  Appointment[] @relation("CustomerAppointments")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -128,12 +138,35 @@ model Service {
   packageItems    ServicePackageItem[] @relation("PackageItems")
   includedIn      ServicePackageItem[] @relation("PackageItemService")
   eligibleStaff   StaffServiceEligibility[]
+  appointments    Appointment[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
   @@index([status])
   @@index([categoryId])
   @@index([createdAt])
+}
+
+model Appointment {
+  id             String            @id @default(cuid())
+  staffProfileId String
+  customerId     String
+  serviceId      String
+  startAt        DateTime
+  endAt          DateTime
+  status         AppointmentStatus @default(SCHEDULED)
+  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  customer       User         @relation("CustomerAppointments", fields: [customerId], references: [id], onDelete: Restrict)
+  service        Service      @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([staffProfileId])
+  @@index([customerId])
+  @@index([serviceId])
+  @@index([startAt])
+  @@index([endAt])
+  @@index([status])
 }
 
 model ServicePackageItem {
@@ -226,10 +259,11 @@ model StaffProfile {
   id                 String   @id @default(cuid())
   userId             String   @unique
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointments       Appointment[]
   certifications     StaffCertification[]
   documents          StaffDocument[]
+  scheduleAssignments StaffScheduleAssignment[]
   shiftOverrides     StaffShiftOverride[]
-  shiftSchedule      ShiftSchedule?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
@@ -293,14 +327,13 @@ model ShiftTemplateBreak {
 model ShiftSchedule {
   id             String   @id @default(cuid())
   name           String?
-  staffProfileId String?  @unique
   isDefault      Boolean  @default(false)
   startDate      DateTime @db.Date
   weekOffDay1    Weekday
   weekOffDay2    Weekday?
   weekOff2Weeks  Int[]
   blocks         ShiftScheduleBlock[]
-  staffProfile   StaffProfile? @relation(fields: [staffProfileId], references: [id], onDelete: SetNull)
+  assignments    StaffScheduleAssignment[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -318,6 +351,23 @@ model ShiftScheduleBlock {
 
   @@index([scheduleId])
   @@index([templateId])
+}
+
+model StaffScheduleAssignment {
+  id             String   @id @default(cuid())
+  staffProfileId String
+  scheduleId     String
+  startDate      DateTime @db.Date
+  endDate        DateTime? @db.Date
+  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  schedule       ShiftSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([staffProfileId])
+  @@index([scheduleId])
+  @@index([startDate])
+  @@index([endDate])
 }
 
 model StaffShiftOverride {

@@ -27,6 +27,19 @@ export async function PATCH(
   }
 
   const data = parsed.data
+  const today = new Date().toISOString().slice(0, 10)
+  if (data.startDate < today) {
+    return NextResponse.json(
+      { error: "Schedule start date cannot be in the past." },
+      { status: 400 }
+    )
+  }
+  if (data.assignmentStartDate && data.assignmentStartDate < today) {
+    return NextResponse.json(
+      { error: "Assignment start date cannot be in the past." },
+      { status: 400 }
+    )
+  }
   const weekOff2Weeks =
     data.weekOffDay2 && (!data.weekOff2Weeks || !data.weekOff2Weeks.length)
       ? [1, 2, 3, 4, 5]
@@ -40,7 +53,6 @@ export async function PATCH(
         where: { id },
         data: {
           name: data.name?.trim() || null,
-          staffProfileId: null,
           isDefault: true,
           startDate: new Date(data.startDate),
           weekOffDay1: data.weekOffDay1,
@@ -61,44 +73,73 @@ export async function PATCH(
         })
       }
 
+      await tx.staffScheduleAssignment.deleteMany({ where: { scheduleId: id } })
+
       return updated
     })
   } else {
-    if (data.staffIds.length !== 1) {
+    const staffIds = Array.from(new Set(data.staffIds.map((value) => value.trim())))
+    if (!staffIds.length) {
       return NextResponse.json(
-        { error: "Select exactly one staff member when editing a schedule." },
+        { error: "Select at least one staff member." },
         { status: 400 }
       )
     }
-    let staffProfile = await prisma.staffProfile.findUnique({
-      where: { userId: data.staffIds[0] },
-      select: { id: true },
+
+    const staffProfiles = await prisma.staffProfile.findMany({
+      where: { userId: { in: staffIds } },
+      select: { id: true, userId: true },
     })
 
-    if (!staffProfile) {
-      const user = await prisma.user.findUnique({
-        where: { id: data.staffIds[0] },
-        select: { role: true },
+    const staffProfilesMap = new Map(staffProfiles.map((profile) => [profile.userId, profile]))
+    const missingStaffIds = staffIds.filter((staffId) => !staffProfilesMap.has(staffId))
+
+    if (missingStaffIds.length) {
+      const staffUsers = await prisma.user.findMany({
+        where: { id: { in: missingStaffIds }, role: "STAFF" },
+        select: { id: true },
       })
-      if (user?.role === "STAFF") {
-        staffProfile = await prisma.staffProfile.create({
-          data: { userId: data.staffIds[0] },
-          select: { id: true },
-        })
+      if (staffUsers.length) {
+        const createdProfiles = await Promise.all(
+          staffUsers.map((user) =>
+            prisma.staffProfile.create({
+              data: { userId: user.id },
+              select: { id: true, userId: true },
+            })
+          )
+        )
+        for (const profile of createdProfiles) {
+          staffProfilesMap.set(profile.userId, profile)
+        }
       }
     }
 
-    if (!staffProfile) {
+    const finalStaffProfiles = staffIds
+      .map((staffId) => staffProfilesMap.get(staffId))
+      .filter(Boolean) as { id: string; userId: string }[]
+
+    if (!finalStaffProfiles.length) {
       return NextResponse.json({ error: "Staff profile not found." }, { status: 404 })
     }
 
-    const existing = await prisma.shiftSchedule.findUnique({
-      where: { staffProfileId: staffProfile.id },
-      select: { id: true },
+    const assignmentStart = data.assignmentStartDate
+      ? new Date(data.assignmentStartDate)
+      : new Date(data.startDate)
+    const assignmentEnd = data.assignmentEndDate ? new Date(data.assignmentEndDate) : null
+
+    const existingAssignments = await prisma.staffScheduleAssignment.findMany({
+      where: {
+        staffProfileId: { in: finalStaffProfiles.map((profile) => profile.id) },
+        scheduleId: { not: id },
+        ...(assignmentEnd ? { startDate: { lte: assignmentEnd } } : {}),
+        OR: [{ endDate: null }, { endDate: { gte: assignmentStart } }],
+      },
+      select: { staffProfileId: true },
     })
-    if (existing && existing.id !== id) {
+
+    if (existingAssignments.length) {
       return NextResponse.json(
-        { error: "Staff already has a schedule assigned." },
+        { error: "Selected staff already have schedules assigned in this range." },
         { status: 409 }
       )
     }
@@ -108,7 +149,6 @@ export async function PATCH(
         where: { id },
         data: {
           name: data.name?.trim() || null,
-          staffProfileId: staffProfile.id,
           isDefault: false,
           startDate: new Date(data.startDate),
           weekOffDay1: data.weekOffDay1,
@@ -129,6 +169,16 @@ export async function PATCH(
         })
       }
 
+      await tx.staffScheduleAssignment.deleteMany({ where: { scheduleId: id } })
+      await tx.staffScheduleAssignment.createMany({
+        data: finalStaffProfiles.map((profile) => ({
+          staffProfileId: profile.id,
+          scheduleId: id,
+          startDate: assignmentStart,
+          endDate: assignmentEnd,
+        })),
+      })
+
       return updated
     })
   }
@@ -140,7 +190,9 @@ export async function PATCH(
         orderBy: { sortOrder: "asc" },
         include: { template: { select: { id: true, name: true } } },
       },
-      staffProfile: { select: { user: { select: { id: true, name: true, email: true } } } },
+      assignments: {
+        include: { staffProfile: { select: { user: { select: { id: true, name: true, email: true } } } } },
+      },
     },
   })
 
