@@ -444,3 +444,25 @@ export const shiftScheduleSchema = z
   })
 
 export type ShiftScheduleInput = z.infer<typeof shiftScheduleSchema>
+
+export const shiftOverrideSchema = z
+  .object({
+    staffId: z.string().trim().min(1),
+    templateId: z.string().trim().min(1).optional().or(z.literal("")),
+    isUnavailable: z.boolean().optional().default(false),
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    skipWeekOff: z.boolean().optional().default(true),
+    skipHolidays: z.boolean().optional().default(true),
+  })
+  .superRefine((values, ctx) => {
+    if (!values.isUnavailable && !values.templateId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Select a shift template or mark as unavailable.",
+        path: ["templateId"],
+      })
+    }
+  })
+
+export type ShiftOverrideInput = z.infer<typeof shiftOverrideSchema>

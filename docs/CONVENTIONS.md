@@ -90,6 +90,7 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Repeat day counts skip week off dates; shift blocks loop in order indefinitely until an explicit end date is added.
 - A single global default shift schedule can be marked and applies to staff without explicit schedules.
 - Roster displays only shift schedules; if no staff schedule and no default schedule, show empty.
+- Roster overrides apply shift templates or mark a date range unavailable for a staff member (skip holidays/week off optional).
 - Shifts module lives under `/shifts` with admin/manager access and uses standard list params/response.
 - Shift schedules live under `/shifts/schedules` with admin/manager access.
 - Shift templates store a single shift start/end with optional breaks and are reusable across staff assignments.
