@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { shiftScheduleSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
@@ -117,34 +118,44 @@ export async function POST(request: Request) {
   }
 
   if (data.isDefault) {
-    await prisma.shiftSchedule.updateMany({ data: { isDefault: false } })
-    const schedule = await prisma.shiftSchedule.create({
-      data: {
-        name: data.name?.trim() || null,
-        staffProfileId: null,
-        isDefault: true,
-        startDate: new Date(data.startDate),
-        weekOffDay1: data.weekOffDay1,
-        weekOffDay2: data.weekOffDay2 ? data.weekOffDay2 : null,
-        weekOff2Weeks,
-        blocks: {
-          create: data.blocks.map((block, index) => ({
-            templateId: block.templateId,
-            repeatDays: block.repeatDays,
-            sortOrder: block.sortOrder ?? index,
-          })),
+    try {
+      await prisma.shiftSchedule.updateMany({ data: { isDefault: false } })
+      const schedule = await prisma.shiftSchedule.create({
+        data: {
+          name: data.name?.trim() || null,
+          staffProfileId: null,
+          isDefault: true,
+          startDate: new Date(data.startDate),
+          weekOffDay1: data.weekOffDay1,
+          weekOffDay2: data.weekOffDay2 ? data.weekOffDay2 : null,
+          weekOff2Weeks,
+          blocks: {
+            create: data.blocks.map((block, index) => ({
+              templateId: block.templateId,
+              repeatDays: block.repeatDays,
+              sortOrder: block.sortOrder ?? index,
+            })),
+          },
         },
-      },
-      include: {
-        blocks: {
-          orderBy: { sortOrder: "asc" },
-          include: { template: { select: { id: true, name: true } } },
+        include: {
+          blocks: {
+            orderBy: { sortOrder: "asc" },
+            include: { template: { select: { id: true, name: true } } },
+          },
+          staffProfile: { select: { user: { select: { id: true, name: true, email: true } } } },
         },
-        staffProfile: { select: { user: { select: { id: true, name: true, email: true } } } },
-      },
-    })
+      })
 
-    return NextResponse.json({ schedule })
+      return NextResponse.json({ schedule })
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return NextResponse.json(
+          { error: "A default schedule already exists." },
+          { status: 409 }
+        )
+      }
+      throw error
+    }
   }
 
   const staffProfiles = await prisma.staffProfile.findMany({

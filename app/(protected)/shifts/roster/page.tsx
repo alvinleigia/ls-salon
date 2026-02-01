@@ -249,7 +249,7 @@ export default function RosterPage() {
       }))
     } catch (error) {
       console.error(error)
-      toast.error("Unable to load staff assignments.")
+      toast.error("Unable to load staff schedule.")
     }
   }, [])
 

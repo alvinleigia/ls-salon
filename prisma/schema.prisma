@@ -228,7 +228,6 @@ model StaffProfile {
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   certifications     StaffCertification[]
   documents          StaffDocument[]
-  shiftAssignments   StaffShiftAssignment[]
   shiftOverrides     StaffShiftOverride[]
   shiftSchedule      ShiftSchedule?
   createdAt          DateTime @default(now())
@@ -272,7 +271,6 @@ model ShiftTemplate {
   endTime     String
   breaks      ShiftTemplateBreak[]
   schedules   ShiftScheduleBlock[]
-  assignments StaffShiftAssignment[]
   overrides   StaffShiftOverride[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -319,21 +317,6 @@ model ShiftScheduleBlock {
   template   ShiftTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
 
   @@index([scheduleId])
-  @@index([templateId])
-}
-
-model StaffShiftAssignment {
-  id             String   @id @default(cuid())
-  staffProfileId String
-  day            Weekday
-  templateId     String
-  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
-  template       ShiftTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  @@unique([staffProfileId, day])
-  @@index([staffProfileId])
   @@index([templateId])
 }
 

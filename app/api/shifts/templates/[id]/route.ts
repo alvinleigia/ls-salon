@@ -73,12 +73,13 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const assignments = await prisma.staffShiftAssignment.count({
-    where: { templateId: id },
-  })
-  if (assignments > 0) {
+  const [scheduleBlocks, overrides] = await Promise.all([
+    prisma.shiftScheduleBlock.count({ where: { templateId: id } }),
+    prisma.staffShiftOverride.count({ where: { templateId: id } }),
+  ])
+  if (scheduleBlocks > 0 || overrides > 0) {
     return NextResponse.json(
-      { error: "Template is assigned to staff and cannot be deleted." },
+      { error: "Template is in use and cannot be deleted." },
       { status: 409 }
     )
   }

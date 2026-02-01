@@ -13,50 +13,6 @@ import { toISODate } from "@/lib/date"
 
 type ServiceOption = { id: string; name: string }
 
-type Weekday =
-  | "MONDAY"
-  | "TUESDAY"
-  | "WEDNESDAY"
-  | "THURSDAY"
-  | "FRIDAY"
-  | "SATURDAY"
-  | "SUNDAY"
-
-const WEEKDAYS: { value: Weekday; label: string }[] = [
-  { value: "MONDAY", label: "Monday" },
-  { value: "TUESDAY", label: "Tuesday" },
-  { value: "WEDNESDAY", label: "Wednesday" },
-  { value: "THURSDAY", label: "Thursday" },
-  { value: "FRIDAY", label: "Friday" },
-  { value: "SATURDAY", label: "Saturday" },
-  { value: "SUNDAY", label: "Sunday" },
-]
-
-type ShiftTemplateBreak = {
-  id?: string
-  startTime: string
-  endTime: string
-  sortOrder?: number
-}
-
-type ShiftTemplate = {
-  id: string
-  name: string
-  description?: string | null
-  color?: string | null
-  isActive: boolean
-  startTime: string
-  endTime: string
-  breaks: ShiftTemplateBreak[]
-}
-
-type StaffShiftAssignment = {
-  id?: string
-  day: Weekday
-  templateId: string
-  template?: { id: string; name: string; color?: string | null }
-}
-
 type StaffUser = {
   id: string
   name: string | null
@@ -79,7 +35,6 @@ type StaffUser = {
       validFrom: string | null
       validTo: string | null
     }[]
-    shiftAssignments?: StaffShiftAssignment[]
   } | null
 }
 
@@ -99,31 +54,6 @@ type StaffProfileForm = {
     validFrom: string
     validTo: string
   }[]
-  shiftAssignments: {
-    day: Weekday
-    templateId: string
-  }[]
-}
-
-const normalizeAssignments = (
-  assignments?: StaffShiftAssignment[]
-): StaffProfileForm["shiftAssignments"] => {
-  return WEEKDAYS.map((day) => {
-    const match = assignments?.find((assignment) => assignment.day === day.value)
-    return {
-      day: day.value,
-      templateId: match?.templateId ?? "",
-    }
-  })
-}
-
-const summarizeTemplate = (template?: ShiftTemplate) => {
-  if (!template) return ""
-  const breaks =
-    template.breaks?.length > 0
-      ? template.breaks.map((period) => `${period.startTime}-${period.endTime}`).join(" - ")
-      : "No breaks"
-  return `Shift ${template.startTime}-${template.endTime} - ${breaks}`
 }
 
 export default function StaffProfilePage() {
@@ -139,33 +69,24 @@ export default function StaffProfilePage() {
   const [serviceOptions, setServiceOptions] = React.useState<ServiceOption[]>([])
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [query, setQuery] = React.useState("")
-  const [templates, setTemplates] = React.useState<ShiftTemplate[]>([])
-  const [templatesLoading, setTemplatesLoading] = React.useState(true)
   const [profile, setProfile] = React.useState<StaffProfileForm>({
     certifications: [],
     documents: [],
-    shiftAssignments: normalizeAssignments(),
   })
-
-  const templateMap = React.useMemo(() => {
-    return new Map(templates.map((template) => [template.id, template]))
-  }, [templates])
 
   React.useEffect(() => {
     if (!params.id) return
     const load = async () => {
       setLoading(true)
-      const [userRes, servicesRes, templatesRes] = await Promise.all([
+      const [userRes, servicesRes] = await Promise.all([
         fetch(`/api/users/${params.id}`, { cache: "no-store" }),
         fetch("/api/services?page=1&pageSize=100&sort=name&order=asc&status=ACTIVE", {
           cache: "no-store",
         }),
-        fetch("/api/shifts/templates?includeInactive=true", { cache: "no-store" }),
       ])
 
       if (!userRes.ok) {
         toast.error("Unable to load staff profile.")
-        setTemplatesLoading(false)
         setLoading(false)
         return
       }
@@ -200,7 +121,6 @@ export default function StaffProfilePage() {
               ? toISODate(doc.validTo)
               : "",
           })) ?? [],
-        shiftAssignments: normalizeAssignments(userRecord?.staffProfile?.shiftAssignments),
       })
 
       if (servicesRes.ok) {
@@ -212,13 +132,6 @@ export default function StaffProfilePage() {
         setServiceOptions([])
       }
 
-      if (templatesRes.ok) {
-        const data = (await templatesRes.json()) as { items?: ShiftTemplate[] }
-        setTemplates(data.items ?? [])
-      } else {
-        setTemplates([])
-      }
-      setTemplatesLoading(false)
       setLoading(false)
     }
 
@@ -229,15 +142,6 @@ export default function StaffProfilePage() {
     setSelectedIds((prev) =>
       checked ? [...prev, serviceId] : prev.filter((id) => id !== serviceId)
     )
-  }
-
-  const updateAssignment = (day: Weekday, templateId: string) => {
-    setProfile((prev) => ({
-      ...prev,
-      shiftAssignments: prev.shiftAssignments.map((assignment) =>
-        assignment.day === day ? { ...assignment, templateId } : assignment
-      ),
-    }))
   }
 
   const save = async () => {
@@ -257,12 +161,6 @@ export default function StaffProfilePage() {
             validFrom: doc.validFrom,
             validTo: doc.validTo,
           })),
-          shiftAssignments: profile.shiftAssignments
-            .filter((assignment) => assignment.templateId)
-            .map((assignment) => ({
-              day: assignment.day,
-              templateId: assignment.templateId,
-            })),
           certifications: profile.certifications.map((cert) => ({
             id: cert.id,
             title: cert.title,
@@ -369,72 +267,6 @@ export default function StaffProfilePage() {
             )}
           </div>
         </div>
-      </div>
-
-      <div className="rounded-xl border bg-card p-6">
-        <div className="space-y-2">
-          <div className="text-lg font-semibold">Shift assignments</div>
-          <p className="text-sm text-muted-foreground">
-            Assign a shift template to each weekday. Leave empty to use global hours.
-          </p>
-        </div>
-        {templatesLoading ? (
-          <p className="mt-4 text-sm text-muted-foreground">Loading templates...</p>
-        ) : templates.length ? (
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            {profile.shiftAssignments.map((assignment) => {
-              const template = assignment.templateId
-                ? templateMap.get(assignment.templateId)
-                : undefined
-              return (
-                <div key={assignment.day} className="rounded-lg border p-4">
-                  <div className="text-sm font-medium">
-                    {WEEKDAYS.find((day) => day.value === assignment.day)?.label}
-                  </div>
-                  <div className="mt-2 space-y-2">
-                    <select
-                      className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                      value={assignment.templateId}
-                      onChange={(event) =>
-                        updateAssignment(assignment.day, event.target.value)
-                      }
-                    >
-                      <option value="">Use global hours</option>
-                      {templates.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                          {item.isActive ? "" : " (inactive)"}
-                        </option>
-                      ))}
-                    </select>
-                    {template ? (
-                      <div className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
-                        <div className="flex items-center gap-2 text-xs font-medium text-foreground">
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ backgroundColor: template.color ?? "#64748b" }}
-                          />
-                          {template.name}
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {summarizeTemplate(template)}
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        No template assigned.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        ) : (
-          <p className="mt-4 text-sm text-muted-foreground">
-            No shift templates available. Create one in Settings to assign shifts.
-          </p>
-        )}
       </div>
 
       <div className="rounded-xl border bg-card p-6">

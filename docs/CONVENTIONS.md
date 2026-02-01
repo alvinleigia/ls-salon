@@ -93,7 +93,7 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Roster overrides apply shift templates or mark a date range unavailable for a staff member (skip holidays/week off optional).
 - Shifts module lives under `/shifts` with admin/manager access and uses standard list params/response.
 - Shift schedules live under `/shifts/schedules` with admin/manager access.
-- Shift templates store a single shift start/end with optional breaks and are reusable across staff assignments.
+- Shift templates store a single shift start/end with optional breaks and are reusable across schedules/overrides.
 - Shift template deletion is blocked when assigned to staff (409 response).
 - Roster UI lives under `/shifts/roster` and uses Syncfusion Scheduler (month view).
 - Scheduler hides non-business hours with `showNonBusiness: false` and business hour bounds.

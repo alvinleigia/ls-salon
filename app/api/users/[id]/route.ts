@@ -141,15 +141,6 @@ export async function PATCH(
                 validTo: true,
               },
             },
-            shiftAssignments: {
-              select: {
-                id: true,
-                day: true,
-                templateId: true,
-                template: { select: { id: true, name: true, color: true } },
-              },
-              orderBy: { day: "asc" },
-            },
             shiftSchedule: {
               select: {
                 id: true,
@@ -220,21 +211,6 @@ export async function PATCH(
                 validTo: doc.validTo
                   ? new Date(doc.validTo)
                   : null,
-              })),
-            })
-          }
-        }
-
-        if (staffProfileInput.shiftAssignments) {
-          await tx.staffShiftAssignment.deleteMany({
-            where: { staffProfileId: profile.id },
-          })
-          if (staffProfileInput.shiftAssignments.length) {
-            await tx.staffShiftAssignment.createMany({
-              data: staffProfileInput.shiftAssignments.map((assignment) => ({
-                staffProfileId: profile.id,
-                day: assignment.day,
-                templateId: assignment.templateId,
               })),
             })
           }
@@ -339,15 +315,6 @@ export async function GET(
               validFrom: true,
               validTo: true,
             },
-          },
-          shiftAssignments: {
-            select: {
-              id: true,
-              day: true,
-              templateId: true,
-              template: { select: { id: true, name: true, color: true } },
-            },
-            orderBy: { day: "asc" },
           },
           shiftSchedule: {
             select: {

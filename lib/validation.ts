@@ -103,15 +103,6 @@ export const updateUserSchema = z.object({
           })
         )
         .optional(),
-      shiftAssignments: z
-        .array(
-          z.object({
-            id: z.string().optional(),
-            day: weekdaySchema,
-            templateId: z.string().trim().min(1),
-          })
-        )
-        .optional(),
       certifications: z
         .array(
           z.object({
@@ -126,22 +117,6 @@ export const updateUserSchema = z.object({
     })
     .optional(),
 })
-  .superRefine((values, ctx) => {
-    const assignments = values.staffProfile?.shiftAssignments
-    if (!assignments) return
-    const byDay = new Set<string>()
-    assignments.forEach((assignment, index) => {
-      const key = assignment.day
-      if (byDay.has(key)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Duplicate shift assignment for the same day.",
-          path: ["staffProfile", "shiftAssignments", index, "day"],
-        })
-      }
-      byDay.add(key)
-    })
-  })
 
 export const inviteUserSchema = z.object({
   email: z.string().trim().email(),
