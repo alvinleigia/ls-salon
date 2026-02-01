@@ -54,7 +54,7 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Store working hours in settings with day-based periods (WORK/BREAK) and allow multiple breaks.
 - Support special date overrides in settings (date-specific periods override weekly hours).
 - Validate working hours/overrides: start < end and no overlapping periods.
-- **Date storage:** persist all dates in ISO `YYYY-MM-DD` format for API + DB.
+- **Date storage:** persist date-only values as Postgres `DATE` (Prisma `DateTime @db.Date`) and use ISO `YYYY-MM-DD` in APIs.
 - **Date display:** format dates for UI using `settings.dateFormat` (use `lib/date.ts` helpers).
 - Use settings for formatting (no hard-coded currency/locale).
 - Settings API is dynamic (no caching).

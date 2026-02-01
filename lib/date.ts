@@ -10,6 +10,20 @@ export const toISODateLocal = (value: Date) => {
   return `${year}-${month}-${day}`
 }
 
+export const parseISODate = (value?: string | Date | null) => {
+  if (!value) return null
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-").map(Number)
+    const parsed = new Date(year, (month ?? 1) - 1, day ?? 1)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
 export const toISODate = (value: string | Date) => {
   if (!value) return ""
   if (value instanceof Date) {
@@ -23,9 +37,9 @@ export const toISODate = (value: string | Date) => {
     const [, day, month, year] = match
     return `${year}-${month}-${day}`
   }
-  const parsed = new Date(value)
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString().slice(0, 10)
+  const parsed = parseISODate(value)
+  if (parsed) {
+    return toISODateLocal(parsed)
   }
   return value
 }
@@ -35,8 +49,8 @@ export const formatDateForDisplay = (
   format = DEFAULT_DATE_FORMAT
 ) => {
   if (!value) return "-"
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) {
+  const date = parseISODate(value)
+  if (!date) {
     return typeof value === "string" ? value : "-"
   }
   const tokens: Record<string, string> = {

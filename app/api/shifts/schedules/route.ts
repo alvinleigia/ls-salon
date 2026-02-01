@@ -46,8 +46,8 @@ export async function GET(request: Request) {
 
   if (startDate) {
     where.startDate = {
-      gte: new Date(`${startDate}T00:00:00.000Z`),
-      lte: new Date(`${startDate}T23:59:59.999Z`),
+      gte: new Date(startDate),
+      lte: new Date(startDate),
     }
   }
 
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
         name: data.name?.trim() || null,
         staffProfileId: null,
         isDefault: true,
-        startDate: new Date(`${data.startDate}T00:00:00.000Z`),
+        startDate: new Date(data.startDate),
         weekOffDay1: data.weekOffDay1,
         weekOffDay2: data.weekOffDay2 ? data.weekOffDay2 : null,
         weekOff2Weeks,
@@ -201,7 +201,7 @@ export async function POST(request: Request) {
     name: data.name?.trim() || null,
     staffProfileId: profile.id,
     isDefault: false,
-    startDate: new Date(`${data.startDate}T00:00:00.000Z`),
+    startDate: new Date(data.startDate),
     weekOffDay1: data.weekOffDay1,
     weekOffDay2: data.weekOffDay2 ? data.weekOffDay2 : null,
     weekOff2Weeks,

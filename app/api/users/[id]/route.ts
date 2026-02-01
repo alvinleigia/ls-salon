@@ -215,10 +215,10 @@ export async function PATCH(
                 number: doc.number || null,
                 imageUrl: doc.imageUrl,
                 validFrom: doc.validFrom
-                  ? new Date(`${doc.validFrom}T00:00:00.000Z`)
+                  ? new Date(doc.validFrom)
                   : null,
                 validTo: doc.validTo
-                  ? new Date(`${doc.validTo}T00:00:00.000Z`)
+                  ? new Date(doc.validTo)
                   : null,
               })),
             })
@@ -251,10 +251,10 @@ export async function PATCH(
                 title: cert.title,
                 issuer: cert.issuer || null,
                 issuedAt: cert.issuedAt
-                  ? new Date(`${cert.issuedAt}T00:00:00.000Z`)
+                  ? new Date(cert.issuedAt)
                   : null,
                 expiresAt: cert.expiresAt
-                  ? new Date(`${cert.expiresAt}T00:00:00.000Z`)
+                  ? new Date(cert.expiresAt)
                   : null,
               })),
             })

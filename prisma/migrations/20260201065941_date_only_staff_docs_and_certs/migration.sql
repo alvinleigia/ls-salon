@@ -1,0 +1,7 @@
+-- AlterTable
+ALTER TABLE "StaffCertification" ALTER COLUMN "expiresAt" SET DATA TYPE DATE,
+ALTER COLUMN "issuedAt" SET DATA TYPE DATE;
+
+-- AlterTable
+ALTER TABLE "StaffDocument" ALTER COLUMN "validFrom" SET DATA TYPE DATE,
+ALTER COLUMN "validTo" SET DATA TYPE DATE;

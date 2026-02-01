@@ -58,8 +58,8 @@ export async function GET(request: Request) {
     where: {
       ...(staffProfileIds.length ? { staffProfileId: { in: staffProfileIds } } : {}),
       date: {
-        gte: new Date(`${startDate}T00:00:00.000Z`),
-        lte: new Date(`${endDate}T23:59:59.999Z`),
+        gte: new Date(startDate),
+        lte: new Date(endDate),
       },
     },
     select: {
@@ -97,8 +97,8 @@ export async function POST(request: Request) {
   }
 
   const data = parsed.data
-  const start = new Date(`${data.startDate}T00:00:00.000Z`)
-  const end = new Date(`${data.endDate}T00:00:00.000Z`)
+  const start = new Date(data.startDate)
+  const end = new Date(data.endDate)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
     return NextResponse.json({ error: "Invalid date range." }, { status: 400 })
   }
@@ -145,8 +145,8 @@ export async function POST(request: Request) {
         where: {
           isOpen: false,
           date: {
-            gte: new Date(`${data.startDate}T00:00:00.000Z`),
-            lte: new Date(`${data.endDate}T23:59:59.999Z`),
+            gte: new Date(data.startDate),
+            lte: new Date(data.endDate),
           },
         },
         select: { date: true },
@@ -227,8 +227,8 @@ export async function DELETE(request: Request) {
     )
   }
 
-  const start = new Date(`${startDate}T00:00:00.000Z`)
-  const end = new Date(`${endDate}T23:59:59.999Z`)
+  const start = new Date(startDate)
+  const end = new Date(endDate)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
     return NextResponse.json({ error: "Invalid date range." }, { status: 400 })
   }

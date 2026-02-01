@@ -4,6 +4,7 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { Weekday } from "@prisma/client"
 import { appSettingsSchema } from "@/lib/validation"
+import { toISODate } from "@/lib/date"
 import { canManageUsers, type Role } from "@/lib/permissions"
 
 const SETTINGS_ID = "global"
@@ -89,9 +90,7 @@ const mapSettingsResponse = (settings: {
     overrides:
       overrides?.map((override) => ({
         id: override.id,
-        date: override.date instanceof Date
-          ? override.date.toISOString().slice(0, 10)
-          : String(override.date),
+        date: toISODate(override.date),
         isOpen: override.isOpen,
         periods: override.periods.map((period) => ({
           id: period.id,
@@ -250,7 +249,7 @@ export async function PATCH(request: Request) {
       }
 
       for (const override of overrides) {
-        const overrideDate = new Date(`${override.date}T00:00:00.000Z`)
+        const overrideDate = new Date(override.date)
         const overrideRecord = await tx.appSettingOverride.upsert({
           where: {
             settingId_date: { settingId: SETTINGS_ID, date: overrideDate },

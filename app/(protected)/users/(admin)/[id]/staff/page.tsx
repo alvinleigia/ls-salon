@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { toISODate } from "@/lib/date"
 
 type ServiceOption = { id: string; name: string }
 
@@ -180,10 +181,10 @@ export default function StaffProfilePage() {
             title: cert.title,
             issuer: cert.issuer ?? "",
             issuedAt: cert.issuedAt
-              ? new Date(cert.issuedAt).toISOString().slice(0, 10)
+              ? toISODate(cert.issuedAt)
               : "",
             expiresAt: cert.expiresAt
-              ? new Date(cert.expiresAt).toISOString().slice(0, 10)
+              ? toISODate(cert.expiresAt)
               : "",
           })) ?? [],
         documents:
@@ -193,10 +194,10 @@ export default function StaffProfilePage() {
             number: doc.number ?? "",
             imageUrl: doc.imageUrl,
             validFrom: doc.validFrom
-              ? new Date(doc.validFrom).toISOString().slice(0, 10)
+              ? toISODate(doc.validFrom)
               : "",
             validTo: doc.validTo
-              ? new Date(doc.validTo).toISOString().slice(0, 10)
+              ? toISODate(doc.validTo)
               : "",
           })) ?? [],
         shiftAssignments: normalizeAssignments(userRecord?.staffProfile?.shiftAssignments),

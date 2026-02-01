@@ -35,6 +35,7 @@ import {
 } from "@/components/data-table"
 import { FormField } from "@/components/form-field"
 import { useFormErrors } from "@/hooks/use-form-errors"
+import { formatDateForDisplay, toISODate } from "@/lib/date"
 import type { ListResponse } from "@/types/api"
 
 type Weekday =
@@ -108,9 +109,7 @@ const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
 
 const toDateInputValue = (value?: string | null) => {
   if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  return date.toISOString().slice(0, 10)
+  return toISODate(value)
 }
 
 const summarizeBlocks = (blocks: ShiftScheduleBlock[]) => {
@@ -455,7 +454,7 @@ export default function ShiftSchedulesPage() {
             </div>
             <span className="text-xs text-muted-foreground">
               {row.original.startDate
-                ? new Date(row.original.startDate).toLocaleDateString()
+                ? formatDateForDisplay(row.original.startDate)
                 : "-"}
             </span>
           </div>
@@ -500,7 +499,7 @@ export default function ShiftSchedulesPage() {
         cell: ({ row }) => (
           <span className="text-sm text-muted-foreground">
             {row.original.startDate
-              ? new Date(row.original.startDate).toLocaleDateString()
+              ? formatDateForDisplay(row.original.startDate)
               : "-"}
           </span>
         ),
@@ -558,7 +557,7 @@ export default function ShiftSchedulesPage() {
             <SortIndicator value={column.getIsSorted()} />
           </button>
         ),
-        cell: ({ row }) => new Date(row.original.updatedAt).toLocaleDateString(),
+        cell: ({ row }) => formatDateForDisplay(row.original.updatedAt),
       },
       {
         id: "actions",

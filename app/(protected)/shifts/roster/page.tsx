@@ -13,7 +13,7 @@ import {
 } from "@syncfusion/ej2-react-schedule"
 import { toast } from "sonner"
 
-import { formatDateForDisplay, toISODate } from "@/lib/date"
+import { formatDateForDisplay, parseISODate, toISODate } from "@/lib/date"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -441,8 +441,8 @@ export default function RosterPage() {
       const sortedBlocks = [...schedule.blocks].sort(
         (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
       )
-      const startDate = new Date(schedule.startDate)
-      if (Number.isNaN(startDate.getTime())) {
+      const startDate = parseISODate(schedule.startDate)
+      if (!startDate) {
         return {} as Record<string, string | null>
       }
       const lastDate = dates.length ? dates[dates.length - 1] : null

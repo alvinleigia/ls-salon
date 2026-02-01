@@ -187,7 +187,7 @@ model AppSettingPeriod {
 model AppSettingOverride {
   id        String   @id @default(cuid())
   settingId String
-  date      DateTime
+  date      DateTime @db.Date
   isOpen    Boolean  @default(true)
   setting   AppSetting @relation(fields: [settingId], references: [id], onDelete: Cascade)
   periods   AppSettingOverridePeriod[]
@@ -240,8 +240,8 @@ model StaffCertification {
   staffProfileId String
   title          String
   issuer         String?
-  issuedAt       DateTime?
-  expiresAt      DateTime?
+  issuedAt       DateTime? @db.Date
+  expiresAt      DateTime? @db.Date
   staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
   createdAt      DateTime @default(now())
 
@@ -254,8 +254,8 @@ model StaffDocument {
   type           StaffDocumentType
   number         String?
   imageUrl       String
-  validFrom      DateTime?
-  validTo        DateTime?
+  validFrom      DateTime? @db.Date
+  validTo        DateTime? @db.Date
   staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
   createdAt      DateTime @default(now())
 
@@ -297,7 +297,7 @@ model ShiftSchedule {
   name           String?
   staffProfileId String?  @unique
   isDefault      Boolean  @default(false)
-  startDate      DateTime
+  startDate      DateTime @db.Date
   weekOffDay1    Weekday
   weekOffDay2    Weekday?
   weekOff2Weeks  Int[]
@@ -340,7 +340,7 @@ model StaffShiftAssignment {
 model StaffShiftOverride {
   id             String   @id @default(cuid())
   staffProfileId String
-  date           DateTime
+  date           DateTime @db.Date
   templateId     String?
   staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
   template       ShiftTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
