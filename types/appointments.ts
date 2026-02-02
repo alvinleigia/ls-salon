@@ -1,0 +1,243 @@
+export type AppointmentStatus =
+  | "SCHEDULED"
+  | "CONFIRMED"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "CANCELED"
+  | "NO_SHOW"
+
+export type AppointmentResolveAction = "cancel" | "reassign" | "reschedule"
+export type DiscountType = "NONE" | "PERCENT" | "AMOUNT"
+
+export type AppointmentCustomerOption = {
+  id: string
+  name: string | null
+  email: string
+}
+
+export type AppointmentStaffOption = {
+  id: string
+  name: string | null
+  email: string
+}
+
+export type AppointmentServiceOption = {
+  id: string
+  name: string
+  durationMinutes: number
+  priceCents?: number
+  taxIds?: string[]
+}
+
+export type AppointmentCore = {
+  id: string
+  staffProfileId: string
+  customerId: string
+  serviceId: string
+  startAt: string
+  endAt: string
+  status: AppointmentStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export type AppointmentRow = AppointmentCore & {
+  customer?: {
+    id: string
+    name: string | null
+    email: string
+  } | null
+  service?: {
+    id: string
+    name: string
+    durationMinutes: number
+  } | null
+  staffProfile?: {
+    id: string
+    user?: {
+      id: string
+      name: string | null
+      email: string
+    } | null
+  } | null
+  orderLine?: {
+    id: string
+    order?: {
+      id: string
+      status: AppointmentOrderStatus
+    } | null
+  } | null
+}
+
+export type AppointmentFormValues = {
+  customerId: string
+  serviceId: string
+  staffId: string
+  date: string
+  startTime: string
+  status: AppointmentStatus
+}
+
+export type CreateAppointmentInput = {
+  customerId: string
+  serviceId: string
+  staffId: string
+  startAt: string
+}
+
+export type UpdateAppointmentInput = Partial<CreateAppointmentInput> & {
+  status?: AppointmentStatus
+}
+
+export type AppointmentConflict = {
+  id: string
+  startAt: string
+  endAt: string
+  customerName?: string | null
+  customerEmail?: string | null
+  serviceName?: string | null
+}
+
+export type ResolveAppointmentsInput = {
+  appointmentIds: string[]
+  action: AppointmentResolveAction
+  targetStaffId?: string
+  rescheduleDate?: string
+  rescheduleTime?: string
+}
+
+export type ResolveAppointmentsResult = {
+  updatedCount: number
+}
+
+export type AppointmentAvailabilityResult = {
+  available: boolean
+  reason?: string
+}
+
+export type AppointmentOrderLineForm = {
+  id: string
+  serviceId: string
+  staffId: string
+  quantity: number
+  durationMinutes: number
+  unitPriceCents: number
+  discountType: DiscountType
+  discountValue: number
+  note: string
+}
+
+export type AppointmentOrderCouponForm = {
+  code: string
+}
+
+export type AppointmentOrderTotals = {
+  subtotalCents: number
+  lineDiscountCents: number
+  couponDiscountCents: number
+  taxCents: number
+  totalCents: number
+}
+
+export type AppointmentOrderFormValues = {
+  customerId: string
+  appointmentDate: string
+  appointmentStartTime: string
+  couponInput: string
+  coupons: AppointmentOrderCouponForm[]
+  taxIds: string[]
+  customerNote: string
+  internalNote: string
+  status?: "DRAFT" | "CONFIRMED" | "COMPLETED" | "CANCELED"
+  lines: AppointmentOrderLineForm[]
+}
+
+export type AppointmentOrderStatus = "DRAFT" | "CONFIRMED" | "COMPLETED" | "CANCELED"
+
+export type CouponRow = {
+  id: string
+  code: string
+  name: string | null
+  discountType: DiscountType
+  discountValue: number
+  isActive: boolean
+  validFrom: string | null
+  validTo: string | null
+  maxUses: number | null
+  usedCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type AppointmentOrderLineRow = {
+  id: string
+  sortOrder: number
+  serviceId: string
+  staffProfileId: string
+  quantity: number
+  durationMinutes: number
+  unitPriceCents: number
+  discountType: DiscountType
+  discountValue: number
+  lineSubtotalCents: number
+  lineDiscountCents: number
+  lineTotalCents: number
+  startAt: string
+  endAt: string
+  note: string | null
+  service?: {
+    id: string
+    name: string
+    durationMinutes: number
+    priceCents: number
+  } | null
+  staffProfile?: {
+    id: string
+    user?: {
+      id: string
+      name: string | null
+      email: string
+    } | null
+  } | null
+}
+
+export type AppointmentOrderCouponRow = {
+  id: string
+  code: string
+  discountType: DiscountType
+  discountValue: number
+  discountCents: number
+}
+
+export type AppointmentOrderTaxRow = {
+  id: string
+  taxId: string | null
+  name: string
+  percent: number
+  taxCents: number
+}
+
+export type AppointmentOrderRow = {
+  id: string
+  customerId: string
+  appointmentDate: string
+  appointmentStartAt: string
+  status: AppointmentOrderStatus
+  customerNote: string | null
+  internalNote: string | null
+  subtotalCents: number
+  lineDiscountCents: number
+  couponDiscountCents: number
+  taxCents: number
+  totalCents: number
+  createdAt: string
+  updatedAt: string
+  customer?: {
+    id: string
+    name: string | null
+    email: string
+  } | null
+  lines: AppointmentOrderLineRow[]
+  coupons: AppointmentOrderCouponRow[]
+  taxes: AppointmentOrderTaxRow[]
+}

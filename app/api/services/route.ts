@@ -94,13 +94,23 @@ export async function GET(request: Request) {
         packageItems: {
           select: { itemService: { select: { id: true, name: true } } },
         },
+        defaultTaxes: { select: { taxId: true } },
       },
     }),
   ])
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
-  return NextResponse.json({ items, page, pageSize, total, totalPages })
+  return NextResponse.json({
+    items: items.map((item) => ({
+      ...item,
+      taxIds: item.defaultTaxes.map((tax) => tax.taxId),
+    })),
+    page,
+    pageSize,
+    total,
+    totalPages,
+  })
 }
 
 export async function POST(request: Request) {
@@ -129,6 +139,7 @@ export async function POST(request: Request) {
     status,
     type,
     packageItemIds,
+    taxIds,
   } = parsed.data
 
   if (type === "PACKAGE" && (!packageItemIds || packageItemIds.length === 0)) {
@@ -156,6 +167,11 @@ export async function POST(request: Request) {
               })),
             }
           : undefined,
+      defaultTaxes: taxIds?.length
+        ? {
+            create: [...new Set(taxIds)].map((taxId) => ({ taxId })),
+          }
+        : undefined,
     },
     select: {
       id: true,
@@ -170,8 +186,14 @@ export async function POST(request: Request) {
       packageItems: {
         select: { itemService: { select: { id: true, name: true } } },
       },
+      defaultTaxes: { select: { taxId: true } },
     },
   })
 
-  return NextResponse.json({ item })
+  return NextResponse.json({
+    item: {
+      ...item,
+      taxIds: item.defaultTaxes.map((tax) => tax.taxId),
+    },
+  })
 }

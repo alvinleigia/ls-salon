@@ -59,6 +59,19 @@ enum AppointmentStatus {
   NO_SHOW
 }
 
+enum AppointmentOrderStatus {
+  DRAFT
+  CONFIRMED
+  COMPLETED
+  CANCELED
+}
+
+enum DiscountType {
+  NONE
+  PERCENT
+  AMOUNT
+}
+
 enum StaffDocumentType {
   ADDRESS
   ID
@@ -107,6 +120,7 @@ model User {
   eligibleServices StaffServiceEligibility[]
   staffProfile  StaffProfile?
   appointments  Appointment[] @relation("CustomerAppointments")
+  appointmentOrders AppointmentOrder[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -137,8 +151,10 @@ model Service {
   category        ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   packageItems    ServicePackageItem[] @relation("PackageItems")
   includedIn      ServicePackageItem[] @relation("PackageItemService")
+  defaultTaxes    ServiceTax[]
   eligibleStaff   StaffServiceEligibility[]
   appointments    Appointment[]
+  appointmentOrderLines AppointmentOrderLine[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -152,9 +168,11 @@ model Appointment {
   staffProfileId String
   customerId     String
   serviceId      String
+  orderLineId    String?
   startAt        DateTime
   endAt          DateTime
   status         AppointmentStatus @default(SCHEDULED)
+  orderLine      AppointmentOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
   staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
   customer       User         @relation("CustomerAppointments", fields: [customerId], references: [id], onDelete: Restrict)
   service        Service      @relation(fields: [serviceId], references: [id], onDelete: Restrict)
@@ -164,9 +182,81 @@ model Appointment {
   @@index([staffProfileId])
   @@index([customerId])
   @@index([serviceId])
+  @@index([orderLineId])
   @@index([startAt])
   @@index([endAt])
   @@index([status])
+}
+
+model AppointmentOrder {
+  id                   String   @id @default(cuid())
+  customerId           String
+  appointmentDate      DateTime @db.Date
+  appointmentStartAt   DateTime
+  status               AppointmentOrderStatus @default(DRAFT)
+  customerNote         String?
+  internalNote         String?
+  subtotalCents        Int      @default(0)
+  lineDiscountCents    Int      @default(0)
+  couponDiscountCents  Int      @default(0)
+  taxCents             Int      @default(0)
+  totalCents           Int      @default(0)
+  customer             User     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  lines                AppointmentOrderLine[]
+  coupons              AppointmentOrderCoupon[]
+  taxes                AppointmentOrderTax[]
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([appointmentDate])
+  @@index([appointmentStartAt])
+  @@index([status])
+}
+
+model AppointmentOrderLine {
+  id                String   @id @default(cuid())
+  orderId           String
+  sortOrder         Int      @default(0)
+  serviceId         String
+  staffProfileId    String
+  quantity          Int      @default(1)
+  durationMinutes   Int
+  unitPriceCents    Int
+  discountType      DiscountType @default(NONE)
+  discountValue     Float    @default(0)
+  lineSubtotalCents Int      @default(0)
+  lineDiscountCents Int      @default(0)
+  lineTotalCents    Int      @default(0)
+  startAt           DateTime
+  endAt             DateTime
+  note              String?
+  order             AppointmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  service           Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  staffProfile      StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Restrict)
+  appointments      Appointment[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([serviceId])
+  @@index([staffProfileId])
+  @@index([startAt])
+  @@index([endAt])
+}
+
+model AppointmentOrderCoupon {
+  id            String   @id @default(cuid())
+  orderId        String
+  code          String
+  discountType  DiscountType @default(NONE)
+  discountValue Float    @default(0)
+  discountCents Int      @default(0)
+  order         AppointmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@index([orderId])
+  @@index([code])
 }
 
 model ServicePackageItem {
@@ -192,6 +282,66 @@ model AppSetting {
   updatedAt  DateTime @updatedAt
   workingDays AppSettingDay[]
   overrides  AppSettingOverride[]
+}
+
+model Coupon {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String?
+  discountType  DiscountType @default(NONE)
+  discountValue Float    @default(0)
+  isActive      Boolean  @default(true)
+  validFrom     DateTime? @db.Date
+  validTo       DateTime? @db.Date
+  maxUses       Int?
+  usedCount     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([code])
+}
+
+model Tax {
+  id          String   @id @default(cuid())
+  name        String
+  percent     Float
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  services    ServiceTax[]
+  orders      AppointmentOrderTax[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([name])
+  @@index([isActive])
+  @@index([sortOrder])
+}
+
+model ServiceTax {
+  serviceId   String
+  taxId       String
+  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  tax         Tax      @relation(fields: [taxId], references: [id], onDelete: Restrict)
+  createdAt   DateTime @default(now())
+
+  @@id([serviceId, taxId])
+  @@index([taxId])
+}
+
+model AppointmentOrderTax {
+  id          String   @id @default(cuid())
+  orderId     String
+  taxId       String?
+  name        String
+  percent     Float
+  taxCents    Int      @default(0)
+  order       AppointmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tax         Tax?     @relation(fields: [taxId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([orderId])
+  @@index([taxId])
 }
 
 model AppSettingDay {
@@ -260,6 +410,7 @@ model StaffProfile {
   userId             String   @unique
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   appointments       Appointment[]
+  appointmentOrderLines AppointmentOrderLine[]
   certifications     StaffCertification[]
   documents          StaffDocument[]
   scheduleAssignments StaffScheduleAssignment[]

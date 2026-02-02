@@ -7,6 +7,7 @@ import type {
   ServiceFormValues,
   ServiceOption,
 } from "@/types/services"
+import type { TaxRow } from "@/types/scheduling"
 import {
   serviceStatusOptions,
   serviceTypeOptions,
@@ -18,6 +19,7 @@ type ServiceFormFieldsProps = {
   errors: Record<string, string>
   categories: CategoryOption[]
   serviceOptions: ServiceOption[]
+  taxOptions: TaxRow[]
   packageQuery: string
   onPackageQueryChange: (value: string) => void
   onChange: (next: ServiceFormValues) => void
@@ -29,6 +31,7 @@ export function ServiceFormFields({
   errors,
   categories,
   serviceOptions,
+  taxOptions,
   packageQuery,
   onPackageQueryChange,
   onChange,
@@ -148,6 +151,35 @@ export function ServiceFormFields({
             </option>
           ))}
         </select>
+      </FormField>
+
+      <FormField id={fieldId("service-taxes")} label="Default taxes" error={errors.taxIds}>
+        <div className="max-h-40 space-y-2 overflow-y-auto rounded-md border border-input bg-background p-3 text-sm">
+          {taxOptions.length ? (
+            taxOptions.map((tax) => (
+              <label key={tax.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={values.taxIds.includes(tax.id)}
+                  onChange={(event) => {
+                    const checked = event.target.checked
+                    onChange({
+                      ...values,
+                      taxIds: checked
+                        ? [...new Set([...values.taxIds, tax.id])]
+                        : values.taxIds.filter((id) => id !== tax.id),
+                    })
+                  }}
+                />
+                <span>
+                  {tax.name} ({tax.percent}%){tax.isActive ? "" : " - inactive"}
+                </span>
+              </label>
+            ))
+          ) : (
+            <p className="text-xs text-muted-foreground">No taxes available.</p>
+          )}
+        </div>
       </FormField>
 
       {values.type === "PACKAGE" ? (

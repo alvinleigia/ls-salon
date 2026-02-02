@@ -38,7 +38,7 @@ import {
   DataTableToolbar,
 } from "@/components/data-table"
 import { useFormErrors } from "@/hooks/use-form-errors"
-import type { AppSettingsPayload } from "@/types/scheduling"
+import type { AppSettingsPayload, TaxRow } from "@/types/scheduling"
 import type { ListResponse } from "@/types/api"
 import type {
   CategoryOption,
@@ -65,6 +65,7 @@ export default function ServicesPage() {
   const [services, setServices] = React.useState<ServiceRow[]>([])
   const [categories, setCategories] = React.useState<CategoryOption[]>([])
   const [serviceOptions, setServiceOptions] = React.useState<ServiceOption[]>([])
+  const [taxOptions, setTaxOptions] = React.useState<TaxRow[]>([])
   const [settings, setSettings] = React.useState({
     locale: "en-US",
     currency: "USD",
@@ -206,6 +207,18 @@ export default function ServicesPage() {
     )
   }, [])
 
+  const loadTaxOptions = React.useCallback(async () => {
+    const response = await fetch("/api/settings/taxes?page=1&pageSize=100", {
+      cache: "no-store",
+    })
+    if (!response.ok) {
+      setTaxOptions([])
+      return
+    }
+    const data = (await response.json()) as ListResponse<TaxRow>
+    setTaxOptions(data.items)
+  }, [])
+
   React.useEffect(() => {
     void loadCategories()
   }, [loadCategories])
@@ -221,6 +234,10 @@ export default function ServicesPage() {
   React.useEffect(() => {
     void loadServiceOptions()
   }, [loadServiceOptions])
+
+  React.useEffect(() => {
+    void loadTaxOptions()
+  }, [loadTaxOptions])
 
   React.useEffect(() => {
     setPagination((prev) =>
@@ -274,6 +291,7 @@ export default function ServicesPage() {
         type: newService.type,
         packageItemIds:
           newService.type === "PACKAGE" ? newService.packageItemIds : [],
+        taxIds: newService.taxIds,
       }),
     })
 
@@ -309,6 +327,7 @@ export default function ServicesPage() {
       type: service.type ?? "STANDARD",
       packageItemIds:
         service.packageItems?.map((item) => item.itemService.id) ?? [],
+      taxIds: service.taxIds ?? [],
     })
     setEditPackageQuery("")
     setEditOpen(true)
@@ -330,6 +349,7 @@ export default function ServicesPage() {
         type: editValues.type,
         packageItemIds:
           editValues.type === "PACKAGE" ? editValues.packageItemIds : [],
+        taxIds: editValues.taxIds,
       }),
     })
 
@@ -632,6 +652,7 @@ export default function ServicesPage() {
               errors={createErrors}
               categories={categories}
               serviceOptions={serviceOptions}
+              taxOptions={taxOptions}
               packageQuery={newPackageQuery}
               onPackageQueryChange={setNewPackageQuery}
               onChange={setNewService}
@@ -670,6 +691,7 @@ export default function ServicesPage() {
               errors={editErrors}
               categories={categories}
               serviceOptions={serviceOptions}
+              taxOptions={taxOptions}
               packageQuery={editPackageQuery}
               onPackageQueryChange={setEditPackageQuery}
               onChange={setEditValues}

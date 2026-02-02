@@ -49,7 +49,6 @@ import { canInvite, canManageUsers, type Role } from "@/lib/permissions"
 
 const navItems = [
   { title: "Dashboard", href: "/", icon: LayoutDashboardIcon },
-  { title: "Appointments", href: "/appointments", icon: CalendarClockIcon },
 ]
 
 export function AppSidebar() {
@@ -97,6 +96,50 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              {canManageUsers(role ?? null) ? (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    data-active={pathname.startsWith("/appointments")}
+                  >
+                    <Link href="/appointments" className="flex w-full items-center">
+                      <CalendarClockIcon className="h-4 w-4" />
+                      <span>Appointments</span>
+                      <span
+                        className={`ml-auto h-2 w-2 rounded-full ${
+                          pathname.startsWith("/appointments")
+                            ? "bg-sidebar-primary"
+                            : "bg-transparent"
+                        }`}
+                      />
+                    </Link>
+                  </SidebarMenuButton>
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/appointments"}
+                      >
+                        <Link href="/appointments">
+                          <CalendarClockIcon className="h-4 w-4" />
+                          <span>View</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/appointments/coupons"}
+                      >
+                        <Link href="/appointments/coupons">
+                          <TagIcon className="h-4 w-4" />
+                          <span>Coupons</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  </SidebarMenuSub>
+                </SidebarMenuItem>
+              ) : null}
               {canManageUsers(role ?? null) ? (
                 <SidebarMenuItem>
                   <SidebarMenuButton
@@ -246,20 +289,44 @@ export function AppSidebar() {
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
-                    data-active={pathname === "/settings"}
+                    data-active={pathname.startsWith("/settings")}
                   >
                     <Link href="/settings" className="flex w-full items-center">
                       <SettingsIcon className="h-4 w-4" />
                       <span>Settings</span>
                       <span
                         className={`ml-auto h-2 w-2 rounded-full ${
-                          pathname === "/settings"
+                          pathname.startsWith("/settings")
                             ? "bg-sidebar-primary"
                             : "bg-transparent"
                         }`}
                       />
                     </Link>
                   </SidebarMenuButton>
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/settings"}
+                      >
+                        <Link href="/settings">
+                          <SettingsIcon className="h-4 w-4" />
+                          <span>General</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/settings/taxes"}
+                      >
+                        <Link href="/settings/taxes">
+                          <TagIcon className="h-4 w-4" />
+                          <span>Taxes</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  </SidebarMenuSub>
                 </SidebarMenuItem>
               ) : null}
             </SidebarMenu>

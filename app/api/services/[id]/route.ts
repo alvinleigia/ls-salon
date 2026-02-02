@@ -54,6 +54,14 @@ export async function PATCH(
           : {}),
         ...(data.status ? { status: data.status } : {}),
         ...(data.type ? { type: data.type } : {}),
+        ...(data.taxIds
+          ? {
+              defaultTaxes: {
+                deleteMany: {},
+                create: [...new Set(data.taxIds)].map((taxId) => ({ taxId })),
+              },
+            }
+          : {}),
       },
     })
 
@@ -85,11 +93,19 @@ export async function PATCH(
         packageItems: {
           select: { itemService: { select: { id: true, name: true } } },
         },
+        defaultTaxes: { select: { taxId: true } },
       },
     })
   })
 
-  return NextResponse.json({ item })
+  return NextResponse.json({
+    item: item
+      ? {
+          ...item,
+          taxIds: item.defaultTaxes.map((tax) => tax.taxId),
+        }
+      : null,
+  })
 }
 
 export async function DELETE(

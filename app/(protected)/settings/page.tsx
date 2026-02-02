@@ -63,7 +63,7 @@ export default function SettingsPage() {
     void load()
   }, [])
 
-  const updateField = (key: keyof SettingsForm, value: string) => {
+  const updateField = (key: keyof SettingsForm, value: string | number) => {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 

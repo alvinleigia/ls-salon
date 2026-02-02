@@ -54,3 +54,13 @@ export type AppSettingsPayload = {
   workingHours?: WorkingDay[]
   overrides?: DateOverrideDay[]
 }
+
+export type TaxRow = {
+  id: string
+  name: string
+  percent: number
+  isActive: boolean
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}

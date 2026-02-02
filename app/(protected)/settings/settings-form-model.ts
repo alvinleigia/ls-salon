@@ -7,7 +7,10 @@ import type {
 } from "@/types/scheduling"
 
 export type SettingsForm = Required<
-  Pick<AppSettingsPayload, "locale" | "currency" | "timeZone" | "dateFormat">
+  Pick<
+    AppSettingsPayload,
+    "locale" | "currency" | "timeZone" | "dateFormat"
+  >
 > & {
   workingHours: WorkingDay[]
   overrides: DateOverrideDay[]
@@ -65,4 +68,3 @@ export const normalizeOverrides = (overrides?: DateOverrideDay[]) =>
           ? [{ ...DEFAULT_PERIOD }]
           : [],
   })) ?? []
-

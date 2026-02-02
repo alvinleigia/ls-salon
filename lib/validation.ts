@@ -12,6 +12,14 @@ export const statusSchema = z.enum(["ACTIVE", "SUSPENDED", "INVITED", "ARCHIVED"
 export const serviceCategoryStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
 export const serviceStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
 export const serviceTypeSchema = z.enum(["STANDARD", "PACKAGE"])
+export const appointmentStatusSchema = z.enum([
+  "SCHEDULED",
+  "CONFIRMED",
+  "IN_PROGRESS",
+  "COMPLETED",
+  "CANCELED",
+  "NO_SHOW",
+])
 export const staffDocumentTypeSchema = z.enum(["ADDRESS", "ID", "OTHER"])
 export const weekdaySchema = z.enum([
   "MONDAY",
@@ -163,6 +171,7 @@ export const createServiceSchema = z.object({
   status: serviceStatusSchema.optional(),
   type: serviceTypeSchema.optional(),
   packageItemIds: z.array(z.string().trim().min(1)).optional(),
+  taxIds: z.array(z.string().trim().min(1)).optional().default([]),
 })
 
 export const updateServiceSchema = createServiceSchema.partial()
@@ -293,6 +302,21 @@ export const appSettingsSchema = z
   })
 
 export type AppSettingsInput = z.infer<typeof appSettingsSchema>
+
+export const taxCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  percent: z.coerce.number().min(0).max(100),
+  isActive: z.boolean().optional().default(true),
+  sortOrder: z.coerce.number().int().min(0).max(9999).optional(),
+})
+
+export const taxUpdateSchema = taxCreateSchema.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  { message: "At least one field is required." }
+)
+
+export type TaxCreateInput = z.infer<typeof taxCreateSchema>
+export type TaxUpdateInput = z.infer<typeof taxUpdateSchema>
 
 export const shiftTemplateSchema = z
   .object({
@@ -474,3 +498,118 @@ export const shiftOverrideSchema = z
   })
 
 export type ShiftOverrideInput = z.infer<typeof shiftOverrideSchema>
+
+export const appointmentCreateSchema = z.object({
+  customerId: z.string().trim().min(1),
+  serviceId: z.string().trim().min(1),
+  staffId: z.string().trim().min(1),
+  startAt: z.string().datetime({ offset: true }),
+  status: appointmentStatusSchema.optional(),
+})
+
+export const appointmentUpdateSchema = z
+  .object({
+    customerId: z.string().trim().min(1).optional(),
+    serviceId: z.string().trim().min(1).optional(),
+    staffId: z.string().trim().min(1).optional(),
+    startAt: z.string().datetime({ offset: true }).optional(),
+    status: appointmentStatusSchema.optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required.",
+  })
+
+export const appointmentOrderLineInputSchema = z.object({
+  id: z.string().optional(),
+  serviceId: z.string().trim().min(1),
+  staffId: z.string().trim().min(1),
+  quantity: z.coerce.number().int().min(1).max(20),
+  durationMinutes: z.coerce.number().int().min(5).max(600),
+  unitPriceCents: z.coerce.number().int().min(0).max(100000000),
+  discountType: z.enum(["NONE", "PERCENT", "AMOUNT"]),
+  discountValue: z.coerce.number().min(0).max(1000000),
+  note: z.string().trim().max(500).optional().or(z.literal("")),
+})
+
+export const appointmentOrderCreateSchema = z.object({
+  customerId: z.string().trim().min(1),
+  appointmentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  appointmentStartTime: z.string().regex(/^\d{2}:\d{2}$/),
+  appointmentStartAt: z.string().datetime({ offset: true }),
+  status: z.enum(["DRAFT", "CONFIRMED", "COMPLETED", "CANCELED"]).optional(),
+  customerNote: z.string().trim().max(500).optional().or(z.literal("")),
+  internalNote: z.string().trim().max(2000).optional().or(z.literal("")),
+  coupons: z.array(z.string().trim().min(2).max(40)).optional().default([]),
+  taxIds: z.array(z.string().trim().min(1)).optional().default([]),
+  lines: z.array(appointmentOrderLineInputSchema).min(1),
+})
+
+export const appointmentOrderUpdateSchema = appointmentOrderCreateSchema.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  { message: "At least one field is required." }
+)
+
+export type AppointmentCreateInput = z.infer<typeof appointmentCreateSchema>
+export type AppointmentUpdateInput = z.infer<typeof appointmentUpdateSchema>
+export type AppointmentOrderCreateInput = z.infer<typeof appointmentOrderCreateSchema>
+export type AppointmentOrderUpdateInput = z.infer<typeof appointmentOrderUpdateSchema>
+
+export const couponCreateSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(2)
+    .max(40)
+    .regex(/^[A-Za-z0-9_-]+$/),
+  name: z.string().trim().max(120).optional().or(z.literal("")),
+  discountType: z.enum(["NONE", "PERCENT", "AMOUNT"]),
+  discountValue: z.coerce.number().min(0).max(1000000),
+  isActive: z.boolean().optional().default(true),
+  validFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
+  validTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
+  maxUses: z.coerce.number().int().min(1).max(1000000).optional(),
+})
+
+export const couponUpdateSchema = couponCreateSchema.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  { message: "At least one field is required." }
+)
+
+export type CouponCreateInput = z.infer<typeof couponCreateSchema>
+export type CouponUpdateInput = z.infer<typeof couponUpdateSchema>
+
+export const appointmentResolveSchema = z
+  .object({
+    appointmentIds: z.array(z.string().trim().min(1)).min(1),
+    action: z.enum(["cancel", "reassign", "reschedule"]),
+    targetStaffId: z.string().trim().min(1).optional(),
+    rescheduleDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    rescheduleTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  })
+  .superRefine((values, ctx) => {
+    if (values.action === "reassign" && !values.targetStaffId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Target staff is required.",
+        path: ["targetStaffId"],
+      })
+    }
+    if (values.action === "reschedule") {
+      if (!values.rescheduleDate) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Reschedule date is required.",
+          path: ["rescheduleDate"],
+        })
+      }
+      if (!values.rescheduleTime) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Reschedule time is required.",
+          path: ["rescheduleTime"],
+        })
+      }
+    }
+  })
+
+export type AppointmentResolveInput = z.infer<typeof appointmentResolveSchema>

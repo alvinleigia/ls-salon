@@ -16,4 +16,5 @@ export const defaultServiceFormValues: ServiceFormValues = {
   status: "ACTIVE",
   type: "STANDARD",
   packageItemIds: [],
+  taxIds: [],
 }

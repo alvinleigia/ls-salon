@@ -59,6 +59,7 @@ This is the baseline for new modules (API + UI) in this codebase.
 - **Date display:** format dates for UI using `settings.dateFormat` (use `lib/date.ts` helpers).
 - Use settings for formatting (no hard-coded currency/locale).
 - Settings API is dynamic (no caching).
+- Taxes are managed in `/settings/taxes`; appointment orders can apply multiple selected taxes and pricing must be server-authoritative.
 - When formatting values (currency/locale), ensure memoized columns include formatter dependencies.
 - Large dialogs should have `max-h-[80vh] overflow-y-auto`.
 - For long forms, keep the footer outside the scroll area (scroll only the form body).
@@ -82,6 +83,7 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Invitees list supports status filter (pending/accepted/expired) via `status` query param, defaulting to pending.
 - Service categories module lives under `/services/categories` with admin/manager access.
 - Services module lives under `/services` with admin/manager access and uses standard list params/response.
+- Services can define default taxes (from `/settings/taxes`); booking forms should preselect these taxes and still allow manual overrides.
 - Packages are services with `type=PACKAGE` and must include package items (services).
 - Staff eligibility: default allow all services; if any eligible services are stored, treat as an allow-list.
 - Manage staff eligibility in the staff profile page (not in the general user create/edit form).
@@ -94,6 +96,17 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Roster displays only shift schedules; if no staff schedule and no default schedule, show empty.
 - Roster overrides apply shift templates or mark a date range unavailable for a staff member (skip holidays/week off optional).
 - Shift overrides must not conflict with booked appointments. Require a resolution action (cancel, reassign, or reschedule) before applying changes.
+- Appointment domain contracts live in `types/appointments.ts` (status/action/request/response and row/form shapes).
+- Appointment conflict resolution payloads must use `appointmentResolveSchema` in `lib/validation.ts` for API validation.
+- Appointment booking uses one shared form component/model, opened from both calendar cell click and "New appointment" action.
+- Billing-oriented appointment creation/editing should use dedicated full pages (`/appointments/new`, `/appointments/[id]/edit`) rather than modal-only flows.
+- Appointment order APIs live under `/api/appointments/orders` and persist invoice-style bookings (lines + coupons + totals).
+- Appointment order lines store `startAt/endAt` and link to `Appointment` via `Appointment.orderLineId` when booking is confirmed.
+- Coupons support multiple codes; keep phase-1 rules simple and deterministic (server-authoritative pricing).
+- Coupon definitions are managed in `/appointments/coupons` via `/api/appointments/coupons` (CRUD).
+- Appointment create/update APIs must enforce staff availability against schedules + overrides + week-off/break windows (not only overlap checks).
+- Appointment UI should call `/api/appointments/availability` as a pre-check and show inline slot status before submit.
+- Appointment flows should expose explicit actions for Edit, Reschedule, and Cancel (with confirmation for cancel).
 - Shifts module lives under `/shifts` with admin/manager access and uses standard list params/response.
 - Shift schedules live under `/shifts/schedules` with admin/manager access.
 - Shift templates store a single shift start/end with optional breaks and are reusable across schedules/overrides.

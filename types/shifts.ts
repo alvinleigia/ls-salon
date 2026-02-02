@@ -1,4 +1,5 @@
 import type { Weekday } from "@/types/scheduling"
+export type { AppointmentConflict } from "@/types/appointments"
 
 export type StaffOption = {
   id: string
@@ -114,13 +115,4 @@ export type AvailabilityEvent = {
   templateBreaks?: string[]
   isUnavailable?: boolean
   CategoryColor?: string
-}
-
-export type AppointmentConflict = {
-  id: string
-  startAt: string
-  endAt: string
-  customerName?: string | null
-  customerEmail?: string | null
-  serviceName?: string | null
 }

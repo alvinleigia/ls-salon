@@ -40,6 +40,7 @@ export type ServiceRow = {
   createdAt: string
   category: { id: string; name: string }
   packageItems?: { itemService: ServiceOption }[]
+  taxIds?: string[]
 }
 
 export type ServiceFormValues = {
@@ -51,4 +52,5 @@ export type ServiceFormValues = {
   status: ServiceStatus
   type: ServiceType
   packageItemIds: string[]
+  taxIds: string[]
 }

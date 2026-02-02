@@ -4,6 +4,8 @@ import { AppointmentStatus } from "@prisma/client"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { appointmentResolveSchema } from "@/lib/validation"
+import type { ResolveAppointmentsInput } from "@/types/appointments"
 
 const parseTimeToMinutes = (value: string) => {
   const [hours, minutes] = value.split(":").map((part) => Number(part))
@@ -23,15 +25,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const body = (await request.json()) as {
-    appointmentIds?: string[]
-    action?: "cancel" | "reassign" | "reschedule"
-    targetStaffId?: string
-    rescheduleDate?: string
-    rescheduleTime?: string
+  const payload = await request.json()
+  const parsed = appointmentResolveSchema.safeParse(payload)
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid request.", details: parsed.error.flatten() },
+      { status: 400 }
+    )
   }
 
-  const appointmentIds = body.appointmentIds?.filter(Boolean) ?? []
+  const body: ResolveAppointmentsInput = parsed.data
+  const appointmentIds = body.appointmentIds
   if (!appointmentIds.length || !body.action) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400 })
   }
