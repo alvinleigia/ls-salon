@@ -33,55 +33,22 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   DataTable,
   DataTablePagination,
   DataTableToolbar,
 } from "@/components/data-table"
-import { FormField } from "@/components/form-field"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import { canInvite, type Role } from "@/lib/permissions"
 import type { ListResponse } from "@/types/api"
-
-
-type Gender = "MALE" | "FEMALE" | "NON_BINARY" | "OTHER" | "PREFER_NOT_TO_SAY"
-type UserStatus = "ACTIVE" | "SUSPENDED" | "INVITED" | "ARCHIVED"
-
-type UserRow = {
-  id: string
-  name: string | null
-  email: string
-  phone: string | null
-  image?: string | null
-  dateOfBirth?: string | null
-  gender?: Gender | null
-  status?: UserStatus | null
-  lastLoginAt?: string | null
-  marketingOptIn?: boolean | null
-  addressLine1?: string | null
-  addressLine2?: string | null
-  city?: string | null
-  state?: string | null
-  postalCode?: string | null
-  country?: string | null
-  role: Role
-  createdAt: string
-}
-
-const roleOptions: Role[] = ["ADMIN", "MANAGER", "STAFF", "CUSTOMER"]
-const genderOptions: Gender[] = [
-  "MALE",
-  "FEMALE",
-  "NON_BINARY",
-  "OTHER",
-  "PREFER_NOT_TO_SAY",
-]
-const statusOptions: UserStatus[] = ["ACTIVE", "SUSPENDED", "INVITED", "ARCHIVED"]
-
-const toDateInput = (value?: string | null) =>
-  value ? value.slice(0, 10) : ""
+import type { UserFormValues, UserRow, UserStatus } from "@/types/users"
+import { UserFormFields } from "./user-form-fields"
+import {
+  defaultUserFormValues,
+  roleOptions,
+  statusOptions,
+  toDateInput,
+} from "./user-form-model"
 
 const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
   if (value === "asc") return <ArrowUpIcon className="h-4 w-4" />
@@ -130,43 +97,8 @@ export default function UsersPage() {
   })
   const [pagination, setPagination] = React.useState({ pageIndex: 0, pageSize: 10 })
 
-  const [newUser, setNewUser] = React.useState({
-    name: "",
-    email: "",
-    phone: "",
-    image: "",
-    dateOfBirth: "",
-    gender: "PREFER_NOT_TO_SAY" as Gender,
-    status: "ACTIVE" as UserStatus,
-    marketingOptIn: false,
-    addressLine1: "",
-    addressLine2: "",
-    city: "",
-    state: "",
-    postalCode: "",
-    country: "",
-    role: "CUSTOMER" as Role,
-    password: "",
-  })
-
-  const [editValues, setEditValues] = React.useState({
-    name: "",
-    email: "",
-    phone: "",
-    image: "",
-    dateOfBirth: "",
-    gender: "PREFER_NOT_TO_SAY" as Gender,
-    status: "ACTIVE" as UserStatus,
-    marketingOptIn: false,
-    addressLine1: "",
-    addressLine2: "",
-    city: "",
-    state: "",
-    postalCode: "",
-    country: "",
-    role: "CUSTOMER" as Role,
-    password: "",
-  })
+  const [newUser, setNewUser] = React.useState<UserFormValues>(defaultUserFormValues)
+  const [editValues, setEditValues] = React.useState<UserFormValues>(defaultUserFormValues)
 
   const totalPages = Math.max(1, Math.ceil(totalRows / pagination.pageSize))
 
@@ -303,24 +235,7 @@ export default function UsersPage() {
     }
 
     toast.success("User created.")
-    setNewUser({
-      name: "",
-      email: "",
-      phone: "",
-      image: "",
-      dateOfBirth: "",
-      gender: "PREFER_NOT_TO_SAY",
-      status: "ACTIVE",
-      marketingOptIn: false,
-      addressLine1: "",
-      addressLine2: "",
-      city: "",
-      state: "",
-      postalCode: "",
-      country: "",
-      role: "CUSTOMER",
-      password: "",
-    })
+    setNewUser(defaultUserFormValues)
     setCreating(false)
     setCreateOpen(false)
     await loadUsers()
@@ -540,214 +455,14 @@ export default function UsersPage() {
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto">
-            <div className="grid gap-4 sm:grid-cols-2">
-            <FormField id="create-name" label="Full name" error={createErrors.name}>
-              <Input
-                id="create-name"
-                value={newUser.name}
-                onChange={(event) =>
-                  setNewUser((prev) => ({ ...prev, name: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField id="create-email" label="Email" error={createErrors.email}>
-              <Input
-                id="create-email"
-                type="email"
-                value={newUser.email}
-                onChange={(event) =>
-                  setNewUser((prev) => ({ ...prev, email: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField id="create-phone" label="Mobile" error={createErrors.phone}>
-              <Input
-                id="create-phone"
-                type="tel"
-                value={newUser.phone}
-                onChange={(event) =>
-                  setNewUser((prev) => ({ ...prev, phone: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField
-              id="create-image"
-              label="Profile image URL"
-              error={createErrors.image}
-            >
-              <Input
-                id="create-image"
-                type="url"
-                value={newUser.image}
-                onChange={(event) =>
-                  setNewUser((prev) => ({ ...prev, image: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField
-              id="create-dob"
-              label="Date of birth"
-              error={createErrors.dateOfBirth}
-            >
-              <Input
-                id="create-dob"
-                type="date"
-                value={newUser.dateOfBirth}
-                onChange={(event) =>
-                  setNewUser((prev) => ({
-                    ...prev,
-                    dateOfBirth: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField id="create-gender" label="Gender" error={createErrors.gender}>
-              <select
-                id="create-gender"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={newUser.gender}
-                onChange={(event) =>
-                  setNewUser((prev) => ({
-                    ...prev,
-                    gender: event.target.value as Gender,
-                  }))
-                }
-              >
-                {genderOptions.map((gender) => (
-                  <option key={gender} value={gender}>
-                    {gender.replaceAll("_", " ")}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField id="create-status" label="Status" error={createErrors.status}>
-              <select
-                id="create-status"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={newUser.status}
-                onChange={(event) =>
-                  setNewUser((prev) => ({
-                    ...prev,
-                    status: event.target.value as UserStatus,
-                  }))
-                }
-              >
-                {statusOptions.map((status) => (
-                  <option key={status} value={status}>
-                    {status.replaceAll("_", " ")}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField id="create-role" label="Role" error={createErrors.role}>
-              <select
-                id="create-role"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={newUser.role}
-                onChange={(event) =>
-                  setNewUser((prev) => ({
-                    ...prev,
-                    role: event.target.value as Role,
-                    marketingOptIn:
-                      event.target.value === "STAFF" ? false : prev.marketingOptIn,
-                  }))
-                }
-              >
-                {roleOptions.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField
-              id="create-password"
-              label="Temporary password"
-              error={createErrors.password}
-              className="sm:col-span-2"
-            >
-              <Input
-                id="create-password"
-                type="password"
-                value={newUser.password}
-                onChange={(event) =>
-                  setNewUser((prev) => ({ ...prev, password: event.target.value }))
-                }
-              />
-            </FormField>
-            <div className="space-y-2 sm:col-span-2">
-              <Label>Address</Label>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Input
-                  placeholder="Address line 1"
-                  value={newUser.addressLine1}
-                  onChange={(event) =>
-                    setNewUser((prev) => ({
-                      ...prev,
-                      addressLine1: event.target.value,
-                    }))
-                  }
-                />
-                <Input
-                  placeholder="Address line 2"
-                  value={newUser.addressLine2}
-                  onChange={(event) =>
-                    setNewUser((prev) => ({
-                      ...prev,
-                      addressLine2: event.target.value,
-                    }))
-                  }
-                />
-                <Input
-                  placeholder="City"
-                  value={newUser.city}
-                  onChange={(event) =>
-                    setNewUser((prev) => ({ ...prev, city: event.target.value }))
-                  }
-                />
-                <Input
-                  placeholder="State"
-                  value={newUser.state}
-                  onChange={(event) =>
-                    setNewUser((prev) => ({ ...prev, state: event.target.value }))
-                  }
-                />
-                <Input
-                  placeholder="Postal code"
-                  value={newUser.postalCode}
-                  onChange={(event) =>
-                    setNewUser((prev) => ({
-                      ...prev,
-                      postalCode: event.target.value,
-                    }))
-                  }
-                />
-                <Input
-                  placeholder="Country"
-                  value={newUser.country}
-                  onChange={(event) =>
-                    setNewUser((prev) => ({ ...prev, country: event.target.value }))
-                  }
-                />
-              </div>
-            </div>
-            {newUser.role !== "STAFF" ? (
-              <div className="sm:col-span-2 flex items-center gap-2">
-                <input
-                  id="create-marketing"
-                  type="checkbox"
-                  checked={newUser.marketingOptIn}
-                  onChange={(event) =>
-                    setNewUser((prev) => ({
-                      ...prev,
-                      marketingOptIn: event.target.checked,
-                    }))
-                  }
-                />
-                <Label htmlFor="create-marketing">Marketing opt-in</Label>
-              </div>
-            ) : null}
-            </div>
+            <UserFormFields
+              mode="create"
+              values={newUser}
+              errors={createErrors}
+              onChange={setNewUser}
+              canManage={canManage}
+              canEditProfile={true}
+            />
           </div>
 
           <DialogFooter className="pt-2">
@@ -778,236 +493,14 @@ export default function UsersPage() {
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto">
-            <div className="grid gap-4 sm:grid-cols-2">
-            <FormField id="edit-name" label="Full name" error={editErrors.name}>
-              <Input
-                id="edit-name"
-                value={editValues.name}
-                onChange={(event) =>
-                  setEditValues((prev) => ({ ...prev, name: event.target.value }))
-                }
-                disabled={!canManage && !canEditProfile}
-              />
-            </FormField>
-            <FormField id="edit-email" label="Email" error={editErrors.email}>
-              <Input
-                id="edit-email"
-                type="email"
-                value={editValues.email}
-                onChange={(event) =>
-                  setEditValues((prev) => ({ ...prev, email: event.target.value }))
-                }
-                disabled={!canManage}
-              />
-            </FormField>
-            <FormField id="edit-phone" label="Mobile" error={editErrors.phone}>
-              <Input
-                id="edit-phone"
-                type="tel"
-                value={editValues.phone}
-                onChange={(event) =>
-                  setEditValues((prev) => ({ ...prev, phone: event.target.value }))
-                }
-                disabled={!canManage && !canEditProfile}
-              />
-            </FormField>
-            <FormField
-              id="edit-image"
-              label="Profile image URL"
-              error={editErrors.image}
-            >
-              <Input
-                id="edit-image"
-                type="url"
-                value={editValues.image}
-                onChange={(event) =>
-                  setEditValues((prev) => ({ ...prev, image: event.target.value }))
-                }
-                disabled={!canManage && !canEditProfile}
-              />
-            </FormField>
-            <FormField
-              id="edit-dob"
-              label="Date of birth"
-              error={editErrors.dateOfBirth}
-            >
-              <Input
-                id="edit-dob"
-                type="date"
-                value={editValues.dateOfBirth}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    dateOfBirth: event.target.value,
-                  }))
-                }
-                disabled={!canManage && !canEditProfile}
-              />
-            </FormField>
-            <FormField id="edit-gender" label="Gender" error={editErrors.gender}>
-              <select
-                id="edit-gender"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={editValues.gender}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    gender: event.target.value as Gender,
-                  }))
-                }
-                disabled={!canManage && !canEditProfile}
-              >
-                {genderOptions.map((gender) => (
-                  <option key={gender} value={gender}>
-                    {gender.replaceAll("_", " ")}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField id="edit-status" label="Status" error={editErrors.status}>
-              <select
-                id="edit-status"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={editValues.status}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    status: event.target.value as UserStatus,
-                  }))
-                }
-                disabled={!canManage}
-              >
-                {statusOptions.map((status) => (
-                  <option key={status} value={status}>
-                    {status.replaceAll("_", " ")}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField id="edit-role" label="Role" error={editErrors.role}>
-              <select
-                id="edit-role"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={editValues.role}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    role: event.target.value as Role,
-                    marketingOptIn:
-                      event.target.value === "STAFF" ? false : prev.marketingOptIn,
-                  }))
-                }
-                disabled={!canManage}
-              >
-                {roleOptions.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField
-              id="edit-password"
-              label="Reset password (optional)"
-              error={editErrors.password}
-              className="sm:col-span-2"
-            >
-              <Input
-                id="edit-password"
-                type="password"
-                value={editValues.password}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    password: event.target.value,
-                  }))
-                }
-                disabled={!canManage}
-              />
-            </FormField>
-            <div className="space-y-2 sm:col-span-2">
-              <Label>Address</Label>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Input
-                  placeholder="Address line 1"
-                  value={editValues.addressLine1}
-                  onChange={(event) =>
-                    setEditValues((prev) => ({
-                      ...prev,
-                      addressLine1: event.target.value,
-                    }))
-                  }
-                  disabled={!canManage && !canEditProfile}
-                />
-                <Input
-                  placeholder="Address line 2"
-                  value={editValues.addressLine2}
-                  onChange={(event) =>
-                    setEditValues((prev) => ({
-                      ...prev,
-                      addressLine2: event.target.value,
-                    }))
-                  }
-                  disabled={!canManage && !canEditProfile}
-                />
-                <Input
-                  placeholder="City"
-                  value={editValues.city}
-                  onChange={(event) =>
-                    setEditValues((prev) => ({ ...prev, city: event.target.value }))
-                  }
-                  disabled={!canManage && !canEditProfile}
-                />
-                <Input
-                  placeholder="State"
-                  value={editValues.state}
-                  onChange={(event) =>
-                    setEditValues((prev) => ({ ...prev, state: event.target.value }))
-                  }
-                  disabled={!canManage && !canEditProfile}
-                />
-                <Input
-                  placeholder="Postal code"
-                  value={editValues.postalCode}
-                  onChange={(event) =>
-                    setEditValues((prev) => ({
-                      ...prev,
-                      postalCode: event.target.value,
-                    }))
-                  }
-                  disabled={!canManage && !canEditProfile}
-                />
-                <Input
-                  placeholder="Country"
-                  value={editValues.country}
-                  onChange={(event) =>
-                    setEditValues((prev) => ({
-                      ...prev,
-                      country: event.target.value,
-                    }))
-                  }
-                  disabled={!canManage && !canEditProfile}
-                />
-              </div>
-            </div>
-            {editValues.role !== "STAFF" ? (
-              <div className="sm:col-span-2 flex items-center gap-2">
-                <input
-                  id="edit-marketing"
-                  type="checkbox"
-                  checked={editValues.marketingOptIn}
-                  onChange={(event) =>
-                    setEditValues((prev) => ({
-                      ...prev,
-                      marketingOptIn: event.target.checked,
-                    }))
-                  }
-                  disabled={!canManage && !canEditProfile}
-                />
-                <Label htmlFor="edit-marketing">Marketing opt-in</Label>
-              </div>
-            ) : null}
-            </div>
+            <UserFormFields
+              mode="edit"
+              values={editValues}
+              errors={editErrors}
+              onChange={setEditValues}
+              canManage={canManage}
+              canEditProfile={canEditProfile}
+            />
           </div>
 
           <DialogFooter className="pt-2">

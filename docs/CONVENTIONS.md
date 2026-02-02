@@ -27,6 +27,7 @@ This is the baseline for new modules (API + UI) in this codebase.
 ## Validation + types
 - Define Zod schemas in `lib/validation.ts`.
 - Export inferred types from the same file (no separate DTOs unless needed).
+- Put reusable domain/UI types in `types/<domain>.ts` (example: `types/scheduling.ts`, `types/shifts.ts`) and import them instead of redefining per page.
 - API: `schema.safeParse(body)` and return `{ error, details }` with `flatten()` on failure.
 
 ## Forms

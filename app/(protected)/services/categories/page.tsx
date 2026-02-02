@@ -27,29 +27,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
 import {
   DataTable,
   DataTablePagination,
   DataTableToolbar,
 } from "@/components/data-table"
-import { FormField } from "@/components/form-field"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import { useDateFormatter } from "@/hooks/use-date-formatter"
 import type { ListResponse } from "@/types/api"
-
-type CategoryStatus = "ACTIVE" | "INACTIVE"
-
-type CategoryRow = {
-  id: string
-  name: string
-  description: string | null
-  status: CategoryStatus
-  sortOrder: number
-  createdAt: string
-}
-
-const statusOptions: CategoryStatus[] = ["ACTIVE", "INACTIVE"]
+import type { CategoryFormValues, CategoryRow, CategoryStatus } from "@/types/services"
+import { CategoryFormFields } from "./category-form-fields"
+import {
+  categoryStatusOptions,
+  defaultCategoryFormValues,
+} from "./category-form-model"
 
 const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
   if (value === "asc") return <ArrowUpIcon className="h-4 w-4" />
@@ -98,19 +89,13 @@ export default function ServiceCategoriesPage() {
     clearErrors: clearEditErrors,
   } = useFormErrors()
 
-  const [newCategory, setNewCategory] = React.useState({
-    name: "",
-    description: "",
-    status: "ACTIVE" as CategoryStatus,
-    sortOrder: 0,
-  })
+  const [newCategory, setNewCategory] = React.useState<CategoryFormValues>(
+    defaultCategoryFormValues
+  )
 
-  const [editValues, setEditValues] = React.useState({
-    name: "",
-    description: "",
-    status: "ACTIVE" as CategoryStatus,
-    sortOrder: 0,
-  })
+  const [editValues, setEditValues] = React.useState<CategoryFormValues>(
+    defaultCategoryFormValues
+  )
 
   const totalPages = Math.max(1, Math.ceil(totalRows / pagination.pageSize))
 
@@ -193,12 +178,7 @@ export default function ServiceCategoriesPage() {
     }
 
     toast.success("Category created.")
-    setNewCategory({
-      name: "",
-      description: "",
-      status: "ACTIVE",
-      sortOrder: 0,
-    })
+    setNewCategory(defaultCategoryFormValues)
     setSaving(false)
     setCreateOpen(false)
     await loadCategories()
@@ -420,7 +400,7 @@ export default function ServiceCategoriesPage() {
           }
         >
           <option value="all">All statuses</option>
-          {statusOptions.map((status) => (
+          {categoryStatusOptions.map((status) => (
             <option key={status} value={status}>
               {status === "ACTIVE" ? "Active" : "Inactive"}
             </option>
@@ -473,70 +453,12 @@ export default function ServiceCategoriesPage() {
             <DialogDescription>Create a service category.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto">
-            <div className="grid gap-4">
-            <FormField id="category-name" label="Name" error={createErrors.name}>
-              <Input
-                id="category-name"
-                value={newCategory.name}
-                onChange={(event) =>
-                  setNewCategory((prev) => ({ ...prev, name: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField
-              id="category-description"
-              label="Description"
-              error={createErrors.description}
-            >
-              <Input
-                id="category-description"
-                value={newCategory.description}
-                onChange={(event) =>
-                  setNewCategory((prev) => ({
-                    ...prev,
-                    description: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField id="category-status" label="Status" error={createErrors.status}>
-              <select
-                id="category-status"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={newCategory.status}
-                onChange={(event) =>
-                  setNewCategory((prev) => ({
-                    ...prev,
-                    status: event.target.value as CategoryStatus,
-                  }))
-                }
-              >
-                {statusOptions.map((status) => (
-                  <option key={status} value={status}>
-                    {status === "ACTIVE" ? "Active" : "Inactive"}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField
-              id="category-order"
-              label="Sort order"
-              error={createErrors.sortOrder}
-            >
-              <Input
-                id="category-order"
-                type="number"
-                min={0}
-                value={newCategory.sortOrder}
-                onChange={(event) =>
-                  setNewCategory((prev) => ({
-                    ...prev,
-                    sortOrder: Number(event.target.value) || 0,
-                  }))
-                }
-              />
-            </FormField>
-            </div>
+            <CategoryFormFields
+              mode="create"
+              values={newCategory}
+              errors={createErrors}
+              onChange={setNewCategory}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
@@ -565,66 +487,12 @@ export default function ServiceCategoriesPage() {
             <DialogDescription>Update category details.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto">
-            <div className="grid gap-4">
-            <FormField id="edit-name" label="Name" error={editErrors.name}>
-              <Input
-                id="edit-name"
-                value={editValues.name}
-                onChange={(event) =>
-                  setEditValues((prev) => ({ ...prev, name: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField
-              id="edit-description"
-              label="Description"
-              error={editErrors.description}
-            >
-              <Input
-                id="edit-description"
-                value={editValues.description}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    description: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField id="edit-status" label="Status" error={editErrors.status}>
-              <select
-                id="edit-status"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={editValues.status}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    status: event.target.value as CategoryStatus,
-                  }))
-                }
-              >
-                {statusOptions.map((status) => (
-                  <option key={status} value={status}>
-                    {status === "ACTIVE" ? "Active" : "Inactive"}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField id="edit-order" label="Sort order" error={editErrors.sortOrder}>
-              <Input
-                id="edit-order"
-                type="number"
-                min={0}
-                value={editValues.sortOrder}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    sortOrder: Number(event.target.value) || 0,
-                  }))
-                }
-              />
-            </FormField>
-            </div>
+            <CategoryFormFields
+              mode="edit"
+              values={editValues}
+              errors={editErrors}
+              onChange={setEditValues}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>

@@ -32,40 +32,26 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
 import {
   DataTable,
   DataTablePagination,
   DataTableToolbar,
 } from "@/components/data-table"
-import { FormField } from "@/components/form-field"
 import { useFormErrors } from "@/hooks/use-form-errors"
+import type { AppSettingsPayload } from "@/types/scheduling"
 import type { ListResponse } from "@/types/api"
-
-type ServiceStatus = "ACTIVE" | "INACTIVE"
-type ServiceType = "STANDARD" | "PACKAGE"
-
-type ServiceRow = {
-  id: string
-  name: string
-  description: string | null
-  durationMinutes: number
-  priceCents: number
-  status: ServiceStatus
-  type: ServiceType
-  createdAt: string
-  category: { id: string; name: string }
-  packageItems?: { itemService: { id: string; name: string } }[]
-}
-
-type CategoryOption = { id: string; name: string; status: "ACTIVE" | "INACTIVE" }
-type ServiceOption = { id: string; name: string }
-
-const statusOptions: ServiceStatus[] = ["ACTIVE", "INACTIVE"]
-const typeOptions: { value: ServiceType; label: string }[] = [
-  { value: "STANDARD", label: "Standard" },
-  { value: "PACKAGE", label: "Package" },
-]
+import type {
+  CategoryOption,
+  ServiceFormValues,
+  ServiceOption,
+  ServiceRow,
+  ServiceStatus,
+} from "@/types/services"
+import { ServiceFormFields } from "./service-form-fields"
+import {
+  defaultServiceFormValues,
+  serviceStatusOptions,
+} from "./service-form-model"
 
 const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
   if (value === "asc") return <ArrowUpIcon className="h-4 w-4" />
@@ -121,28 +107,14 @@ export default function ServicesPage() {
     clearErrors: clearEditErrors,
   } = useFormErrors()
 
-  const [newService, setNewService] = React.useState({
-    name: "",
-    description: "",
-    categoryId: "",
-    durationMinutes: 60,
-    price: "0.00",
-    status: "ACTIVE" as ServiceStatus,
-    type: "STANDARD" as ServiceType,
-    packageItemIds: [] as string[],
-  })
+  const [newService, setNewService] = React.useState<ServiceFormValues>(
+    defaultServiceFormValues
+  )
   const [newPackageQuery, setNewPackageQuery] = React.useState("")
 
-  const [editValues, setEditValues] = React.useState({
-    name: "",
-    description: "",
-    categoryId: "",
-    durationMinutes: 60,
-    price: "0.00",
-    status: "ACTIVE" as ServiceStatus,
-    type: "STANDARD" as ServiceType,
-    packageItemIds: [] as string[],
-  })
+  const [editValues, setEditValues] = React.useState<ServiceFormValues>(
+    defaultServiceFormValues
+  )
   const [editPackageQuery, setEditPackageQuery] = React.useState("")
 
   const totalPages = Math.max(1, Math.ceil(totalRows / pagination.pageSize))
@@ -165,9 +137,7 @@ export default function ServicesPage() {
     if (!response.ok) {
       return
     }
-    const data = (await response.json()) as {
-      settings?: { locale?: string; currency?: string }
-    }
+    const data = (await response.json()) as { settings?: AppSettingsPayload }
     if (data.settings?.locale && data.settings?.currency) {
       setSettings({
         locale: data.settings.locale,
@@ -319,16 +289,7 @@ export default function ServicesPage() {
     }
 
     toast.success("Service created.")
-    setNewService({
-      name: "",
-      description: "",
-      categoryId: "",
-      durationMinutes: 60,
-      price: "0.00",
-      status: "ACTIVE",
-      type: "STANDARD",
-      packageItemIds: [],
-    })
+    setNewService(defaultServiceFormValues)
     setNewPackageQuery("")
     setSaving(false)
     setCreateOpen(false)
@@ -600,7 +561,7 @@ export default function ServicesPage() {
           }
         >
           <option value="all">All statuses</option>
-          {statusOptions.map((status) => (
+          {serviceStatusOptions.map((status) => (
             <option key={status} value={status}>
               {status === "ACTIVE" ? "Active" : "Inactive"}
             </option>
@@ -665,184 +626,16 @@ export default function ServicesPage() {
             <DialogDescription>Create a service offering.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto">
-            <div className="grid gap-4">
-            <FormField id="service-name" label="Name" error={createErrors.name}>
-              <Input
-                id="service-name"
-                value={newService.name}
-                onChange={(event) =>
-                  setNewService((prev) => ({ ...prev, name: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField
-              id="service-description"
-              label="Description"
-              error={createErrors.description}
-            >
-              <Input
-                id="service-description"
-                value={newService.description}
-                onChange={(event) =>
-                  setNewService((prev) => ({
-                    ...prev,
-                    description: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField
-              id="service-category"
-              label="Category"
-              error={createErrors.categoryId}
-            >
-              <select
-                id="service-category"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={newService.categoryId}
-                onChange={(event) =>
-                  setNewService((prev) => ({
-                    ...prev,
-                    categoryId: event.target.value,
-                  }))
-                }
-              >
-                <option value="">Select a category</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField
-              id="service-duration"
-              label="Duration (minutes)"
-              error={createErrors.durationMinutes}
-            >
-              <Input
-                id="service-duration"
-                type="number"
-                min={5}
-                value={newService.durationMinutes}
-                onChange={(event) =>
-                  setNewService((prev) => ({
-                    ...prev,
-                    durationMinutes: Number(event.target.value) || 0,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField id="service-price" label="Price" error={createErrors.priceCents}>
-              <Input
-                id="service-price"
-                inputMode="decimal"
-                value={newService.price}
-                onChange={(event) =>
-                  setNewService((prev) => ({
-                    ...prev,
-                    price: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField id="service-status" label="Status" error={createErrors.status}>
-              <select
-                id="service-status"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={newService.status}
-                onChange={(event) =>
-                  setNewService((prev) => ({
-                    ...prev,
-                    status: event.target.value as ServiceStatus,
-                  }))
-                }
-              >
-                {statusOptions.map((status) => (
-                  <option key={status} value={status}>
-                    {status === "ACTIVE" ? "Active" : "Inactive"}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField id="service-type" label="Type" error={createErrors.type}>
-              <select
-                id="service-type"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={newService.type}
-                onChange={(event) =>
-                  setNewService((prev) => ({
-                    ...prev,
-                    type: event.target.value as ServiceType,
-                    packageItemIds:
-                      event.target.value === "PACKAGE"
-                        ? prev.packageItemIds
-                        : [],
-                  }))
-                }
-              >
-                {typeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            {newService.type === "PACKAGE" ? (
-              <FormField
-                id="service-package-items"
-                label="Package items"
-                error={createErrors.packageItemIds}
-              >
-                <div className="space-y-3">
-                  <Input
-                    placeholder="Search services..."
-                    value={newPackageQuery}
-                    onChange={(event) => setNewPackageQuery(event.target.value)}
-                  />
-                  {(() => {
-                    const query = newPackageQuery.trim().toLowerCase()
-                    const filtered = query
-                      ? serviceOptions.filter((option) =>
-                          option.name.toLowerCase().includes(query)
-                        )
-                      : serviceOptions
-                    return (
-                      <div className="max-h-40 space-y-2 overflow-y-auto rounded-md border border-input bg-background p-3 text-sm">
-                        {filtered.length ? (
-                          filtered.map((option) => (
-                          <label
-                            key={option.id}
-                            className="flex items-center gap-2 text-sm"
-                          >
-                        <input
-                          type="checkbox"
-                          checked={newService.packageItemIds.includes(option.id)}
-                          onChange={(event) => {
-                            const checked = event.target.checked
-                            setNewService((prev) => ({
-                              ...prev,
-                              packageItemIds: checked
-                                ? [...prev.packageItemIds, option.id]
-                                : prev.packageItemIds.filter((id) => id !== option.id),
-                            }))
-                          }}
-                            />
-                            <span>{option.name}</span>
-                          </label>
-                        ))
-                        ) : (
-                          <p className="text-xs text-muted-foreground">
-                            No eligible services found.
-                          </p>
-                        )}
-                      </div>
-                    )
-                  })()}
-                </div>
-              </FormField>
-            ) : null}
-            </div>
+            <ServiceFormFields
+              mode="create"
+              values={newService}
+              errors={createErrors}
+              categories={categories}
+              serviceOptions={serviceOptions}
+              packageQuery={newPackageQuery}
+              onPackageQueryChange={setNewPackageQuery}
+              onChange={setNewService}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
@@ -871,184 +664,16 @@ export default function ServicesPage() {
             <DialogDescription>Update service details.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto">
-            <div className="grid gap-4">
-            <FormField id="edit-service-name" label="Name" error={editErrors.name}>
-              <Input
-                id="edit-service-name"
-                value={editValues.name}
-                onChange={(event) =>
-                  setEditValues((prev) => ({ ...prev, name: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField
-              id="edit-service-description"
-              label="Description"
-              error={editErrors.description}
-            >
-              <Input
-                id="edit-service-description"
-                value={editValues.description}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    description: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField
-              id="edit-service-category"
-              label="Category"
-              error={editErrors.categoryId}
-            >
-              <select
-                id="edit-service-category"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={editValues.categoryId}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    categoryId: event.target.value,
-                  }))
-                }
-              >
-                <option value="">Select a category</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField
-              id="edit-service-duration"
-              label="Duration (minutes)"
-              error={editErrors.durationMinutes}
-            >
-              <Input
-                id="edit-service-duration"
-                type="number"
-                min={5}
-                value={editValues.durationMinutes}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    durationMinutes: Number(event.target.value) || 0,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField id="edit-service-price" label="Price" error={editErrors.priceCents}>
-              <Input
-                id="edit-service-price"
-                inputMode="decimal"
-                value={editValues.price}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    price: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField id="edit-service-status" label="Status" error={editErrors.status}>
-              <select
-                id="edit-service-status"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={editValues.status}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    status: event.target.value as ServiceStatus,
-                  }))
-                }
-              >
-                {statusOptions.map((status) => (
-                  <option key={status} value={status}>
-                    {status === "ACTIVE" ? "Active" : "Inactive"}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField id="edit-service-type" label="Type" error={editErrors.type}>
-              <select
-                id="edit-service-type"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={editValues.type}
-                onChange={(event) =>
-                  setEditValues((prev) => ({
-                    ...prev,
-                    type: event.target.value as ServiceType,
-                    packageItemIds:
-                      event.target.value === "PACKAGE"
-                        ? prev.packageItemIds
-                        : [],
-                  }))
-                }
-              >
-                {typeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            {editValues.type === "PACKAGE" ? (
-              <FormField
-                id="edit-package-items"
-                label="Package items"
-                error={editErrors.packageItemIds}
-              >
-                <div className="space-y-3">
-                  <Input
-                    placeholder="Search services..."
-                    value={editPackageQuery}
-                    onChange={(event) => setEditPackageQuery(event.target.value)}
-                  />
-                  {(() => {
-                    const query = editPackageQuery.trim().toLowerCase()
-                    const filtered = query
-                      ? serviceOptions.filter((option) =>
-                          option.name.toLowerCase().includes(query)
-                        )
-                      : serviceOptions
-                    return (
-                      <div className="max-h-40 space-y-2 overflow-y-auto rounded-md border border-input bg-background p-3 text-sm">
-                        {filtered.length ? (
-                          filtered.map((option) => (
-                          <label
-                            key={option.id}
-                            className="flex items-center gap-2 text-sm"
-                          >
-                        <input
-                          type="checkbox"
-                          checked={editValues.packageItemIds.includes(option.id)}
-                          onChange={(event) => {
-                            const checked = event.target.checked
-                            setEditValues((prev) => ({
-                              ...prev,
-                              packageItemIds: checked
-                                ? [...prev.packageItemIds, option.id]
-                                : prev.packageItemIds.filter((id) => id !== option.id),
-                            }))
-                          }}
-                            />
-                            <span>{option.name}</span>
-                          </label>
-                        ))
-                        ) : (
-                          <p className="text-xs text-muted-foreground">
-                            No eligible services found.
-                          </p>
-                        )}
-                      </div>
-                    )
-                  })()}
-                </div>
-              </FormField>
-            ) : null}
-            </div>
+            <ServiceFormFields
+              mode="edit"
+              values={editValues}
+              errors={editErrors}
+              categories={categories}
+              serviceOptions={serviceOptions}
+              packageQuery={editPackageQuery}
+              onPackageQueryChange={setEditPackageQuery}
+              onChange={setEditValues}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>

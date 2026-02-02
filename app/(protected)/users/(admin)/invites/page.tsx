@@ -20,30 +20,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import {
   DataTable,
   DataTablePagination,
   DataTableToolbar,
 } from "@/components/data-table"
-import { FormField } from "@/components/form-field"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import { useDateFormatter } from "@/hooks/use-date-formatter"
-import type { Role } from "@/lib/permissions"
 import type { ListResponse } from "@/types/api"
-
-
-type InviteRow = {
-  id: string
-  email: string
-  role: Role
-  token: string
-  createdAt: string
-  expiresAt: string
-  acceptedAt: string | null
-}
-
-const roleOptions: Role[] = ["ADMIN", "MANAGER", "STAFF", "CUSTOMER"]
+import type { InviteRow, InviteStatusFilter } from "@/types/invites"
+import { InviteFormFields } from "./invite-form-fields"
+import {
+  defaultInviteFormValues,
+  type InviteFormValues,
+} from "./invite-form-model"
 
 const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
   if (value === "asc") return <ArrowUpIcon className="h-4 w-4" />
@@ -70,14 +60,11 @@ export default function InvitesPage() {
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
   const [pagination, setPagination] = React.useState({ pageIndex: 0, pageSize: 10 })
   const [search, setSearch] = React.useState("")
-  const [statusFilter, setStatusFilter] = React.useState<
-    "all" | "pending" | "accepted" | "expired"
-  >("pending")
+  const [statusFilter, setStatusFilter] = React.useState<InviteStatusFilter>("pending")
 
-  const [inviteValues, setInviteValues] = React.useState({
-    email: "",
-    role: "CUSTOMER" as Role,
-  })
+  const [inviteValues, setInviteValues] = React.useState<InviteFormValues>(
+    defaultInviteFormValues
+  )
 
   const totalPages = Math.max(1, Math.ceil(totalRows / pagination.pageSize))
 
@@ -152,7 +139,7 @@ export default function InvitesPage() {
     }
 
     toast.success("Invite sent.")
-    setInviteValues({ email: "", role: "CUSTOMER" })
+    setInviteValues(defaultInviteFormValues)
     setInviting(false)
     setInviteOpen(false)
     await loadInvites()
@@ -273,7 +260,7 @@ export default function InvitesPage() {
         ),
       },
     ],
-    []
+    [copyInviteLink, formatDate, revokeInvite]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -334,37 +321,11 @@ export default function InvitesPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto">
-            <div className="grid gap-4">
-            <FormField id="invite-email" label="Email" error={inviteErrors.email}>
-              <Input
-                id="invite-email"
-                type="email"
-                value={inviteValues.email}
-                onChange={(event) =>
-                  setInviteValues((prev) => ({ ...prev, email: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField id="invite-role" label="Role" error={inviteErrors.role}>
-              <select
-                id="invite-role"
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={inviteValues.role}
-                onChange={(event) =>
-                  setInviteValues((prev) => ({
-                    ...prev,
-                    role: event.target.value as Role,
-                  }))
-                }
-              >
-                {roleOptions.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            </div>
+            <InviteFormFields
+              values={inviteValues}
+              errors={inviteErrors}
+              onChange={setInviteValues}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setInviteOpen(false)}>

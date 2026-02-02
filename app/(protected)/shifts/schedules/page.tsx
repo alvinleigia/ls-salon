@@ -27,86 +27,24 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   DataTable,
   DataTablePagination,
   DataTableToolbar,
 } from "@/components/data-table"
-import { FormField } from "@/components/form-field"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import { formatDateForDisplay, toISODate } from "@/lib/date"
 import type { ListResponse } from "@/types/api"
-
-type Weekday =
-  | "MONDAY"
-  | "TUESDAY"
-  | "WEDNESDAY"
-  | "THURSDAY"
-  | "FRIDAY"
-  | "SATURDAY"
-  | "SUNDAY"
-
-const WEEKDAYS: { value: Weekday; label: string }[] = [
-  { value: "MONDAY", label: "Monday" },
-  { value: "TUESDAY", label: "Tuesday" },
-  { value: "WEDNESDAY", label: "Wednesday" },
-  { value: "THURSDAY", label: "Thursday" },
-  { value: "FRIDAY", label: "Friday" },
-  { value: "SATURDAY", label: "Saturday" },
-  { value: "SUNDAY", label: "Sunday" },
-]
-
-type StaffOption = {
-  id: string
-  name: string | null
-  email: string
-}
-
-type ShiftTemplateOption = {
-  id: string
-  name: string
-}
-
-type ShiftScheduleBlock = {
-  id?: string
-  templateId: string
-  repeatDays: number
-  sortOrder?: number
-  template?: ShiftTemplateOption | null
-}
-
-type ShiftScheduleRow = {
-  id: string
-  name: string | null
-  isDefault?: boolean
-  startDate: string
-  weekOffDay1: Weekday
-  weekOffDay2: Weekday | null
-  weekOff2Weeks: number[]
-  blocks: ShiftScheduleBlock[]
-  assignments?: {
-    id: string
-    startDate: string
-    endDate?: string | null
-    staffProfile?: { user?: StaffOption | null } | null
-  }[]
-  createdAt: string
-  updatedAt: string
-}
-
-type ShiftScheduleForm = {
-  name: string
-  staffIds: string[]
-  isDefault: boolean
-  startDate: string
-  assignmentStartDate: string
-  assignmentEndDate: string
-  weekOffDay1: Weekday
-  weekOffDay2: Weekday | ""
-  weekOff2Weeks: number[]
-  blocks: { templateId: string; repeatDays: number }[]
-}
+import { WEEKDAY_OPTIONS } from "@/types/scheduling"
+import type {
+  ShiftSchedule,
+  ShiftScheduleBlock,
+  ShiftScheduleForm,
+  ShiftTemplateOption,
+  StaffOption,
+} from "@/types/shifts"
+import { ScheduleFormFields } from "./schedule-form-fields"
+import { createDefaultScheduleForm } from "./schedule-form-model"
 
 const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
   if (value === "asc") return <ArrowUpIcon className="h-4 w-4" />
@@ -129,18 +67,22 @@ const summarizeBlocks = (blocks: ShiftScheduleBlock[]) => {
     .join(" - ")
 }
 
-const summarizeWeekOff = (schedule: ShiftScheduleRow) => {
-  const day1 = WEEKDAYS.find((item) => item.value === schedule.weekOffDay1)?.label ?? schedule.weekOffDay1
+const summarizeWeekOff = (schedule: ShiftSchedule) => {
+  const day1 =
+    WEEKDAY_OPTIONS.find((item) => item.value === schedule.weekOffDay1)?.label ??
+    schedule.weekOffDay1
   if (!schedule.weekOffDay2) {
     return day1
   }
-  const day2 = WEEKDAYS.find((item) => item.value === schedule.weekOffDay2)?.label ?? schedule.weekOffDay2
+  const day2 =
+    WEEKDAY_OPTIONS.find((item) => item.value === schedule.weekOffDay2)?.label ??
+    schedule.weekOffDay2
   const weeks =
     schedule.weekOff2Weeks?.length ? ` (weeks ${schedule.weekOff2Weeks.join(", ")})` : ""
   return `${day1} + ${day2}${weeks}`
 }
 
-const summarizeAssignments = (schedule: ShiftScheduleRow) => {
+const summarizeAssignments = (schedule: ShiftSchedule) => {
   if (schedule.isDefault) return "All staff"
   const assignments = schedule.assignments ?? []
   const names = assignments
@@ -151,7 +93,7 @@ const summarizeAssignments = (schedule: ShiftScheduleRow) => {
   return `${names.slice(0, 2).join(", ")} +${names.length - 2}`
 }
 
-const summarizeAssignmentRange = (schedule: ShiftScheduleRow) => {
+const summarizeAssignmentRange = (schedule: ShiftSchedule) => {
   const assignments = schedule.assignments ?? []
   if (!assignments.length) return "-"
   const rangeStart = assignments[0]?.startDate
@@ -164,7 +106,7 @@ const summarizeAssignmentRange = (schedule: ShiftScheduleRow) => {
 export default function ShiftSchedulesPage() {
   type PaginationState = { pageIndex: number; pageSize: number }
 
-  const [schedules, setSchedules] = React.useState<ShiftScheduleRow[]>([])
+  const [schedules, setSchedules] = React.useState<ShiftSchedule[]>([])
   const [loading, setLoading] = React.useState(true)
   const [totalRows, setTotalRows] = React.useState(0)
 
@@ -192,22 +134,11 @@ export default function ShiftSchedulesPage() {
   const [deleteOpen, setDeleteOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
-  const [deleteTarget, setDeleteTarget] = React.useState<ShiftScheduleRow | null>(null)
-  const [editingSchedule, setEditingSchedule] = React.useState<ShiftScheduleRow | null>(null)
+  const [deleteTarget, setDeleteTarget] = React.useState<ShiftSchedule | null>(null)
+  const [editingSchedule, setEditingSchedule] = React.useState<ShiftSchedule | null>(null)
 
   const today = React.useMemo(() => toISODate(new Date()), [])
-  const defaultForm: ShiftScheduleForm = {
-    name: "",
-    staffIds: [],
-    isDefault: false,
-    startDate: today,
-    assignmentStartDate: today,
-    assignmentEndDate: "",
-    weekOffDay1: "SUNDAY",
-    weekOffDay2: "",
-    weekOff2Weeks: [],
-    blocks: [{ templateId: "", repeatDays: 1 }],
-  }
+  const defaultForm = React.useMemo(() => createDefaultScheduleForm(today), [today])
 
   const [newSchedule, setNewSchedule] = React.useState<ShiftScheduleForm>(defaultForm)
   const [editSchedule, setEditSchedule] = React.useState<ShiftScheduleForm>(defaultForm)
@@ -249,7 +180,7 @@ export default function ShiftSchedulesPage() {
       setLoading(false)
       return
     }
-    const data = (await response.json()) as ListResponse<ShiftScheduleRow>
+    const data = (await response.json()) as ListResponse<ShiftSchedule>
     setSchedules(data.items)
     setTotalRows(data.total)
     setLoading(false)
@@ -312,36 +243,6 @@ export default function ShiftSchedulesPage() {
     []
   )
 
-  const addBlock = (setter: React.Dispatch<React.SetStateAction<ShiftScheduleForm>>) => {
-    setter((prev) => ({
-      ...prev,
-      blocks: [...prev.blocks, { templateId: "", repeatDays: 1 }],
-    }))
-  }
-
-  const updateBlock = (
-    setter: React.Dispatch<React.SetStateAction<ShiftScheduleForm>>,
-    blockIndex: number,
-    updater: (block: ShiftScheduleForm["blocks"][number]) => ShiftScheduleForm["blocks"][number]
-  ) => {
-    setter((prev) => ({
-      ...prev,
-      blocks: prev.blocks.map((block, index) =>
-        index === blockIndex ? updater(block) : block
-      ),
-    }))
-  }
-
-  const removeBlock = (
-    setter: React.Dispatch<React.SetStateAction<ShiftScheduleForm>>,
-    blockIndex: number
-  ) => {
-    setter((prev) => ({
-      ...prev,
-      blocks: prev.blocks.filter((_, index) => index !== blockIndex),
-    }))
-  }
-
   const createSchedule = async () => {
     if (!newSchedule.isDefault && !newSchedule.staffIds.length) {
       toast.error("Select at least one staff member.")
@@ -374,7 +275,7 @@ export default function ShiftSchedulesPage() {
   }
 
   const startEdit = React.useCallback(
-    (schedule: ShiftScheduleRow) => {
+    (schedule: ShiftSchedule) => {
       clearEditErrors()
       const assignments = schedule.assignments ?? []
       const assignmentStart = assignments[0]?.startDate
@@ -442,7 +343,7 @@ export default function ShiftSchedulesPage() {
     await loadSchedules()
   }
 
-  const requestDelete = React.useCallback((schedule: ShiftScheduleRow) => {
+  const requestDelete = React.useCallback((schedule: ShiftSchedule) => {
     setDeleteTarget(schedule)
     setDeleteOpen(true)
   }, [])
@@ -466,7 +367,7 @@ export default function ShiftSchedulesPage() {
     await loadSchedules()
   }, [deleteTarget, loadSchedules])
 
-  const columns = React.useMemo<ColumnDef<ShiftScheduleRow>[]>(
+  const columns = React.useMemo<ColumnDef<ShiftSchedule>[]>(
     () => [
       {
         accessorKey: "name",
@@ -648,291 +549,6 @@ export default function ShiftSchedulesPage() {
     getCoreRowModel: getCoreRowModel(),
   })
 
-  const renderScheduleForm = (
-    form: ShiftScheduleForm,
-    setForm: React.Dispatch<React.SetStateAction<ShiftScheduleForm>>,
-    errors: Record<string, string>,
-    allowMultiStaff: boolean
-  ) => {
-    const weekOff2Enabled = Boolean(form.weekOffDay2)
-    return (
-      <div className="grid gap-4">
-        <FormField id="schedule-name" label="Schedule name" error={errors.name}>
-          <Input
-            id="schedule-name"
-            value={form.name}
-            onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-          />
-        </FormField>
-        <div className="flex items-center gap-2">
-          <input
-            id="schedule-default"
-            type="checkbox"
-            checked={form.isDefault}
-            onChange={(event) =>
-              setForm((prev) => ({
-                ...prev,
-                isDefault: event.target.checked,
-                staffIds: event.target.checked ? [] : prev.staffIds,
-              }))
-            }
-          />
-          <Label htmlFor="schedule-default">Make this the default schedule</Label>
-        </div>
-        <FormField id="schedule-staff" label="Staff" error={errors.staffIds}>
-          {form.isDefault ? (
-            <div className="rounded-md border border-dashed border-input bg-background p-3 text-xs text-muted-foreground">
-              Default schedules apply to all staff without an explicit schedule.
-            </div>
-          ) : allowMultiStaff ? (
-            <div className="space-y-2 rounded-md border border-input bg-background p-3">
-              <div className="text-xs text-muted-foreground">
-                Select one or more staff members.
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {staffOptions.map((staff) => {
-                  const label = staff.name?.trim() || staff.email
-                  const checked = form.staffIds.includes(staff.id)
-                  return (
-                    <label key={staff.id} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(event) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            staffIds: event.target.checked
-                              ? [...prev.staffIds, staff.id]
-                              : prev.staffIds.filter((value) => value !== staff.id),
-                          }))
-                        }
-                      />
-                      <span>{label}</span>
-                    </label>
-                  )
-                })}
-              </div>
-            </div>
-          ) : (
-            <select
-              id="schedule-staff"
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={form.staffIds[0] ?? ""}
-              onChange={(event) =>
-                setForm((prev) => ({
-                  ...prev,
-                  staffIds: event.target.value ? [event.target.value] : [],
-                }))
-              }
-            >
-              <option value="">Select staff</option>
-              {staffOptions.map((staff) => (
-                <option key={staff.id} value={staff.id}>
-                  {staff.name?.trim() || staff.email}
-                </option>
-              ))}
-            </select>
-          )}
-        </FormField>
-        {!form.isDefault ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <FormField
-              id="schedule-assign-start"
-              label="Assignment start date"
-              error={errors.assignmentStartDate}
-            >
-              <Input
-                id="schedule-assign-start"
-                type="date"
-                value={form.assignmentStartDate}
-                min={today}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, assignmentStartDate: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField
-              id="schedule-assign-end"
-              label="Assignment end date"
-              error={errors.assignmentEndDate}
-            >
-              <Input
-                id="schedule-assign-end"
-                type="date"
-                value={form.assignmentEndDate}
-                min={form.assignmentStartDate || today}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, assignmentEndDate: event.target.value }))
-                }
-              />
-            </FormField>
-          </div>
-        ) : null}
-        <FormField id="schedule-start" label="Start date" error={errors.startDate}>
-          <Input
-            id="schedule-start"
-            type="date"
-            value={form.startDate}
-            min={today}
-            onChange={(event) =>
-              setForm((prev) => {
-                const next = event.target.value
-                return {
-                  ...prev,
-                  startDate: next,
-                  assignmentStartDate:
-                    !prev.assignmentStartDate || prev.assignmentStartDate === prev.startDate
-                      ? next
-                      : prev.assignmentStartDate,
-                }
-              })
-            }
-          />
-        </FormField>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <FormField id="schedule-weekoff-1" label="Week off day 1" error={errors.weekOffDay1}>
-            <select
-              id="schedule-weekoff-1"
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={form.weekOffDay1}
-              onChange={(event) =>
-                setForm((prev) => ({
-                  ...prev,
-                  weekOffDay1: event.target.value as Weekday,
-                }))
-              }
-            >
-              {WEEKDAYS.map((day) => (
-                <option key={day.value} value={day.value}>
-                  {day.label}
-                </option>
-              ))}
-            </select>
-          </FormField>
-          <FormField id="schedule-weekoff-2" label="Week off day 2" error={errors.weekOffDay2}>
-            <select
-              id="schedule-weekoff-2"
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={form.weekOffDay2}
-              onChange={(event) => {
-                const value = event.target.value as Weekday | ""
-                setForm((prev) => ({
-                  ...prev,
-                  weekOffDay2: value,
-                  weekOff2Weeks: value
-                    ? prev.weekOff2Weeks.length
-                      ? prev.weekOff2Weeks
-                      : [1, 2, 3, 4, 5]
-                    : [],
-                }))
-              }}
-            >
-              <option value="">None</option>
-              {WEEKDAYS.map((day) => (
-                <option key={day.value} value={day.value}>
-                  {day.label}
-                </option>
-              ))}
-            </select>
-          </FormField>
-        </div>
-
-        <div className="space-y-2 rounded-md border border-input bg-background p-3">
-          <div className="flex items-center justify-between">
-            <Label>Week off day 2 weeks</Label>
-            <span className="text-xs text-muted-foreground">Weeks of the month.</span>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {[1, 2, 3, 4, 5].map((week) => (
-              <label key={week} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.weekOff2Weeks.includes(week)}
-                  disabled={!weekOff2Enabled}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      weekOff2Weeks: event.target.checked
-                        ? [...prev.weekOff2Weeks, week]
-                        : prev.weekOff2Weeks.filter((value) => value !== week),
-                    }))
-                  }
-                />
-                Week {week}
-              </label>
-            ))}
-          </div>
-          {errors.weekOff2Weeks ? (
-            <p className="text-xs text-destructive">{errors.weekOff2Weeks}</p>
-          ) : null}
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <Label>Shift blocks</Label>
-            <span className="text-xs text-muted-foreground">
-              Repeat days count ignores week off days.
-            </span>
-          </div>
-          <div className="space-y-3">
-            {form.blocks.map((block, index) => (
-              <div
-                key={`block-${index}`}
-                className="grid gap-3 sm:grid-cols-[1fr_140px_auto] sm:items-end"
-              >
-                <FormField
-                  id={`block-template-${index}`}
-                  label={`Shift template ${index + 1}`}
-                >
-                  <select
-                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    value={block.templateId}
-                    onChange={(event) =>
-                      updateBlock(setForm, index, (current) => ({
-                        ...current,
-                        templateId: event.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">Select template</option>
-                    {templates.map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.name}
-                      </option>
-                    ))}
-                  </select>
-                </FormField>
-                <FormField id={`block-repeat-${index}`} label="Repeat days">
-                  <Input
-                    type="number"
-                    min={1}
-                    value={block.repeatDays}
-                    onChange={(event) =>
-                      updateBlock(setForm, index, (current) => ({
-                        ...current,
-                        repeatDays: Number(event.target.value || 1),
-                      }))
-                    }
-                  />
-                </FormField>
-                <Button variant="outline" onClick={() => removeBlock(setForm, index)}>
-                  Remove
-                </Button>
-              </div>
-            ))}
-          </div>
-          {errors.blocks ? <p className="text-xs text-destructive">{errors.blocks}</p> : null}
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => addBlock(setForm)}>
-              Add shift block
-            </Button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1014,7 +630,16 @@ export default function ShiftSchedulesPage() {
             <DialogDescription>Define repeating blocks and week off rules.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto">
-            {renderScheduleForm(newSchedule, setNewSchedule, createErrors, true)}
+            <ScheduleFormFields
+              mode="create"
+              form={newSchedule}
+              setForm={setNewSchedule}
+              errors={createErrors}
+              allowMultiStaff
+              today={today}
+              staffOptions={staffOptions}
+              templates={templates}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
@@ -1043,7 +668,16 @@ export default function ShiftSchedulesPage() {
             <DialogDescription>Update schedule details and blocks.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto">
-            {renderScheduleForm(editSchedule, setEditSchedule, editErrors, true)}
+            <ScheduleFormFields
+              mode="edit"
+              form={editSchedule}
+              setForm={setEditSchedule}
+              errors={editErrors}
+              allowMultiStaff
+              today={today}
+              staffOptions={staffOptions}
+              templates={templates}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>

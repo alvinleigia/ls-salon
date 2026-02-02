@@ -8,109 +8,20 @@ import { Input } from "@/components/ui/input"
 import { FormField } from "@/components/form-field"
 import { Label } from "@/components/ui/label"
 import { useFormErrors } from "@/hooks/use-form-errors"
-
-type SettingsForm = {
-  locale: string
-  currency: string
-  timeZone: string
-  dateFormat: string
-  workingHours: WorkingDay[]
-  overrides: OverrideDay[]
-}
-
-type Weekday =
-  | "MONDAY"
-  | "TUESDAY"
-  | "WEDNESDAY"
-  | "THURSDAY"
-  | "FRIDAY"
-  | "SATURDAY"
-  | "SUNDAY"
-
-type WorkingPeriod = {
-  id?: string
-  kind: "WORK" | "BREAK"
-  startTime: string
-  endTime: string
-  sortOrder?: number
-}
-
-type WorkingDay = {
-  id?: string
-  day: Weekday
-  isOpen: boolean
-  periods: WorkingPeriod[]
-}
-
-type OverrideDay = {
-  id?: string
-  date: string
-  isOpen: boolean
-  periods: WorkingPeriod[]
-}
-
-const WEEKDAYS: { value: Weekday; label: string }[] = [
-  { value: "MONDAY", label: "Monday" },
-  { value: "TUESDAY", label: "Tuesday" },
-  { value: "WEDNESDAY", label: "Wednesday" },
-  { value: "THURSDAY", label: "Thursday" },
-  { value: "FRIDAY", label: "Friday" },
-  { value: "SATURDAY", label: "Saturday" },
-  { value: "SUNDAY", label: "Sunday" },
-]
-
-const DEFAULT_PERIOD: WorkingPeriod = {
-  kind: "WORK",
-  startTime: "09:00",
-  endTime: "18:00",
-}
-
-const defaultWorkingHours: WorkingDay[] = WEEKDAYS.map((day) => ({
-  day: day.value,
-  isOpen: true,
-  periods: [{ ...DEFAULT_PERIOD }],
-}))
-
-const defaultSettings: SettingsForm = {
-  locale: "en-US",
-  currency: "USD",
-  timeZone: "America/New_York",
-  dateFormat: "MM/dd/yyyy",
-  workingHours: defaultWorkingHours,
-  overrides: [],
-}
-
-const normalizeWorkingHours = (workingHours?: WorkingDay[]) => {
-  const map = new Map(workingHours?.map((day) => [day.day, day]) ?? [])
-  return WEEKDAYS.map((day) => {
-    const existing = map.get(day.value)
-    if (!existing) {
-      return {
-        day: day.value,
-        isOpen: true,
-        periods: [{ ...DEFAULT_PERIOD }],
-      }
-    }
-    const periods =
-      existing.periods?.length > 0
-        ? existing.periods
-        : existing.isOpen
-          ? [{ ...DEFAULT_PERIOD }]
-          : []
-    return { ...existing, periods }
-  })
-}
-
-const normalizeOverrides = (overrides?: OverrideDay[]) =>
-  overrides?.map((override) => ({
-    ...override,
-    periods:
-      override.periods?.length > 0
-        ? override.periods
-        : override.isOpen
-          ? [{ ...DEFAULT_PERIOD }]
-          : [],
-  })) ?? []
+import { WEEKDAY_OPTIONS } from "@/types/scheduling"
+import type {
+  AppSettingsPayload,
+  DateOverrideDay,
+  WorkingDay,
+  WorkingPeriod,
+} from "@/types/scheduling"
+import {
+  DEFAULT_PERIOD,
+  defaultSettings,
+  normalizeOverrides,
+  normalizeWorkingHours,
+  type SettingsForm,
+} from "./settings-form-model"
 
 export default function SettingsPage() {
   const InlineField = ({
@@ -139,12 +50,13 @@ export default function SettingsPage() {
         setLoading(false)
         return
       }
-      const data = (await response.json()) as { settings?: SettingsForm }
-      const settings = data.settings ?? defaultSettings
+      const data = (await response.json()) as { settings?: AppSettingsPayload }
+      const settings = data.settings ?? {}
       setForm({
+        ...defaultSettings,
         ...settings,
-        workingHours: normalizeWorkingHours(settings.workingHours),
-        overrides: normalizeOverrides(settings.overrides),
+        workingHours: normalizeWorkingHours(settings.workingHours ?? defaultSettings.workingHours),
+        overrides: normalizeOverrides(settings.overrides ?? defaultSettings.overrides),
       })
       setLoading(false)
     }
@@ -203,7 +115,7 @@ export default function SettingsPage() {
 
   const updateOverride = (
     overrideIndex: number,
-    updater: (override: OverrideDay) => OverrideDay
+    updater: (override: DateOverrideDay) => DateOverrideDay
   ) => {
     setForm((prev) => ({
       ...prev,
@@ -293,10 +205,14 @@ export default function SettingsPage() {
       return
     }
 
-    const data = (await response.json()) as { settings?: SettingsForm }
-    if (data.settings) {
-      setForm(data.settings)
-    }
+    const data = (await response.json()) as { settings?: AppSettingsPayload }
+    const settings = data.settings ?? {}
+    setForm({
+      ...defaultSettings,
+      ...settings,
+      workingHours: normalizeWorkingHours(settings.workingHours ?? defaultSettings.workingHours),
+      overrides: normalizeOverrides(settings.overrides ?? defaultSettings.overrides),
+    })
     toast.success("Settings updated.")
     setSaving(false)
   }
@@ -366,7 +282,7 @@ export default function SettingsPage() {
             <div key={day.day} className="rounded-lg border p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="text-sm font-medium">
-                  {WEEKDAYS.find((item) => item.value === day.day)?.label ?? day.day}
+                  {WEEKDAY_OPTIONS.find((item) => item.value === day.day)?.label ?? day.day}
                 </div>
                 <label className="flex items-center gap-2 text-sm">
                   <input

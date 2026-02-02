@@ -6,33 +6,10 @@ import { useSession } from "next-auth/react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useDateFormatter } from "@/hooks/use-date-formatter"
 import { canManageUsers, type Role } from "@/lib/permissions"
-
-type Gender = "MALE" | "FEMALE" | "NON_BINARY" | "OTHER" | "PREFER_NOT_TO_SAY"
-type UserStatus = "ACTIVE" | "SUSPENDED" | "INVITED" | "ARCHIVED"
-
-type UserProfile = {
-  id: string
-  name: string | null
-  email: string
-  phone: string | null
-  image: string | null
-  role: Role
-  status: UserStatus
-  gender: Gender | null
-  dateOfBirth: string | null
-  marketingOptIn: boolean
-  addressLine1: string | null
-  addressLine2: string | null
-  city: string | null
-  state: string | null
-  postalCode: string | null
-  country: string | null
-  createdAt: string
-  updatedAt: string
-}
+import type { UserProfile } from "@/types/users"
+import { UserProfileSections } from "./user-profile-sections"
 
 export default function UserProfilePage() {
   const { formatDate } = useDateFormatter()
@@ -87,98 +64,7 @@ export default function UserProfilePage() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Profile</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <div className="text-xs text-muted-foreground">Role</div>
-                <div className="font-medium">{user.role}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Status</div>
-                <div className="font-medium">{user.status}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Phone</div>
-                <div className="font-medium">{user.phone ?? "-"}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Date of birth</div>
-                <div className="font-medium">{formatDate(user.dateOfBirth)}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Gender</div>
-                <div className="font-medium">
-                  {user.gender ? user.gender.replaceAll("_", " ") : "-"}
-                </div>
-              </div>
-              {user.role !== "STAFF" ? (
-                <div>
-                  <div className="text-xs text-muted-foreground">Marketing opt-in</div>
-                  <div className="font-medium">
-                    {user.marketingOptIn ? "Yes" : "No"}
-                  </div>
-                </div>
-              ) : null}
-              <div>
-                <div className="text-xs text-muted-foreground">Created</div>
-                <div className="font-medium">{formatDate(user.createdAt)}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Updated</div>
-                <div className="font-medium">{formatDate(user.updatedAt)}</div>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs text-muted-foreground">Address</div>
-              <div className="font-medium">
-                {user.addressLine1 || user.addressLine2 || user.city ? (
-                  <div className="space-y-1">
-                    <div>{user.addressLine1 ?? "-"}</div>
-                    {user.addressLine2 ? <div>{user.addressLine2}</div> : null}
-                    <div>
-                      {[user.city, user.state, user.postalCode]
-                        .filter(Boolean)
-                        .join(", ") || "-"}
-                    </div>
-                    <div>{user.country ?? "-"}</div>
-                  </div>
-                ) : (
-                  "-"
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Avatar</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4">
-              <div className="h-16 w-16 overflow-hidden rounded-full border bg-muted">
-                {user.image ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={user.image}
-                    alt={user.name ?? "User"}
-                    className="h-full w-full object-cover"
-                  />
-                ) : null}
-              </div>
-              <div className="text-sm text-muted-foreground">
-                {user.image ? "Profile image set" : "No image uploaded"}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <UserProfileSections user={user} formatDate={formatDate} />
     </div>
   )
 }

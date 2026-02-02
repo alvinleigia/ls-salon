@@ -22,7 +22,7 @@ export async function GET(request: Request) {
   const isDefault = searchParams.get("isDefault") === "true"
   const startDate = searchParams.get("startDate")?.trim()
   const sort = searchParams.get("sort") ?? "startDate"
-  const order = searchParams.get("order") === "desc" ? "desc" : "asc"
+  const order: Prisma.SortOrder = searchParams.get("order") === "desc" ? "desc" : "asc"
   const pageParamRaw = searchParams.get("page")
   const pageSizeParamRaw = searchParams.get("pageSize")
   const hasPagination = pageParamRaw !== null && pageSizeParamRaw !== null
@@ -31,12 +31,7 @@ export async function GET(request: Request) {
   const page = hasPagination ? Math.max(1, pageParam) : 1
   const pageSize = hasPagination ? Math.max(1, pageSizeParam) : undefined
 
-  const where: {
-    isDefault?: boolean
-    startDate?: { gte?: Date; lte?: Date }
-    assignments?: { some?: { staffProfile?: { userId?: string } } }
-    OR?: { name?: { contains: string; mode: "insensitive" } }[]
-  } = {}
+  const where: Prisma.ShiftScheduleWhereInput = {}
   if (staffId) {
     where.assignments = { some: { staffProfile: { userId: staffId } } }
   }
@@ -55,10 +50,20 @@ export async function GET(request: Request) {
     where.OR = [{ name: { contains: q, mode: "insensitive" } }]
   }
 
-  const orderBy =
-    sort === "createdAt" || sort === "updatedAt" || sort === "startDate"
-      ? { [sort]: order }
-      : { startDate: "asc" }
+  let orderBy: Prisma.ShiftScheduleOrderByWithRelationInput
+  switch (sort) {
+    case "createdAt":
+      orderBy = { createdAt: order }
+      break
+    case "updatedAt":
+      orderBy = { updatedAt: order }
+      break
+    case "startDate":
+      orderBy = { startDate: order }
+      break
+    default:
+      orderBy = { startDate: "asc" }
+  }
 
   const total = await prisma.shiftSchedule.count({ where })
   const schedules = await prisma.shiftSchedule.findMany({

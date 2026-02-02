@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { Prisma } from "@prisma/client"
 
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
@@ -20,7 +21,7 @@ export async function GET(request: Request) {
   const q = searchParams.get("q")?.trim()
   const status = searchParams.get("status")
   const sort = searchParams.get("sort") ?? "name"
-  const order = searchParams.get("order") === "desc" ? "desc" : "asc"
+  const order: Prisma.SortOrder = searchParams.get("order") === "desc" ? "desc" : "asc"
   const pageParamRaw = searchParams.get("page")
   const pageSizeParamRaw = searchParams.get("pageSize")
   const hasPagination = pageParamRaw !== null && pageSizeParamRaw !== null
@@ -29,10 +30,7 @@ export async function GET(request: Request) {
   const page = hasPagination ? Math.max(1, pageParam) : 1
   const pageSize = hasPagination ? Math.max(1, pageSizeParam) : undefined
 
-  const where: {
-    isActive?: boolean
-    OR?: { name?: { contains: string; mode: "insensitive" } }[]
-  } = {}
+  const where: Prisma.ShiftTemplateWhereInput = {}
 
   if (!includeInactive) {
     if (status === "INACTIVE") {
@@ -55,10 +53,17 @@ export async function GET(request: Request) {
     ]
   }
 
-  const orderBy =
-    sort === "createdAt" || sort === "updatedAt"
-      ? { [sort]: order }
-      : { name: order }
+  let orderBy: Prisma.ShiftTemplateOrderByWithRelationInput
+  switch (sort) {
+    case "createdAt":
+      orderBy = { createdAt: order }
+      break
+    case "updatedAt":
+      orderBy = { updatedAt: order }
+      break
+    default:
+      orderBy = { name: order }
+  }
 
   const total = await prisma.shiftTemplate.count({ where })
   const templates = await prisma.shiftTemplate.findMany({

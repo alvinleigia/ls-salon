@@ -28,87 +28,25 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   DataTable,
   DataTablePagination,
   DataTableToolbar,
 } from "@/components/data-table"
-import { FormField } from "@/components/form-field"
 import { useFormErrors } from "@/hooks/use-form-errors"
+import type { AppSettingsPayload, WorkingDay } from "@/types/scheduling"
 import type { ListResponse } from "@/types/api"
-
-type Weekday =
-  | "MONDAY"
-  | "TUESDAY"
-  | "WEDNESDAY"
-  | "THURSDAY"
-  | "FRIDAY"
-  | "SATURDAY"
-  | "SUNDAY"
-
-type WorkingPeriod = {
-  kind: "WORK" | "BREAK"
-  startTime: string
-  endTime: string
-}
-
-type WorkingDay = {
-  day: Weekday
-  isOpen: boolean
-  periods: WorkingPeriod[]
-}
-
-type SettingsResponse = {
-  settings?: {
-    workingHours?: WorkingDay[]
-  }
-}
-
-type ShiftTemplateBreak = {
-  id?: string
-  startTime: string
-  endTime: string
-  sortOrder?: number
-}
-
-type ShiftTemplateRow = {
-  id: string
-  name: string
-  description: string | null
-  color: string | null
-  isActive: boolean
-  startTime: string
-  endTime: string
-  breaks: ShiftTemplateBreak[]
-  createdAt: string
-  updatedAt: string
-}
-
-type ShiftTemplateForm = {
-  name: string
-  description: string
-  color: string
-  isActive: boolean
-  startTime: string
-  endTime: string
-  breaks: ShiftTemplateBreak[]
-}
-
-type TemplateStatus = "ACTIVE" | "INACTIVE"
-
-const statusOptions: TemplateStatus[] = ["ACTIVE", "INACTIVE"]
-
-const defaultTemplateForm: ShiftTemplateForm = {
-  name: "",
-  description: "",
-  color: "#2563eb",
-  isActive: true,
-  startTime: "09:00",
-  endTime: "18:00",
-  breaks: [],
-}
+import type {
+  ShiftTemplateBreak,
+  ShiftTemplateForm,
+  ShiftTemplateRow,
+} from "@/types/shifts"
+import { TemplateFormFields } from "./template-form-fields"
+import {
+  defaultTemplateForm,
+  templateStatusOptions,
+  type TemplateStatus,
+} from "./template-form-model"
 
 const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
   if (value === "asc") return <ArrowUpIcon className="h-4 w-4" />
@@ -181,7 +119,7 @@ export default function ShiftsPage() {
     if (!response.ok) {
       return
     }
-    const data = (await response.json()) as SettingsResponse
+    const data = (await response.json()) as { settings?: AppSettingsPayload }
     setWorkingHours(data.settings?.workingHours ?? [])
   }, [])
 
@@ -617,7 +555,7 @@ export default function ShiftsPage() {
           }
         >
           <option value="all">All statuses</option>
-          {statusOptions.map((status) => (
+          {templateStatusOptions.map((status) => (
             <option key={status} value={status}>
               {status === "ACTIVE" ? "Active" : "Inactive"}
             </option>
@@ -669,169 +607,19 @@ export default function ShiftsPage() {
             <DialogDescription>Define a reusable schedule.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto">
-            <div className="grid gap-4">
-              <FormField id="template-name" label="Name" error={createErrors.name}>
-                <Input
-                  id="template-name"
-                  value={newTemplate.name}
-                  onChange={(event) =>
-                    setNewTemplate((prev) => ({ ...prev, name: event.target.value }))
-                  }
-                />
-              </FormField>
-              <FormField
-                id="template-description"
-                label="Description"
-                error={createErrors.description}
-              >
-                <Input
-                  id="template-description"
-                  value={newTemplate.description}
-                  onChange={(event) =>
-                    setNewTemplate((prev) => ({
-                      ...prev,
-                      description: event.target.value,
-                    }))
-                  }
-                />
-              </FormField>
-              <FormField id="template-color" label="Color" error={createErrors.color}>
-                <Input
-                  id="template-color"
-                  type="color"
-                  value={newTemplate.color}
-                  onChange={(event) =>
-                    setNewTemplate((prev) => ({
-                      ...prev,
-                      color: event.target.value,
-                    }))
-                  }
-                />
-              </FormField>
-              <FormField id="template-status" label="Status" error={createErrors.isActive}>
-                <select
-                  id="template-status"
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  value={newTemplate.isActive ? "ACTIVE" : "INACTIVE"}
-                  onChange={(event) =>
-                    setNewTemplate((prev) => ({
-                      ...prev,
-                      isActive: event.target.value === "ACTIVE",
-                    }))
-                  }
-                >
-                  {statusOptions.map((status) => (
-                    <option key={status} value={status}>
-                      {status === "ACTIVE" ? "Active" : "Inactive"}
-                    </option>
-                  ))}
-                </select>
-              </FormField>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <Label>Shift time</Label>
-                  <span className="text-xs text-muted-foreground">
-                    Working hours bounds: {getWorkingHoursBounds().minStart} -{" "}
-                    {getWorkingHoursBounds().maxEnd}
-                  </span>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <FormField
-                    id="create-shift-start"
-                    label="Start"
-                    error={createErrors.startTime}
-                  >
-                    <Input
-                      type="time"
-                      min={getWorkingHoursBounds().minStart}
-                      max={getWorkingHoursBounds().maxEnd}
-                      value={newTemplate.startTime}
-                      onChange={(event) =>
-                        setNewTemplate((prev) => ({
-                          ...prev,
-                          startTime: event.target.value,
-                        }))
-                      }
-                    />
-                  </FormField>
-                  <FormField id="create-shift-end" label="End" error={createErrors.endTime}>
-                    <Input
-                      type="time"
-                      min={getWorkingHoursBounds().minStart}
-                      max={getWorkingHoursBounds().maxEnd}
-                      value={newTemplate.endTime}
-                      onChange={(event) =>
-                        setNewTemplate((prev) => ({
-                          ...prev,
-                          endTime: event.target.value,
-                        }))
-                      }
-                    />
-                  </FormField>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <Label>Breaks</Label>
-                  <span className="text-xs text-muted-foreground">
-                    Optional breaks within the shift range.
-                  </span>
-                </div>
-                <div className="space-y-3">
-                  {newTemplate.breaks.map((period, index) => (
-                    <div
-                      key={`create-break-${index}`}
-                      className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
-                    >
-                      <FormField id={`create-break-start-${index}`} label="Start">
-                        <Input
-                          type="time"
-                          min={newTemplate.startTime}
-                          max={newTemplate.endTime}
-                          value={period.startTime}
-                          onChange={(event) =>
-                            updateBreak(setNewTemplate, index, (current) => ({
-                              ...current,
-                              startTime: event.target.value,
-                            }))
-                          }
-                        />
-                      </FormField>
-                      <FormField id={`create-break-end-${index}`} label="End">
-                        <Input
-                          type="time"
-                          min={newTemplate.startTime}
-                          max={newTemplate.endTime}
-                          value={period.endTime}
-                          onChange={(event) =>
-                            updateBreak(setNewTemplate, index, (current) => ({
-                              ...current,
-                              endTime: event.target.value,
-                            }))
-                          }
-                        />
-                      </FormField>
-                      <Button
-                        variant="outline"
-                        onClick={() => removeBreak(setNewTemplate, index)}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-                {createErrors.breaks ? (
-                  <p className="text-xs text-destructive">{createErrors.breaks}</p>
-                ) : null}
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" onClick={() => addBreak(setNewTemplate)}>
-                    Add break
-                  </Button>
-                </div>
-              </div>
-            </div>
+            <TemplateFormFields
+              mode="create"
+              template={newTemplate}
+              errors={createErrors}
+              minStart={getWorkingHoursBounds().minStart}
+              maxEnd={getWorkingHoursBounds().maxEnd}
+              onChange={setNewTemplate}
+              onAddBreak={() => addBreak(setNewTemplate)}
+              onUpdateBreak={(index, updater) =>
+                updateBreak(setNewTemplate, index, updater)
+              }
+              onRemoveBreak={(index) => removeBreak(setNewTemplate, index)}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
@@ -860,165 +648,19 @@ export default function ShiftsPage() {
             <DialogDescription>Update template details, shift time, and breaks.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto">
-            <div className="grid gap-4">
-              <FormField id="edit-template-name" label="Name" error={editErrors.name}>
-                <Input
-                  id="edit-template-name"
-                  value={editTemplate.name}
-                  onChange={(event) =>
-                    setEditTemplate((prev) => ({ ...prev, name: event.target.value }))
-                  }
-                />
-              </FormField>
-              <FormField
-                id="edit-template-description"
-                label="Description"
-                error={editErrors.description}
-              >
-                <Input
-                  id="edit-template-description"
-                  value={editTemplate.description}
-                  onChange={(event) =>
-                    setEditTemplate((prev) => ({
-                      ...prev,
-                      description: event.target.value,
-                    }))
-                  }
-                />
-              </FormField>
-              <FormField id="edit-template-color" label="Color" error={editErrors.color}>
-                <Input
-                  id="edit-template-color"
-                  type="color"
-                  value={editTemplate.color}
-                  onChange={(event) =>
-                    setEditTemplate((prev) => ({
-                      ...prev,
-                      color: event.target.value,
-                    }))
-                  }
-                />
-              </FormField>
-              <FormField id="edit-template-status" label="Status" error={editErrors.isActive}>
-                <select
-                  id="edit-template-status"
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  value={editTemplate.isActive ? "ACTIVE" : "INACTIVE"}
-                  onChange={(event) =>
-                    setEditTemplate((prev) => ({
-                      ...prev,
-                      isActive: event.target.value === "ACTIVE",
-                    }))
-                  }
-                >
-                  {statusOptions.map((status) => (
-                    <option key={status} value={status}>
-                      {status === "ACTIVE" ? "Active" : "Inactive"}
-                    </option>
-                  ))}
-                </select>
-              </FormField>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <Label>Shift time</Label>
-                  <span className="text-xs text-muted-foreground">
-                    Working hours bounds: {getWorkingHoursBounds().minStart} -{" "}
-                    {getWorkingHoursBounds().maxEnd}
-                  </span>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <FormField id="edit-shift-start" label="Start" error={editErrors.startTime}>
-                    <Input
-                      type="time"
-                      min={getWorkingHoursBounds().minStart}
-                      max={getWorkingHoursBounds().maxEnd}
-                      value={editTemplate.startTime}
-                      onChange={(event) =>
-                        setEditTemplate((prev) => ({
-                          ...prev,
-                          startTime: event.target.value,
-                        }))
-                      }
-                    />
-                  </FormField>
-                  <FormField id="edit-shift-end" label="End" error={editErrors.endTime}>
-                    <Input
-                      type="time"
-                      min={getWorkingHoursBounds().minStart}
-                      max={getWorkingHoursBounds().maxEnd}
-                      value={editTemplate.endTime}
-                      onChange={(event) =>
-                        setEditTemplate((prev) => ({
-                          ...prev,
-                          endTime: event.target.value,
-                        }))
-                      }
-                    />
-                  </FormField>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <Label>Breaks</Label>
-                  <span className="text-xs text-muted-foreground">
-                    Optional breaks within the shift range.
-                  </span>
-                </div>
-                <div className="space-y-3">
-                  {editTemplate.breaks.map((period, index) => (
-                    <div
-                      key={`edit-break-${index}`}
-                      className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
-                    >
-                      <FormField id={`edit-break-start-${index}`} label="Start">
-                        <Input
-                          type="time"
-                          min={editTemplate.startTime}
-                          max={editTemplate.endTime}
-                          value={period.startTime}
-                          onChange={(event) =>
-                            updateBreak(setEditTemplate, index, (current) => ({
-                              ...current,
-                              startTime: event.target.value,
-                            }))
-                          }
-                        />
-                      </FormField>
-                      <FormField id={`edit-break-end-${index}`} label="End">
-                        <Input
-                          type="time"
-                          min={editTemplate.startTime}
-                          max={editTemplate.endTime}
-                          value={period.endTime}
-                          onChange={(event) =>
-                            updateBreak(setEditTemplate, index, (current) => ({
-                              ...current,
-                              endTime: event.target.value,
-                            }))
-                          }
-                        />
-                      </FormField>
-                      <Button
-                        variant="outline"
-                        onClick={() => removeBreak(setEditTemplate, index)}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-                {editErrors.breaks ? (
-                  <p className="text-xs text-destructive">{editErrors.breaks}</p>
-                ) : null}
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" onClick={() => addBreak(setEditTemplate)}>
-                    Add break
-                  </Button>
-                </div>
-              </div>
-            </div>
+            <TemplateFormFields
+              mode="edit"
+              template={editTemplate}
+              errors={editErrors}
+              minStart={getWorkingHoursBounds().minStart}
+              maxEnd={getWorkingHoursBounds().maxEnd}
+              onChange={setEditTemplate}
+              onAddBreak={() => addBreak(setEditTemplate)}
+              onUpdateBreak={(index, updater) =>
+                updateBreak(setEditTemplate, index, updater)
+              }
+              onRemoveBreak={(index) => removeBreak(setEditTemplate, index)}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>
