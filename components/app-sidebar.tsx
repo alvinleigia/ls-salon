@@ -8,6 +8,7 @@ import { useTheme } from "next-themes"
 import {
   CalendarClockIcon,
   ClockIcon,
+  PackageIcon,
   LayoutDashboardIcon,
   LogOutIcon,
   MailIcon,
@@ -96,6 +97,72 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              {canManageUsers(role ?? null) ? (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    data-active={pathname.startsWith("/inventory")}
+                  >
+                    <Link href="/inventory" className="flex w-full items-center">
+                      <PackageIcon className="h-4 w-4" />
+                      <span>Inventory</span>
+                      <span
+                        className={`ml-auto h-2 w-2 rounded-full ${
+                          pathname.startsWith("/inventory")
+                            ? "bg-sidebar-primary"
+                            : "bg-transparent"
+                        }`}
+                      />
+                    </Link>
+                  </SidebarMenuButton>
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/inventory"}
+                      >
+                        <Link href="/inventory">
+                          <PackageIcon className="h-4 w-4" />
+                          <span>Products</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/inventory/categories"}
+                      >
+                        <Link href="/inventory/categories">
+                          <TagIcon className="h-4 w-4" />
+                          <span>Categories</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/inventory/suppliers"}
+                      >
+                        <Link href="/inventory/suppliers">
+                          <UsersIcon className="h-4 w-4" />
+                          <span>Suppliers</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/inventory/purchases"}
+                      >
+                        <Link href="/inventory/purchases">
+                          <CalendarClockIcon className="h-4 w-4" />
+                          <span>Purchases</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  </SidebarMenuSub>
+                </SidebarMenuItem>
+              ) : null}
               {canManageUsers(role ?? null) ? (
                 <SidebarMenuItem>
                   <SidebarMenuButton

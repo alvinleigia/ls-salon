@@ -115,6 +115,12 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Shift template deletion is blocked when assigned to staff (409 response).
 - Roster UI lives under `/shifts/roster` and uses Syncfusion Scheduler (month view).
 - Scheduler hides non-business hours with `showNonBusiness: false` and business hour bounds.
+- Inventory module lives under `/inventory` with admin/manager access and uses standard list params/response.
+- Inventory module subroutes: `/inventory/categories`, `/inventory/suppliers`, `/inventory/purchases`.
+- Inventory products require CP (`costPriceCents`) and MRP (`mrpCents`), support multiple suppliers, and can define default taxes from `/settings/taxes`.
+- Product-supplier links store supplier-specific SKU/cost/min-order/lead-time with a single preferred supplier.
+- Purchase receipt updates inventory stock by writing stock movement ledger entries (`InventoryStockMovement`) and incrementing on-hand quantity.
+- Inventory delete policy follows global rules: soft delete via `INACTIVE` when references exist; hard delete only when unreferenced.
 - List pageSize max is 100 unless explicitly raised (align UI requests accordingly).
 - Seed helpers live in `scripts/` (use `seed-service-categories.js` for defaults).
 - Services seed: `scripts/seed-services.js` (requires categories).

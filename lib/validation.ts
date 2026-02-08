@@ -13,6 +13,15 @@ export const serviceCategoryStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
 export const serviceStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
 export const serviceTypeSchema = z.enum(["STANDARD", "PACKAGE"])
 export const taxModeSchema = z.enum(["EXCLUSIVE", "INCLUSIVE"])
+export const inventoryCategoryStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
+export const supplierStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
+export const inventoryProductStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
+export const purchaseOrderStatusSchema = z.enum([
+  "DRAFT",
+  "ORDERED",
+  "RECEIVED",
+  "CANCELED",
+])
 export const appointmentStatusSchema = z.enum([
   "SCHEDULED",
   "CONFIRMED",
@@ -331,6 +340,122 @@ export const taxUpdateSchema = taxCreateSchema.partial().refine(
 
 export type TaxCreateInput = z.infer<typeof taxCreateSchema>
 export type TaxUpdateInput = z.infer<typeof taxUpdateSchema>
+
+export const createInventoryCategorySchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  description: z.string().trim().max(500).optional().or(z.literal("")),
+  status: inventoryCategoryStatusSchema.optional(),
+  sortOrder: z.coerce.number().int().min(0).max(9999).optional(),
+})
+
+export const updateInventoryCategorySchema = createInventoryCategorySchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required.",
+  })
+
+export type CreateInventoryCategoryInput = z.infer<
+  typeof createInventoryCategorySchema
+>
+export type UpdateInventoryCategoryInput = z.infer<
+  typeof updateInventoryCategorySchema
+>
+
+export const createSupplierSchema = z.object({
+  name: z.string().trim().min(2).max(140),
+  contactPerson: z.string().trim().max(120).optional().or(z.literal("")),
+  email: z.string().trim().email().optional().or(z.literal("")),
+  phone: z.string().trim().max(30).optional().or(z.literal("")),
+  taxId: z.string().trim().max(60).optional().or(z.literal("")),
+  leadTimeDays: z.coerce.number().int().min(0).max(365).optional(),
+  addressLine1: z.string().trim().max(200).optional().or(z.literal("")),
+  addressLine2: z.string().trim().max(200).optional().or(z.literal("")),
+  city: z.string().trim().max(100).optional().or(z.literal("")),
+  state: z.string().trim().max(100).optional().or(z.literal("")),
+  postalCode: z.string().trim().max(20).optional().or(z.literal("")),
+  country: z.string().trim().max(100).optional().or(z.literal("")),
+  notes: z.string().trim().max(1000).optional().or(z.literal("")),
+  status: supplierStatusSchema.optional(),
+})
+
+export const updateSupplierSchema = createSupplierSchema.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  { message: "At least one field is required." }
+)
+
+export type CreateSupplierInput = z.infer<typeof createSupplierSchema>
+export type UpdateSupplierInput = z.infer<typeof updateSupplierSchema>
+
+const supplierLinkSchema = z.object({
+  supplierId: z.string().trim().min(1),
+  supplierSku: z.string().trim().max(120).optional().or(z.literal("")),
+  supplierCostCents: z.coerce.number().int().min(0).max(100000000).optional(),
+  minOrderQty: z.coerce.number().int().min(1).max(1000000).optional(),
+  leadTimeDays: z.coerce.number().int().min(0).max(365).optional(),
+  isPreferred: z.boolean().optional(),
+})
+
+export const createInventoryProductSchema = z.object({
+  sku: z.string().trim().min(2).max(80),
+  name: z.string().trim().min(2).max(160),
+  description: z.string().trim().max(1000).optional().or(z.literal("")),
+  unit: z.string().trim().min(1).max(30).optional(),
+  categoryId: z.string().trim().min(1),
+  status: inventoryProductStatusSchema.optional(),
+  costPriceCents: z.coerce.number().int().min(0).max(100000000),
+  mrpCents: z.coerce.number().int().min(0).max(100000000),
+  reorderPoint: z.coerce.number().int().min(0).max(1000000).optional(),
+  reorderQty: z.coerce.number().int().min(0).max(1000000).optional(),
+  onHandQty: z.coerce.number().int().min(0).max(1000000).optional(),
+  isPhysical: z.boolean().optional(),
+  taxIds: z.array(z.string().trim().min(1)).optional().default([]),
+  supplierLinks: z.array(supplierLinkSchema).optional().default([]),
+})
+
+export const updateInventoryProductSchema = createInventoryProductSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required.",
+  })
+
+export type CreateInventoryProductInput = z.infer<
+  typeof createInventoryProductSchema
+>
+export type UpdateInventoryProductInput = z.infer<
+  typeof updateInventoryProductSchema
+>
+
+export const purchaseOrderItemInputSchema = z.object({
+  productId: z.string().trim().min(1),
+  quantity: z.coerce.number().int().min(1).max(1000000),
+  unitCostCents: z.coerce.number().int().min(0).max(100000000),
+})
+
+export const createPurchaseOrderSchema = z.object({
+  supplierId: z.string().trim().min(1),
+  orderDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  expectedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
+  status: purchaseOrderStatusSchema.optional(),
+  notes: z.string().trim().max(1000).optional().or(z.literal("")),
+  items: z.array(purchaseOrderItemInputSchema).min(1),
+})
+
+export const updatePurchaseOrderSchema = z
+  .object({
+    status: purchaseOrderStatusSchema.optional(),
+    expectedDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional()
+      .or(z.literal("")),
+    notes: z.string().trim().max(1000).optional().or(z.literal("")),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required.",
+  })
+
+export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>
+export type UpdatePurchaseOrderInput = z.infer<typeof updatePurchaseOrderSchema>
 
 export const shiftTemplateSchema = z
   .object({

@@ -1,0 +1,392 @@
+"use client"
+
+import { FormField } from "@/components/form-field"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import type {
+  InventoryCategoryOption,
+  InventoryProductFormValues,
+  SupplierOption,
+} from "@/types/inventory"
+import type { TaxRow } from "@/types/scheduling"
+import { inventoryProductStatusOptions } from "./product-form-model"
+
+type ProductFormFieldsProps = {
+  values: InventoryProductFormValues
+  errors: Record<string, string | undefined>
+  categories: InventoryCategoryOption[]
+  suppliers: SupplierOption[]
+  taxes: TaxRow[]
+  onChange: (next: InventoryProductFormValues) => void
+}
+
+const updateSupplierLink = (
+  values: InventoryProductFormValues,
+  index: number,
+  patch: Partial<InventoryProductFormValues["supplierLinks"][number]>
+) =>
+  values.supplierLinks.map((link, linkIndex) =>
+    linkIndex === index ? { ...link, ...patch } : link
+  )
+
+export function ProductFormFields({
+  values,
+  errors,
+  categories,
+  suppliers,
+  taxes,
+  onChange,
+}: ProductFormFieldsProps) {
+  return (
+    <div className="grid gap-4 py-1">
+      <div className="grid gap-4 md:grid-cols-2">
+        <FormField id="product-sku" label="SKU" error={errors.sku}>
+          <Input
+            id="product-sku"
+            value={values.sku}
+            onChange={(event) => onChange({ ...values, sku: event.target.value })}
+          />
+        </FormField>
+        <FormField id="product-name" label="Product name" error={errors.name}>
+          <Input
+            id="product-name"
+            value={values.name}
+            onChange={(event) => onChange({ ...values, name: event.target.value })}
+          />
+        </FormField>
+      </div>
+
+      <FormField id="product-description" label="Description" error={errors.description}>
+        <Input
+          id="product-description"
+          value={values.description}
+          onChange={(event) => onChange({ ...values, description: event.target.value })}
+        />
+      </FormField>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <FormField id="product-unit" label="Unit" error={errors.unit}>
+          <Input
+            id="product-unit"
+            value={values.unit}
+            onChange={(event) => onChange({ ...values, unit: event.target.value })}
+          />
+        </FormField>
+        <FormField id="product-category" label="Category" error={errors.categoryId}>
+          <select
+            id="product-category"
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={values.categoryId}
+            onChange={(event) => onChange({ ...values, categoryId: event.target.value })}
+          >
+            <option value="">Select category</option>
+            {categories
+              .filter((category) => category.status === "ACTIVE")
+              .map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+          </select>
+        </FormField>
+        <FormField id="product-status" label="Status" error={errors.status}>
+          <select
+            id="product-status"
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={values.status}
+            onChange={(event) =>
+              onChange({
+                ...values,
+                status: event.target.value as InventoryProductFormValues["status"],
+              })
+            }
+          >
+            {inventoryProductStatusOptions.map((status) => (
+              <option key={status} value={status}>
+                {status === "ACTIVE" ? "Active" : "Inactive"}
+              </option>
+            ))}
+          </select>
+        </FormField>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <FormField id="product-cp" label="Cost price (CP)" error={errors.costPriceCents}>
+          <Input
+            id="product-cp"
+            value={values.costPrice}
+            onChange={(event) => onChange({ ...values, costPrice: event.target.value })}
+          />
+        </FormField>
+        <FormField id="product-mrp" label="MRP" error={errors.mrpCents}>
+          <Input
+            id="product-mrp"
+            value={values.mrp}
+            onChange={(event) => onChange({ ...values, mrp: event.target.value })}
+          />
+        </FormField>
+        <FormField id="product-on-hand" label="Opening stock" error={errors.onHandQty}>
+          <Input
+            id="product-on-hand"
+            type="number"
+            min={0}
+            value={values.onHandQty}
+            onChange={(event) =>
+              onChange({
+                ...values,
+                onHandQty: Math.max(0, Number(event.target.value || 0)),
+              })
+            }
+          />
+        </FormField>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <FormField id="product-reorder-point" label="Reorder point" error={errors.reorderPoint}>
+          <Input
+            id="product-reorder-point"
+            type="number"
+            min={0}
+            value={values.reorderPoint}
+            onChange={(event) =>
+              onChange({
+                ...values,
+                reorderPoint: Math.max(0, Number(event.target.value || 0)),
+              })
+            }
+          />
+        </FormField>
+        <FormField id="product-reorder-qty" label="Reorder qty" error={errors.reorderQty}>
+          <Input
+            id="product-reorder-qty"
+            type="number"
+            min={0}
+            value={values.reorderQty}
+            onChange={(event) =>
+              onChange({
+                ...values,
+                reorderQty: Math.max(0, Number(event.target.value || 0)),
+              })
+            }
+          />
+        </FormField>
+        <label className="inline-flex items-center gap-2 text-sm pt-8">
+          <input
+            type="checkbox"
+            checked={values.isPhysical}
+            onChange={(event) =>
+              onChange({ ...values, isPhysical: event.target.checked })
+            }
+          />
+          Physical product
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-sm font-medium">Taxes</p>
+        <div className="grid gap-2 md:grid-cols-2">
+          {taxes.map((tax) => {
+            const checked = values.taxIds.includes(tax.id)
+            return (
+              <label key={tax.id} className="inline-flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(event) =>
+                    onChange({
+                      ...values,
+                      taxIds: event.target.checked
+                        ? [...values.taxIds, tax.id]
+                        : values.taxIds.filter((taxId) => taxId !== tax.id),
+                    })
+                  }
+                />
+                {tax.name} ({tax.percent}%)
+              </label>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">Supplier links</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              onChange({
+                ...values,
+                supplierLinks: [
+                  ...values.supplierLinks,
+                  {
+                    supplierId: "",
+                    supplierSku: "",
+                    supplierCost: "",
+                    minOrderQty: 1,
+                    leadTimeDays: 0,
+                    isPreferred: values.supplierLinks.length === 0,
+                  },
+                ],
+              })
+            }
+          >
+            Add supplier
+          </Button>
+        </div>
+        {values.supplierLinks.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No suppliers linked. Add one or more suppliers for purchasing.
+          </p>
+        ) : null}
+        {values.supplierLinks.map((link, index) => (
+          <div key={`${link.supplierId}-${index}`} className="rounded-md border p-3 space-y-3">
+            <div className="grid gap-3 md:grid-cols-2">
+              <FormField
+                id={`supplier-${index}`}
+                label="Supplier"
+                error={errors[`supplierLinks.${index}.supplierId`]}
+              >
+                <select
+                  id={`supplier-${index}`}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={link.supplierId}
+                  onChange={(event) =>
+                    onChange({
+                      ...values,
+                      supplierLinks: updateSupplierLink(values, index, {
+                        supplierId: event.target.value,
+                      }),
+                    })
+                  }
+                >
+                  <option value="">Select supplier</option>
+                  {suppliers
+                    .filter((supplier) => supplier.status === "ACTIVE")
+                    .map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </option>
+                    ))}
+                </select>
+              </FormField>
+              <FormField
+                id={`supplier-sku-${index}`}
+                label="Supplier SKU"
+                error={errors[`supplierLinks.${index}.supplierSku`]}
+              >
+                <Input
+                  id={`supplier-sku-${index}`}
+                  value={link.supplierSku}
+                  onChange={(event) =>
+                    onChange({
+                      ...values,
+                      supplierLinks: updateSupplierLink(values, index, {
+                        supplierSku: event.target.value,
+                      }),
+                    })
+                  }
+                />
+              </FormField>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <FormField
+                id={`supplier-cost-${index}`}
+                label="Supplier cost"
+                error={errors[`supplierLinks.${index}.supplierCostCents`]}
+              >
+                <Input
+                  id={`supplier-cost-${index}`}
+                  value={link.supplierCost}
+                  onChange={(event) =>
+                    onChange({
+                      ...values,
+                      supplierLinks: updateSupplierLink(values, index, {
+                        supplierCost: event.target.value,
+                      }),
+                    })
+                  }
+                />
+              </FormField>
+              <FormField
+                id={`supplier-min-${index}`}
+                label="Min order qty"
+                error={errors[`supplierLinks.${index}.minOrderQty`]}
+              >
+                <Input
+                  id={`supplier-min-${index}`}
+                  type="number"
+                  min={1}
+                  value={link.minOrderQty}
+                  onChange={(event) =>
+                    onChange({
+                      ...values,
+                      supplierLinks: updateSupplierLink(values, index, {
+                        minOrderQty: Math.max(1, Number(event.target.value || 1)),
+                      }),
+                    })
+                  }
+                />
+              </FormField>
+              <FormField
+                id={`supplier-lead-${index}`}
+                label="Lead days"
+                error={errors[`supplierLinks.${index}.leadTimeDays`]}
+              >
+                <Input
+                  id={`supplier-lead-${index}`}
+                  type="number"
+                  min={0}
+                  value={link.leadTimeDays}
+                  onChange={(event) =>
+                    onChange({
+                      ...values,
+                      supplierLinks: updateSupplierLink(values, index, {
+                        leadTimeDays: Math.max(0, Number(event.target.value || 0)),
+                      }),
+                    })
+                  }
+                />
+              </FormField>
+            </div>
+            <div className="flex items-center justify-between">
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={link.isPreferred}
+                  onChange={(event) =>
+                    onChange({
+                      ...values,
+                      supplierLinks: values.supplierLinks.map((entry, entryIndex) => ({
+                        ...entry,
+                        isPreferred:
+                          entryIndex === index ? event.target.checked : false,
+                      })),
+                    })
+                  }
+                />
+                Preferred supplier
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  onChange({
+                    ...values,
+                    supplierLinks: values.supplierLinks.filter(
+                      (_, entryIndex) => entryIndex !== index
+                    ),
+                  })
+                }
+              >
+                Remove
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}

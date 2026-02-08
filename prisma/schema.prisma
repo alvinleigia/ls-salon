@@ -112,6 +112,34 @@ enum TaxMode {
   INCLUSIVE
 }
 
+enum InventoryCategoryStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SupplierStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum InventoryProductStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  ORDERED
+  RECEIVED
+  CANCELED
+}
+
+enum StockMovementType {
+  PURCHASE_RECEIPT
+  ADJUSTMENT_ADD
+  ADJUSTMENT_SUB
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String?
@@ -335,6 +363,7 @@ model Tax {
   isActive    Boolean  @default(true)
   sortOrder   Int      @default(0)
   services    ServiceTax[]
+  inventoryProducts InventoryProductTax[]
   orders      AppointmentOrderTax[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -623,4 +652,163 @@ model PasswordResetToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+model InventoryCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  status      InventoryCategoryStatus @default(ACTIVE)
+  sortOrder   Int      @default(0)
+  products    InventoryProduct[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@index([sortOrder])
+}
+
+model Supplier {
+  id            String   @id @default(cuid())
+  name          String
+  contactPerson String?
+  email         String?
+  phone         String?
+  taxId         String?
+  leadTimeDays  Int      @default(0)
+  addressLine1  String?
+  addressLine2  String?
+  city          String?
+  state         String?
+  postalCode    String?
+  country       String?
+  notes         String?
+  status        SupplierStatus @default(ACTIVE)
+  products      InventoryProductSupplier[]
+  purchaseOrders PurchaseOrder[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([name])
+  @@index([status])
+}
+
+model InventoryProduct {
+  id             String   @id @default(cuid())
+  sku            String   @unique
+  name           String
+  description    String?
+  unit           String   @default("unit")
+  categoryId     String
+  status         InventoryProductStatus @default(ACTIVE)
+  costPriceCents Int      @default(0)
+  mrpCents       Int      @default(0)
+  reorderPoint   Int      @default(0)
+  reorderQty     Int      @default(0)
+  onHandQty      Int      @default(0)
+  isPhysical     Boolean  @default(true)
+  category       InventoryCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  suppliers      InventoryProductSupplier[]
+  taxes          InventoryProductTax[]
+  purchaseItems  PurchaseOrderItem[]
+  stockMovements InventoryStockMovement[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([name])
+  @@index([status])
+  @@index([categoryId])
+  @@index([onHandQty])
+}
+
+model InventoryProductSupplier {
+  productId         String
+  supplierId        String
+  supplierSku       String?
+  supplierCostCents Int?
+  minOrderQty       Int      @default(1)
+  leadTimeDays      Int?
+  isPreferred       Boolean  @default(false)
+  lastPurchasedAt   DateTime?
+  product           InventoryProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  supplier          Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@id([productId, supplierId])
+  @@index([supplierId])
+  @@index([isPreferred])
+}
+
+model InventoryProductTax {
+  productId String
+  taxId     String
+  product   InventoryProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tax       Tax      @relation(fields: [taxId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+
+  @@id([productId, taxId])
+  @@index([taxId])
+}
+
+model PurchaseOrder {
+  id           String   @id @default(cuid())
+  orderNumber  String   @unique
+  supplierId   String
+  status       PurchaseOrderStatus @default(DRAFT)
+  orderDate    DateTime @db.Date
+  expectedDate DateTime? @db.Date
+  notes        String?
+  subtotalCents Int     @default(0)
+  taxCents     Int      @default(0)
+  totalCents   Int      @default(0)
+  receivedAt   DateTime?
+  supplier     Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  items        PurchaseOrderItem[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([supplierId])
+  @@index([status])
+  @@index([orderDate])
+}
+
+model PurchaseOrderItem {
+  id            String   @id @default(cuid())
+  orderId       String
+  productId     String
+  quantity      Int
+  receivedQty   Int      @default(0)
+  unitCostCents Int
+  taxPercent    Float    @default(0)
+  lineSubtotalCents Int  @default(0)
+  lineTaxCents  Int      @default(0)
+  lineTotalCents Int     @default(0)
+  order         PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product       InventoryProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+  stockMovements InventoryStockMovement[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model InventoryStockMovement {
+  id           String   @id @default(cuid())
+  productId    String
+  orderItemId  String?
+  type         StockMovementType
+  quantityDelta Int
+  unitCostCents Int?
+  note         String?
+  occurredAt   DateTime @default(now())
+  product      InventoryProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+  orderItem    PurchaseOrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+
+  @@index([productId])
+  @@index([orderItemId])
+  @@index([type])
+  @@index([occurredAt])
 }
