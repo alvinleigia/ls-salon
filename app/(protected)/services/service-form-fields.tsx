@@ -181,6 +181,19 @@ export function ServiceFormFields({
           )}
         </div>
       </FormField>
+      <FormField id={fieldId("service-tax-mode")} label="Tax mode" error={errors.taxMode}>
+        <select
+          id={fieldId("service-tax-mode")}
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+          value={values.taxMode}
+          onChange={(event) =>
+            update("taxMode", event.target.value as ServiceFormValues["taxMode"])
+          }
+        >
+          <option value="EXCLUSIVE">Exclusive (tax added on top)</option>
+          <option value="INCLUSIVE">Inclusive (price includes tax)</option>
+        </select>
+      </FormField>
 
       {values.type === "PACKAGE" ? (
         <FormField

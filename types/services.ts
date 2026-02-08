@@ -1,5 +1,6 @@
 export type ServiceStatus = "ACTIVE" | "INACTIVE"
 export type ServiceType = "STANDARD" | "PACKAGE"
+export type TaxMode = "EXCLUSIVE" | "INCLUSIVE"
 export type CategoryStatus = "ACTIVE" | "INACTIVE"
 
 export type CategoryOption = {
@@ -41,6 +42,7 @@ export type ServiceRow = {
   category: { id: string; name: string }
   packageItems?: { itemService: ServiceOption }[]
   taxIds?: string[]
+  taxMode?: TaxMode
 }
 
 export type ServiceFormValues = {
@@ -53,4 +55,5 @@ export type ServiceFormValues = {
   type: ServiceType
   packageItemIds: string[]
   taxIds: string[]
+  taxMode: TaxMode
 }

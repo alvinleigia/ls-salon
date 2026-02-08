@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner"
 
 import { formatDateForDisplay, parseISODate, toISODate } from "@/lib/date"
+import { weekdayToSchedulerFirstDay } from "@/lib/formatting"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -57,6 +58,7 @@ export default function RosterPage() {
     workingHours: [],
     overrides: [],
   })
+  const [firstDayOfWeek, setFirstDayOfWeek] = React.useState(0)
   const [templates, setTemplates] = React.useState<ShiftTemplateRow[]>([])
   const [staffAssignments, setStaffAssignments] = React.useState<
     Record<string, StaffScheduleAssignment[]>
@@ -109,6 +111,7 @@ export default function RosterPage() {
           timeZone: nextSettings.timeZone,
           dateFormat: nextSettings.dateFormat,
         })
+        setFirstDayOfWeek(weekdayToSchedulerFirstDay(nextSettings.firstDayOfWeek))
       }
     } catch (error) {
       console.error(error)
@@ -850,7 +853,7 @@ export default function RosterPage() {
           <ScheduleComponent
             ref={scheduleRef}
             currentView="Month"
-            firstDayOfWeek={0}
+            firstDayOfWeek={firstDayOfWeek}
             showQuickInfo
             eventSettings={{
               dataSource: calendarEvents,

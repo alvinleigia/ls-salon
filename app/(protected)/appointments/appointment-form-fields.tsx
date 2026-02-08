@@ -2,6 +2,7 @@
 
 import { FormField } from "@/components/form-field"
 import { Input } from "@/components/ui/input"
+import { SearchableSelect } from "@/components/searchable-select"
 import type {
   AppointmentStatus,
   AppointmentCustomerOption,
@@ -41,54 +42,48 @@ export function AppointmentFormFields({
   return (
     <div className="grid gap-4">
       <FormField id="appointment-customer" label="Customer" error={errors.customerId}>
-        <select
+        <SearchableSelect
           id="appointment-customer"
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
           value={values.customerId}
           disabled={disableParticipantFields}
-          onChange={(event) => update("customerId", event.target.value)}
-        >
-          <option value="">Select customer</option>
-          {customers.map((customer) => (
-            <option key={customer.id} value={customer.id}>
-              {(customer.name?.trim() || customer.email) + ` (${customer.email})`}
-            </option>
-          ))}
-        </select>
+          placeholder="Select customer"
+          searchPlaceholder="Search customer..."
+          options={customers.map((customer) => ({
+            value: customer.id,
+            label: `${customer.name?.trim() || customer.email} (${customer.email})`,
+          }))}
+          onChange={(nextValue) => update("customerId", nextValue)}
+        />
       </FormField>
 
       <FormField id="appointment-service" label="Service" error={errors.serviceId}>
-        <select
+        <SearchableSelect
           id="appointment-service"
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
           value={values.serviceId}
           disabled={disableParticipantFields}
-          onChange={(event) => update("serviceId", event.target.value)}
-        >
-          <option value="">Select service</option>
-          {services.map((service) => (
-            <option key={service.id} value={service.id}>
-              {service.name} ({service.durationMinutes}m)
-            </option>
-          ))}
-        </select>
+          placeholder="Select service"
+          searchPlaceholder="Search service..."
+          options={services.map((service) => ({
+            value: service.id,
+            label: `${service.name} (${service.durationMinutes}m)`,
+          }))}
+          onChange={(nextValue) => update("serviceId", nextValue)}
+        />
       </FormField>
 
       <FormField id="appointment-staff" label="Staff attendant" error={errors.staffId}>
-        <select
+        <SearchableSelect
           id="appointment-staff"
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
           value={values.staffId}
           disabled={disableParticipantFields}
-          onChange={(event) => update("staffId", event.target.value)}
-        >
-          <option value="">Select staff</option>
-          {staff.map((member) => (
-            <option key={member.id} value={member.id}>
-              {member.name?.trim() || member.email}
-            </option>
-          ))}
-        </select>
+          placeholder="Select staff"
+          searchPlaceholder="Search staff..."
+          options={staff.map((member) => ({
+            value: member.id,
+            label: member.name?.trim() || member.email,
+          }))}
+          onChange={(nextValue) => update("staffId", nextValue)}
+        />
       </FormField>
 
       <div className="grid gap-4 sm:grid-cols-2">

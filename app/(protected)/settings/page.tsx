@@ -8,7 +8,12 @@ import { Input } from "@/components/ui/input"
 import { FormField } from "@/components/form-field"
 import { Label } from "@/components/ui/label"
 import { useFormErrors } from "@/hooks/use-form-errors"
-import { WEEKDAY_OPTIONS } from "@/types/scheduling"
+import {
+  CURRENCY_SYMBOL_PLACEMENT_OPTIONS,
+  DATE_FORMAT_OPTIONS,
+  NUMBER_FORMAT_OPTIONS,
+  WEEKDAY_OPTIONS,
+} from "@/types/scheduling"
 import type {
   AppSettingsPayload,
   DateOverrideDay,
@@ -260,11 +265,74 @@ export default function SettingsPage() {
             label="Date format"
             error={errors.dateFormat}
           >
-            <Input
+            <select
               id="settings-date-format"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               value={form.dateFormat}
               onChange={(event) => updateField("dateFormat", event.target.value)}
-            />
+            >
+              {DATE_FORMAT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <FormField
+            id="settings-first-day"
+            label="First day of week"
+            error={errors.firstDayOfWeek}
+          >
+            <select
+              id="settings-first-day"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={form.firstDayOfWeek}
+              onChange={(event) => updateField("firstDayOfWeek", event.target.value)}
+            >
+              {WEEKDAY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <FormField
+            id="settings-currency-placement"
+            label="Currency symbol placement"
+            error={errors.currencySymbolPlacement}
+          >
+            <select
+              id="settings-currency-placement"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={form.currencySymbolPlacement}
+              onChange={(event) =>
+                updateField("currencySymbolPlacement", event.target.value)
+              }
+            >
+              {CURRENCY_SYMBOL_PLACEMENT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <FormField
+            id="settings-number-format"
+            label="Number format"
+            error={errors.numberFormat}
+          >
+            <select
+              id="settings-number-format"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={form.numberFormat}
+              onChange={(event) => updateField("numberFormat", event.target.value)}
+            >
+              {NUMBER_FORMAT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </FormField>
         </div>
       </div>

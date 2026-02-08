@@ -39,6 +39,7 @@ import {
 } from "@/components/data-table"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import type { AppSettingsPayload, TaxRow } from "@/types/scheduling"
+import { formatCurrencyFromCents } from "@/lib/formatting"
 import type { ListResponse } from "@/types/api"
 import type {
   CategoryOption,
@@ -66,9 +67,18 @@ export default function ServicesPage() {
   const [categories, setCategories] = React.useState<CategoryOption[]>([])
   const [serviceOptions, setServiceOptions] = React.useState<ServiceOption[]>([])
   const [taxOptions, setTaxOptions] = React.useState<TaxRow[]>([])
-  const [settings, setSettings] = React.useState({
+  const [settings, setSettings] = React.useState<
+    Required<
+      Pick<
+        AppSettingsPayload,
+        "locale" | "currency" | "currencySymbolPlacement" | "numberFormat"
+      >
+    >
+  >({
     locale: "en-US",
     currency: "USD",
+    currencySymbolPlacement: "BEFORE",
+    numberFormat: "US_UK",
   })
   const [loading, setLoading] = React.useState(true)
   const [totalRows, setTotalRows] = React.useState(0)
@@ -84,6 +94,10 @@ export default function ServicesPage() {
     category: true,
     durationMinutes: true,
     priceCents: true,
+    taxMode: true,
+    taxes: true,
+    taxAmount: true,
+    totalWithTax: true,
     status: true,
     type: true,
   })
@@ -143,6 +157,8 @@ export default function ServicesPage() {
       setSettings({
         locale: data.settings.locale,
         currency: data.settings.currency,
+        currencySymbolPlacement: data.settings.currencySymbolPlacement ?? "BEFORE",
+        numberFormat: data.settings.numberFormat ?? "US_UK",
       })
     }
   }, [])
@@ -266,13 +282,60 @@ export default function ServicesPage() {
   }
 
   const formatPrice = React.useCallback(
-    (cents: number) =>
-      new Intl.NumberFormat(settings.locale, {
-        style: "currency",
-        currency: settings.currency,
-        maximumFractionDigits: 2,
-      }).format(cents / 100),
-    [settings.currency, settings.locale]
+    (cents: number) => formatCurrencyFromCents(cents, settings),
+    [settings]
+  )
+
+  const resolveTaxes = React.useCallback(
+    (service: ServiceRow) =>
+      (service.taxIds ?? [])
+        .map((taxId) => taxOptions.find((tax) => tax.id === taxId))
+        .filter((tax): tax is TaxRow => Boolean(tax)),
+    [taxOptions]
+  )
+
+  const taxSummary = React.useCallback(
+    (service: ServiceRow) => {
+      const taxes = resolveTaxes(service)
+      if (!taxes.length) return { label: "None", percentTotal: 0 }
+      return {
+        label: taxes.map((tax) => `${tax.name} ${tax.percent}%`).join(", "),
+        percentTotal: taxes.reduce((sum, tax) => sum + Math.max(0, tax.percent), 0),
+      }
+    },
+    [resolveTaxes]
+  )
+
+  const computeTaxCents = React.useCallback(
+    (service: ServiceRow) => {
+      const base = Math.max(0, service.priceCents)
+      const { percentTotal } = taxSummary(service)
+      if (percentTotal <= 0 || base <= 0) return 0
+      if (service.taxMode === "INCLUSIVE") {
+        const net = Math.round((base * 100) / (100 + percentTotal))
+        return Math.max(0, base - net)
+      }
+      return Math.max(0, Math.round((base * percentTotal) / 100))
+    },
+    [taxSummary]
+  )
+
+  const computeTotalWithTax = React.useCallback(
+    (service: ServiceRow) => {
+      const base = Math.max(0, service.priceCents)
+      const taxCents = computeTaxCents(service)
+      return service.taxMode === "INCLUSIVE" ? base : base + taxCents
+    },
+    [computeTaxCents]
+  )
+
+  const computeNetPriceCents = React.useCallback(
+    (service: ServiceRow) => {
+      const base = Math.max(0, service.priceCents)
+      const taxCents = computeTaxCents(service)
+      return service.taxMode === "INCLUSIVE" ? Math.max(0, base - taxCents) : base
+    },
+    [computeTaxCents]
   )
 
   const createService = async () => {
@@ -292,6 +355,7 @@ export default function ServicesPage() {
         packageItemIds:
           newService.type === "PACKAGE" ? newService.packageItemIds : [],
         taxIds: newService.taxIds,
+        taxMode: newService.taxMode,
       }),
     })
 
@@ -328,6 +392,7 @@ export default function ServicesPage() {
       packageItemIds:
         service.packageItems?.map((item) => item.itemService.id) ?? [],
       taxIds: service.taxIds ?? [],
+      taxMode: service.taxMode ?? "EXCLUSIVE",
     })
     setEditPackageQuery("")
     setEditOpen(true)
@@ -350,6 +415,7 @@ export default function ServicesPage() {
         packageItemIds:
           editValues.type === "PACKAGE" ? editValues.packageItemIds : [],
         taxIds: editValues.taxIds,
+        taxMode: editValues.taxMode,
       }),
     })
 
@@ -465,7 +531,74 @@ export default function ServicesPage() {
             <SortIndicator value={column.getIsSorted()} />
           </button>
         ),
-        cell: ({ row }) => formatPrice(row.original.priceCents),
+        cell: ({ row }) => formatPrice(computeNetPriceCents(row.original)),
+      },
+      {
+        id: "taxMode",
+        accessorFn: (row) => row.taxMode ?? "EXCLUSIVE",
+        meta: { label: "Tax mode" },
+        header: ({ column }) => (
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 text-sm font-medium"
+            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          >
+            Tax mode
+            <SortIndicator value={column.getIsSorted()} />
+          </button>
+        ),
+        cell: ({ row }) => (row.original.taxMode === "INCLUSIVE" ? "Inclusive" : "Exclusive"),
+      },
+      {
+        id: "taxes",
+        meta: { label: "Taxes" },
+        header: ({ column }) => (
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 text-sm font-medium"
+            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          >
+            Taxes
+            <SortIndicator value={column.getIsSorted()} />
+          </button>
+        ),
+        cell: ({ row }) => (
+          <div className="text-xs text-muted-foreground">
+            {taxSummary(row.original).label}
+          </div>
+        ),
+      },
+      {
+        id: "taxAmount",
+        meta: { label: "Tax" },
+        header: ({ column }) => (
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 text-sm font-medium"
+            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          >
+            Tax
+            <SortIndicator value={column.getIsSorted()} />
+          </button>
+        ),
+        cell: ({ row }) => formatPrice(computeTaxCents(row.original)),
+      },
+      {
+        id: "totalWithTax",
+        meta: { label: "Total" },
+        header: ({ column }) => (
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 text-sm font-medium"
+            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          >
+            Total
+            <SortIndicator value={column.getIsSorted()} />
+          </button>
+        ),
+        cell: ({ row }) => (
+          <span className="font-medium">{formatPrice(computeTotalWithTax(row.original))}</span>
+        ),
       },
       {
         accessorKey: "status",
@@ -534,7 +667,15 @@ export default function ServicesPage() {
         ),
       },
     ],
-    [formatPrice, requestDelete, startEdit]
+    [
+      computeNetPriceCents,
+      computeTaxCents,
+      computeTotalWithTax,
+      formatPrice,
+      requestDelete,
+      startEdit,
+      taxSummary,
+    ]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library

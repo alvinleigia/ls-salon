@@ -89,6 +89,7 @@ export async function GET(request: Request) {
         priceCents: true,
         status: true,
         type: true,
+        taxMode: true,
         createdAt: true,
         category: { select: { id: true, name: true } },
         packageItems: {
@@ -104,8 +105,8 @@ export async function GET(request: Request) {
   return NextResponse.json({
     items: items.map((item) => ({
       ...item,
-      taxIds: item.defaultTaxes.map((tax) => tax.taxId),
-    })),
+    taxIds: item.defaultTaxes.map((tax) => tax.taxId),
+  })),
     page,
     pageSize,
     total,
@@ -140,6 +141,7 @@ export async function POST(request: Request) {
     type,
     packageItemIds,
     taxIds,
+    taxMode,
   } = parsed.data
 
   if (type === "PACKAGE" && (!packageItemIds || packageItemIds.length === 0)) {
@@ -158,6 +160,7 @@ export async function POST(request: Request) {
       priceCents,
       status: status ?? "ACTIVE",
       type: type ?? "STANDARD",
+      taxMode,
       packageItems:
         type === "PACKAGE" && packageItemIds?.length
           ? {
@@ -181,6 +184,7 @@ export async function POST(request: Request) {
       priceCents: true,
       status: true,
       type: true,
+      taxMode: true,
       createdAt: true,
       category: { select: { id: true, name: true } },
       packageItems: {

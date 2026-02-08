@@ -51,7 +51,7 @@ This is the baseline for new modules (API + UI) in this codebase.
 
 ## Settings
 - Global settings live under `/settings` (admin/manager).
-- Start with locale, currency, time zone, and date format.
+- Start with locale, currency, time zone, date format, first day of week, currency symbol placement, and number format.
 - Store working hours in settings with day-based periods (WORK/BREAK) and allow multiple breaks.
 - Support special date overrides in settings (date-specific periods override weekly hours).
 - Validate working hours/overrides: start < end and no overlapping periods.
@@ -84,6 +84,8 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Service categories module lives under `/services/categories` with admin/manager access.
 - Services module lives under `/services` with admin/manager access and uses standard list params/response.
 - Services can define default taxes (from `/settings/taxes`); booking forms should preselect these taxes and still allow manual overrides.
+- Services must define a default tax mode (`EXCLUSIVE` or `INCLUSIVE`) with their default taxes; booking line items snapshot both values at the time of booking.
+- Appointment order tax calculation is line-based (per service line tax mode + tax ids) and order-level tax rows are aggregated summaries.
 - Packages are services with `type=PACKAGE` and must include package items (services).
 - Staff eligibility: default allow all services; if any eligible services are stored, treat as an allow-list.
 - Manage staff eligibility in the staff profile page (not in the general user create/edit form).

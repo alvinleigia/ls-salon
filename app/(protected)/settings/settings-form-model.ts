@@ -9,7 +9,13 @@ import type {
 export type SettingsForm = Required<
   Pick<
     AppSettingsPayload,
-    "locale" | "currency" | "timeZone" | "dateFormat"
+    | "locale"
+    | "currency"
+    | "timeZone"
+    | "dateFormat"
+    | "firstDayOfWeek"
+    | "currencySymbolPlacement"
+    | "numberFormat"
   >
 > & {
   workingHours: WorkingDay[]
@@ -33,6 +39,9 @@ export const defaultSettings: SettingsForm = {
   currency: "USD",
   timeZone: "America/New_York",
   dateFormat: "MM/dd/yyyy",
+  firstDayOfWeek: "SUNDAY",
+  currencySymbolPlacement: "BEFORE",
+  numberFormat: "US_UK",
   workingHours: defaultWorkingHours,
   overrides: [],
 }

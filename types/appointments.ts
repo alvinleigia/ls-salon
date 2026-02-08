@@ -8,6 +8,7 @@ export type AppointmentStatus =
 
 export type AppointmentResolveAction = "cancel" | "reassign" | "reschedule"
 export type DiscountType = "NONE" | "PERCENT" | "AMOUNT"
+export type TaxMode = "EXCLUSIVE" | "INCLUSIVE"
 
 export type AppointmentCustomerOption = {
   id: string
@@ -27,6 +28,7 @@ export type AppointmentServiceOption = {
   durationMinutes: number
   priceCents?: number
   taxIds?: string[]
+  taxMode?: TaxMode
 }
 
 export type AppointmentCore = {
@@ -51,6 +53,7 @@ export type AppointmentRow = AppointmentCore & {
     id: string
     name: string
     durationMinutes: number
+    priceCents?: number
   } | null
   staffProfile?: {
     id: string
@@ -124,6 +127,9 @@ export type AppointmentOrderLineForm = {
   unitPriceCents: number
   discountType: DiscountType
   discountValue: number
+  taxIds: string[]
+  taxMode: TaxMode
+  lineTaxCents?: number
   note: string
 }
 
@@ -145,7 +151,6 @@ export type AppointmentOrderFormValues = {
   appointmentStartTime: string
   couponInput: string
   coupons: AppointmentOrderCouponForm[]
-  taxIds: string[]
   customerNote: string
   internalNote: string
   status?: "DRAFT" | "CONFIRMED" | "COMPLETED" | "CANCELED"
@@ -181,7 +186,10 @@ export type AppointmentOrderLineRow = {
   discountValue: number
   lineSubtotalCents: number
   lineDiscountCents: number
+  lineTaxCents: number
   lineTotalCents: number
+  taxIds: string[]
+  taxMode: TaxMode
   startAt: string
   endAt: string
   note: string | null

@@ -6,7 +6,6 @@ import { checkStaffAppointmentAvailability } from "@/app/api/appointments/_avail
 import { prisma } from "@/lib/prisma"
 import {
   calculateCouponDiscounts,
-  calculateTaxBreakdown,
   calculateLineAmounts,
   pickActiveCouponRules,
   resolveCouponRules,
@@ -37,8 +36,12 @@ type ResolvedOrderLine = {
   unitPriceCents: number
   discountType: AppointmentOrderCreateInput["lines"][number]["discountType"]
   discountValue: number
+  taxMode: AppointmentOrderCreateInput["lines"][number]["taxMode"]
+  taxIds: string[]
+  taxPercents: Array<{ id: string; name: string; percent: number }>
   lineSubtotalCents: number
   lineDiscountCents: number
+  lineTaxCents: number
   lineTotalCents: number
   startAt: Date
   endAt: Date
@@ -52,6 +55,60 @@ type ResolvedOrderTax = {
   percent: number
   taxCents: number
 }
+
+const sumPercent = (values: number[]) => values.reduce((sum, value) => sum + Math.max(0, value), 0)
+
+const extractTaxFromInclusiveGross = (
+  grossCents: number,
+  taxes: Array<{ percent: number }>
+) => {
+  const totalPercent = sumPercent(taxes.map((tax) => tax.percent))
+  if (grossCents <= 0 || totalPercent <= 0) return 0
+  const netCents = Math.round((grossCents * 100) / (100 + totalPercent))
+  return Math.max(0, grossCents - netCents)
+}
+
+const calculateExclusiveTaxFromNet = (
+  netCents: number,
+  taxes: Array<{ percent: number }>
+) =>
+  taxes.reduce(
+    (sum, tax) =>
+      sum + Math.max(0, Math.round((Math.max(0, netCents) * Math.max(0, tax.percent)) / 100)),
+    0
+  )
+
+const allocateCouponByWeight = (amounts: number[], couponCents: number) => {
+  const total = amounts.reduce((sum, value) => sum + Math.max(0, value), 0)
+  if (total <= 0 || couponCents <= 0) return amounts.map(() => 0)
+
+  const rawAllocations = amounts.map((value) => ({
+    base: Math.floor((couponCents * Math.max(0, value)) / total),
+    remainder: (couponCents * Math.max(0, value)) % total,
+  }))
+  let remaining = couponCents - rawAllocations.reduce((sum, item) => sum + item.base, 0)
+  const ranked = rawAllocations
+    .map((item, index) => ({ ...item, index }))
+    .sort((a, b) => b.remainder - a.remainder)
+  for (let i = 0; i < ranked.length && remaining > 0; i += 1) {
+    rawAllocations[ranked[i].index].base += 1
+    remaining -= 1
+  }
+  return rawAllocations.map((item) => item.base)
+}
+
+class AvailabilityConflictError extends Error {
+  suggestedStartAt?: string
+
+  constructor(message: string, suggestedStartAt?: Date) {
+    super(message)
+    this.name = "AvailabilityConflictError"
+    this.suggestedStartAt = suggestedStartAt?.toISOString()
+  }
+}
+
+const SUGGESTION_STEP_MINUTES = 15
+const SUGGESTION_MAX_STEPS = 14 * 24 * (60 / SUGGESTION_STEP_MINUTES)
 
 const ensureAuthorized = async () => {
   const session = await auth()
@@ -71,7 +128,7 @@ const resolveOrderData = async (input: AppointmentOrderCreateInput) => {
   const appointmentDate = toDateOnlyUtc(input.appointmentDate)
   const normalizedCouponCodes = resolveCouponRules(input.coupons)
 
-  const normalizedTaxIds = [...new Set(input.taxIds)]
+  const normalizedTaxIds = [...new Set(input.lines.flatMap((line) => line.taxIds ?? []))]
   const [customer, services, staffProfiles, couponsFromDb, taxesFromDb] = await Promise.all([
     prisma.user.findUnique({
       where: { id: input.customerId },
@@ -81,7 +138,14 @@ const resolveOrderData = async (input: AppointmentOrderCreateInput) => {
       where: {
         id: { in: [...new Set(input.lines.map((line) => line.serviceId))] },
       },
-      select: { id: true, durationMinutes: true, status: true },
+      select: {
+        id: true,
+        durationMinutes: true,
+        priceCents: true,
+        status: true,
+        taxMode: true,
+        defaultTaxes: { select: { taxId: true } },
+      },
     }),
     prisma.staffProfile.findMany({
       where: {
@@ -152,24 +216,46 @@ const resolveOrderData = async (input: AppointmentOrderCreateInput) => {
     endAt.setMinutes(endAt.getMinutes() + totalDurationMinutes)
     cursor = endAt
 
+    const resolvedUnitPriceCents =
+      line.unitPriceCents > 0 ? line.unitPriceCents : service.priceCents
+
     const amounts = calculateLineAmounts({
       quantity: line.quantity,
-      unitPriceCents: line.unitPriceCents,
+      unitPriceCents: resolvedUnitPriceCents,
       discountType: line.discountType,
       discountValue: line.discountValue,
     })
+    const resolvedLineTaxIds = (line.taxIds ?? []).length
+      ? line.taxIds
+      : service.defaultTaxes.map((tax) => tax.taxId)
+    const resolvedTaxMode = line.taxMode ?? service.taxMode
+    const lineTaxes = resolvedLineTaxIds
+      .map((taxId) => taxesFromDb.find((tax) => tax.id === taxId))
+      .filter((tax): tax is { id: string; name: string; percent: number } => Boolean(tax))
+    const lineTaxCents =
+      resolvedTaxMode === "INCLUSIVE"
+        ? extractTaxFromInclusiveGross(amounts.lineTotalCents, lineTaxes)
+        : calculateExclusiveTaxFromNet(amounts.lineTotalCents, lineTaxes)
+    const lineTotalCents =
+      resolvedTaxMode === "INCLUSIVE"
+        ? amounts.lineTotalCents
+        : amounts.lineTotalCents + lineTaxCents
 
     lines.push({
       serviceId: service.id,
       staffProfileId: staffProfile.id,
       quantity: line.quantity,
       durationMinutes: totalDurationMinutes,
-      unitPriceCents: line.unitPriceCents,
+      unitPriceCents: resolvedUnitPriceCents,
       discountType: line.discountType,
       discountValue: line.discountValue,
+      taxMode: resolvedTaxMode,
+      taxIds: lineTaxes.map((tax) => tax.id),
+      taxPercents: lineTaxes,
       lineSubtotalCents: amounts.lineSubtotalCents,
       lineDiscountCents: amounts.lineDiscountCents,
-      lineTotalCents: amounts.lineTotalCents,
+      lineTaxCents,
+      lineTotalCents,
       startAt,
       endAt,
       note: line.note?.trim() || null,
@@ -187,27 +273,44 @@ const resolveOrderData = async (input: AppointmentOrderCreateInput) => {
       discountValue: coupon.discountValue,
     }))
   )
-  const coupons = calculateCouponDiscounts(subtotalCents - lineDiscountCents, couponRules)
+  const lineNetBeforeCoupon = lines.map((line) =>
+    line.taxMode === "INCLUSIVE"
+      ? Math.max(0, line.lineTotalCents - line.lineTaxCents)
+      : Math.max(0, line.lineTotalCents - line.lineTaxCents)
+  )
+  const coupons = calculateCouponDiscounts(
+    lineNetBeforeCoupon.reduce((sum, value) => sum + value, 0),
+    couponRules
+  )
   const couponDiscountCents = coupons.reduce((sum, coupon) => sum + coupon.discountCents, 0)
-  const discountedSubtotal = Math.max(0, subtotalCents - lineDiscountCents - couponDiscountCents)
-  const selectedTaxes = normalizedTaxIds
-    .map((taxId) => taxesFromDb.find((tax) => tax.id === taxId))
-    .filter((tax): tax is { id: string; name: string; percent: number } => Boolean(tax))
-  const taxes: ResolvedOrderTax[] = calculateTaxBreakdown(
-    discountedSubtotal,
-    selectedTaxes.map((tax) => ({
-      id: tax.id,
-      name: tax.name,
-      percent: tax.percent,
-    }))
-  ).map((tax) => ({
-    taxId: tax.id,
-    name: tax.name,
-    percent: tax.percent,
-    taxCents: tax.taxCents,
-  }))
+  const couponAllocations = allocateCouponByWeight(lineNetBeforeCoupon, couponDiscountCents)
+  const lineTaxByLine = lines.map((line, index) => {
+    const netAfterCoupon = Math.max(0, lineNetBeforeCoupon[index] - couponAllocations[index])
+    return calculateExclusiveTaxFromNet(netAfterCoupon, line.taxPercents)
+  })
+  lines.forEach((line, index) => {
+    const netAfterCoupon = Math.max(0, lineNetBeforeCoupon[index] - couponAllocations[index])
+    const taxCentsForLine = lineTaxByLine[index]
+    line.lineTaxCents = taxCentsForLine
+    line.lineTotalCents = netAfterCoupon + taxCentsForLine
+  })
+  const taxBreakdownMap = new Map<string, ResolvedOrderTax>()
+  lines.forEach((line, index) => {
+    const netAfterCoupon = Math.max(0, lineNetBeforeCoupon[index] - couponAllocations[index])
+    line.taxPercents.forEach((tax) => {
+      const taxCents = Math.max(0, Math.round((Math.max(0, netAfterCoupon) * Math.max(0, tax.percent)) / 100))
+      const current = taxBreakdownMap.get(tax.id)
+      taxBreakdownMap.set(tax.id, {
+        taxId: tax.id,
+        name: tax.name,
+        percent: tax.percent,
+        taxCents: (current?.taxCents ?? 0) + taxCents,
+      })
+    })
+  })
+  const taxes = [...taxBreakdownMap.values()]
   const taxCents = taxes.reduce((sum, tax) => sum + tax.taxCents, 0)
-  const totalCents = Math.max(0, discountedSubtotal + taxCents)
+  const totalCents = lines.reduce((sum, line) => sum + line.lineTotalCents, 0)
 
   return {
     appointmentDate,
@@ -229,51 +332,156 @@ const resolveOrderData = async (input: AppointmentOrderCreateInput) => {
   }
 }
 
-const assertConfirmAvailability = async (
+const getLineConflictReason = async (
+  line: { staffProfileId: string; startAt: Date; endAt: Date },
+  customerId: string,
+  excludedAppointmentIds: string[]
+) => {
+  const availability = await checkStaffAppointmentAvailability(
+    line.staffProfileId,
+    line.startAt,
+    line.endAt
+  )
+  if (!availability.ok) {
+    return availability.reason || "Staff is unavailable for one of the selected slots."
+  }
+
+  const [staffConflict, customerConflict] = await Promise.all([
+    prisma.appointment.findFirst({
+      where: {
+        id: excludedAppointmentIds.length ? { notIn: excludedAppointmentIds } : undefined,
+        staffProfileId: line.staffProfileId,
+        status: { in: ACTIVE_APPOINTMENT_STATUSES },
+        startAt: { lt: line.endAt },
+        endAt: { gt: line.startAt },
+      },
+      select: { id: true },
+    }),
+    prisma.appointment.findFirst({
+      where: {
+        id: excludedAppointmentIds.length ? { notIn: excludedAppointmentIds } : undefined,
+        customerId,
+        status: { in: ACTIVE_APPOINTMENT_STATUSES },
+        startAt: { lt: line.endAt },
+        endAt: { gt: line.startAt },
+      },
+      select: { id: true },
+    }),
+  ])
+
+  if (staffConflict) {
+    return "A staff member has a conflicting appointment."
+  }
+  if (customerConflict) {
+    return "Customer has a conflicting appointment."
+  }
+
+  return null
+}
+
+const alignToStep = (value: Date) => {
+  const next = new Date(value)
+  next.setSeconds(0, 0)
+  const remainder = next.getMinutes() % SUGGESTION_STEP_MINUTES
+  if (remainder !== 0) {
+    next.setMinutes(next.getMinutes() + (SUGGESTION_STEP_MINUTES - remainder))
+  }
+  return next
+}
+
+const findNextAvailableLineStart = async (
+  line: ResolvedOrderLine,
+  customerId: string,
+  excludedAppointmentIds: string[],
+  earliestStart: Date
+) => {
+  let candidate = alignToStep(earliestStart)
+
+  for (let step = 0; step < SUGGESTION_MAX_STEPS; step += 1) {
+    const startAt = new Date(candidate)
+    const endAt = new Date(candidate)
+    endAt.setMinutes(endAt.getMinutes() + line.durationMinutes)
+    const reason = await getLineConflictReason(
+      {
+        staffProfileId: line.staffProfileId,
+        startAt,
+        endAt,
+      },
+      customerId,
+      excludedAppointmentIds
+    )
+    if (!reason) {
+      return { startAt, endAt }
+    }
+    candidate = new Date(candidate.getTime() + SUGGESTION_STEP_MINUTES * 60_000)
+  }
+
+  return null
+}
+
+const scheduleConfirmedOrderLines = async (
   orderLines: ResolvedOrderLine[],
   customerId: string,
   excludedAppointmentIds: string[]
 ) => {
-  for (const line of orderLines) {
-    const availability = await checkStaffAppointmentAvailability(
-      line.staffProfileId,
-      line.startAt,
-      line.endAt
-    )
-    if (!availability.ok) {
-      throw new Error(availability.reason || "Staff is unavailable for one of the selected slots.")
-    }
+  const scheduledLines: ResolvedOrderLine[] = []
+  let cursor = orderLines[0]?.startAt ? new Date(orderLines[0].startAt) : new Date()
 
-    const [staffConflict, customerConflict] = await Promise.all([
-      prisma.appointment.findFirst({
-        where: {
-          id: excludedAppointmentIds.length ? { notIn: excludedAppointmentIds } : undefined,
+  for (let index = 0; index < orderLines.length; index += 1) {
+    const line = orderLines[index]
+    const lineStart = index === 0 ? new Date(line.startAt) : cursor
+    const lineEnd = new Date(lineStart)
+    lineEnd.setMinutes(lineEnd.getMinutes() + line.durationMinutes)
+
+    if (index === 0) {
+      const reason = await getLineConflictReason(
+        {
           staffProfileId: line.staffProfileId,
-          status: { in: ACTIVE_APPOINTMENT_STATUSES },
-          startAt: { lt: line.endAt },
-          endAt: { gt: line.startAt },
+          startAt: lineStart,
+          endAt: lineEnd,
         },
-        select: { id: true },
-      }),
-      prisma.appointment.findFirst({
-        where: {
-          id: excludedAppointmentIds.length ? { notIn: excludedAppointmentIds } : undefined,
+        customerId,
+        excludedAppointmentIds
+      )
+      if (reason) {
+        const suggestion = await findNextAvailableLineStart(
+          line,
           customerId,
-          status: { in: ACTIVE_APPOINTMENT_STATUSES },
-          startAt: { lt: line.endAt },
-          endAt: { gt: line.startAt },
-        },
-        select: { id: true },
-      }),
-    ])
+          excludedAppointmentIds,
+          new Date(lineStart.getTime() + SUGGESTION_STEP_MINUTES * 60_000)
+        )
+        throw new AvailabilityConflictError(reason, suggestion?.startAt)
+      }
+      scheduledLines.push({
+        ...line,
+        startAt: lineStart,
+        endAt: lineEnd,
+      })
+      cursor = lineEnd
+      continue
+    }
 
-    if (staffConflict) {
-      throw new Error("A staff member has a conflicting appointment.")
+    const nextSlot = await findNextAvailableLineStart(
+      line,
+      customerId,
+      excludedAppointmentIds,
+      lineStart
+    )
+    if (!nextSlot) {
+      throw new AvailabilityConflictError(
+        `Unable to find an available slot for service item ${index + 1}.`
+      )
     }
-    if (customerConflict) {
-      throw new Error("Customer has a conflicting appointment.")
-    }
+
+    scheduledLines.push({
+      ...line,
+      startAt: nextSlot.startAt,
+      endAt: nextSlot.endAt,
+    })
+    cursor = nextSlot.endAt
   }
+
+  return scheduledLines
 }
 
 export async function GET(
@@ -341,7 +549,6 @@ export async function PATCH(
     customerNote: parsed.data.customerNote ?? currentOrder.customerNote ?? "",
     internalNote: parsed.data.internalNote ?? currentOrder.internalNote ?? "",
     coupons: parsed.data.coupons ?? currentOrder.coupons.map((coupon) => coupon.code),
-    taxIds: parsed.data.taxIds ?? currentOrder.taxes.map((tax) => tax.taxId).filter((taxId): taxId is string => Boolean(taxId)),
     lines:
       parsed.data.lines ??
       currentOrder.lines.map((line) => ({
@@ -352,6 +559,8 @@ export async function PATCH(
         unitPriceCents: line.unitPriceCents,
         discountType: line.discountType,
         discountValue: line.discountValue,
+        taxMode: line.taxMode,
+        taxIds: line.taxIds,
         note: line.note ?? "",
       })),
   })
@@ -370,10 +579,10 @@ export async function PATCH(
       select: { id: true },
     })
     const excludedIds = existingAppointments.map((item) => item.id)
-
-    if (resolved.status === "CONFIRMED") {
-      await assertConfirmAvailability(resolved.lines, resolved.customerId, excludedIds)
-    }
+    const scheduledLines =
+      resolved.status === "CONFIRMED"
+        ? await scheduleConfirmedOrderLines(resolved.lines, resolved.customerId, excludedIds)
+        : resolved.lines
 
     const updated = await prisma.$transaction(async (tx) => {
       const order = await tx.appointmentOrder.update({
@@ -392,7 +601,7 @@ export async function PATCH(
           totalCents: resolved.totals.totalCents,
           lines: {
             deleteMany: {},
-            create: resolved.lines.map((line) => ({
+            create: scheduledLines.map((line) => ({
               serviceId: line.serviceId,
               staffProfileId: line.staffProfileId,
               quantity: line.quantity,
@@ -400,8 +609,11 @@ export async function PATCH(
               unitPriceCents: line.unitPriceCents,
               discountType: line.discountType,
               discountValue: line.discountValue,
+              taxMode: line.taxMode,
+              taxIds: line.taxIds,
               lineSubtotalCents: line.lineSubtotalCents,
               lineDiscountCents: line.lineDiscountCents,
+              lineTaxCents: line.lineTaxCents,
               lineTotalCents: line.lineTotalCents,
               startAt: line.startAt,
               endAt: line.endAt,
@@ -435,16 +647,24 @@ export async function PATCH(
         await tx.appointment.deleteMany({
           where: { orderLine: { is: { orderId: id } } },
         })
+        const createdLineBySortOrder = new Map(
+          order.lines.map((line) => [line.sortOrder, line])
+        )
         await tx.appointment.createMany({
-          data: order.lines.map((line) => ({
-            staffProfileId: line.staffProfileId,
-            customerId: order.customerId,
-            serviceId: line.serviceId,
-            startAt: line.startAt,
-            endAt: line.endAt,
-            status: AppointmentStatus.SCHEDULED,
-            orderLineId: line.id,
-          })),
+          data: scheduledLines
+            .flatMap((line) => {
+              const createdLine = createdLineBySortOrder.get(line.sortOrder)
+              if (!createdLine) return []
+              return [{
+                staffProfileId: line.staffProfileId,
+                customerId: order.customerId,
+                serviceId: line.serviceId,
+                startAt: line.startAt,
+                endAt: line.endAt,
+                status: AppointmentStatus.SCHEDULED,
+                orderLineId: createdLine.id,
+              }]
+            })
         })
       } else if (resolved.status === "CANCELED") {
         await tx.appointment.updateMany({
@@ -470,6 +690,16 @@ export async function PATCH(
 
     return NextResponse.json({ order: serializeAppointmentOrder(updated) })
   } catch (error) {
+    if (error instanceof AvailabilityConflictError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          suggestedStartAt: error.suggestedStartAt,
+          canApplySuggestion: Boolean(error.suggestedStartAt),
+        },
+        { status: 409 }
+      )
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to update booking order." },
       { status: 400 }

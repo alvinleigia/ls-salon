@@ -8,6 +8,14 @@ export type Weekday =
   | "SUNDAY"
 
 export type PeriodKind = "WORK" | "BREAK"
+export type CurrencySymbolPlacement = "BEFORE" | "AFTER"
+export type NumberFormatStyle =
+  | "US_UK"
+  | "EUROPEAN"
+  | "ISO_DECIMAL_POINT"
+  | "ISO_DECIMAL_COMMA"
+  | "COMPACT_DECIMAL_POINT"
+  | "COMPACT_DECIMAL_COMMA"
 
 export type WeekdayOption = {
   value: Weekday
@@ -22,6 +30,30 @@ export const WEEKDAY_OPTIONS: WeekdayOption[] = [
   { value: "FRIDAY", label: "Friday" },
   { value: "SATURDAY", label: "Saturday" },
   { value: "SUNDAY", label: "Sunday" },
+]
+
+export const DATE_FORMAT_OPTIONS = [
+  { value: "MM/dd/yyyy", label: "MM/dd/yyyy" },
+  { value: "dd/MM/yyyy", label: "dd/MM/yyyy" },
+  { value: "yyyy-MM-dd", label: "yyyy-MM-dd" },
+  { value: "dd-MM-yyyy", label: "dd-MM-yyyy" },
+] as const
+
+export const CURRENCY_SYMBOL_PLACEMENT_OPTIONS: Array<{
+  value: CurrencySymbolPlacement
+  label: string
+}> = [
+  { value: "BEFORE", label: "Before amount ($ 1,234.56)" },
+  { value: "AFTER", label: "After amount (1,234.56 $)" },
+]
+
+export const NUMBER_FORMAT_OPTIONS: Array<{ value: NumberFormatStyle; label: string }> = [
+  { value: "US_UK", label: "1,000,000.00 (US/UK format)" },
+  { value: "EUROPEAN", label: "1.000.000,00 (European format)" },
+  { value: "ISO_DECIMAL_POINT", label: "1 000 000.00 (ISO 80000-1 with decimal point)" },
+  { value: "ISO_DECIMAL_COMMA", label: "1 000 000,00 (ISO 80000-1 with decimal comma)" },
+  { value: "COMPACT_DECIMAL_POINT", label: "1000000.00 (Compact format with decimal point)" },
+  { value: "COMPACT_DECIMAL_COMMA", label: "1000000,00 (Compact format with decimal comma)" },
 ]
 
 export type WorkingPeriod = {
@@ -51,6 +83,9 @@ export type AppSettingsPayload = {
   currency?: string
   timeZone?: string
   dateFormat?: string
+  firstDayOfWeek?: Weekday
+  currencySymbolPlacement?: CurrencySymbolPlacement
+  numberFormat?: NumberFormatStyle
   workingHours?: WorkingDay[]
   overrides?: DateOverrideDay[]
 }

@@ -33,7 +33,7 @@ const serializeAppointment = <
 
 const appointmentInclude = {
   customer: { select: { id: true, name: true, email: true } },
-  service: { select: { id: true, name: true, durationMinutes: true } },
+  service: { select: { id: true, name: true, durationMinutes: true, priceCents: true } },
   staffProfile: {
     select: {
       id: true,
@@ -96,7 +96,7 @@ export async function PATCH(
   const data = parsed.data
   const current = await prisma.appointment.findUnique({
     where: { id },
-    include: { service: { select: { id: true, durationMinutes: true } } },
+    include: { service: { select: { id: true, durationMinutes: true, priceCents: true } } },
   })
 
   if (!current) {

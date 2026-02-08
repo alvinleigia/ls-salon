@@ -54,6 +54,7 @@ export async function PATCH(
           : {}),
         ...(data.status ? { status: data.status } : {}),
         ...(data.type ? { type: data.type } : {}),
+        ...(data.taxMode ? { taxMode: data.taxMode } : {}),
         ...(data.taxIds
           ? {
               defaultTaxes: {
@@ -88,6 +89,7 @@ export async function PATCH(
         priceCents: true,
         status: true,
         type: true,
+        taxMode: true,
         createdAt: true,
         category: { select: { id: true, name: true } },
         packageItems: {

@@ -12,6 +12,7 @@ export const statusSchema = z.enum(["ACTIVE", "SUSPENDED", "INVITED", "ARCHIVED"
 export const serviceCategoryStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
 export const serviceStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
 export const serviceTypeSchema = z.enum(["STANDARD", "PACKAGE"])
+export const taxModeSchema = z.enum(["EXCLUSIVE", "INCLUSIVE"])
 export const appointmentStatusSchema = z.enum([
   "SCHEDULED",
   "CONFIRMED",
@@ -31,6 +32,15 @@ export const weekdaySchema = z.enum([
   "SUNDAY",
 ])
 export const appSettingPeriodTypeSchema = z.enum(["WORK", "BREAK"])
+export const currencySymbolPlacementSchema = z.enum(["BEFORE", "AFTER"])
+export const numberFormatStyleSchema = z.enum([
+  "US_UK",
+  "EUROPEAN",
+  "ISO_DECIMAL_POINT",
+  "ISO_DECIMAL_COMMA",
+  "COMPACT_DECIMAL_POINT",
+  "COMPACT_DECIMAL_COMMA",
+])
 
 const optionalDate = z
   .preprocess((value) => {
@@ -172,6 +182,7 @@ export const createServiceSchema = z.object({
   type: serviceTypeSchema.optional(),
   packageItemIds: z.array(z.string().trim().min(1)).optional(),
   taxIds: z.array(z.string().trim().min(1)).optional().default([]),
+  taxMode: taxModeSchema.default("EXCLUSIVE"),
 })
 
 export const updateServiceSchema = createServiceSchema.partial()
@@ -202,6 +213,9 @@ export const appSettingsSchema = z
   currency: z.string().trim().min(3).max(3),
   timeZone: z.string().trim().min(2).max(64),
   dateFormat: z.string().trim().min(4).max(20),
+  firstDayOfWeek: weekdaySchema.default("SUNDAY"),
+  currencySymbolPlacement: currencySymbolPlacementSchema.default("BEFORE"),
+  numberFormat: numberFormatStyleSchema.default("US_UK"),
   workingHours: z
     .array(
       z.object({
@@ -528,6 +542,8 @@ export const appointmentOrderLineInputSchema = z.object({
   unitPriceCents: z.coerce.number().int().min(0).max(100000000),
   discountType: z.enum(["NONE", "PERCENT", "AMOUNT"]),
   discountValue: z.coerce.number().min(0).max(1000000),
+  taxIds: z.array(z.string().trim().min(1)).optional().default([]),
+  taxMode: taxModeSchema.default("EXCLUSIVE"),
   note: z.string().trim().max(500).optional().or(z.literal("")),
 })
 
@@ -540,7 +556,6 @@ export const appointmentOrderCreateSchema = z.object({
   customerNote: z.string().trim().max(500).optional().or(z.literal("")),
   internalNote: z.string().trim().max(2000).optional().or(z.literal("")),
   coupons: z.array(z.string().trim().min(2).max(40)).optional().default([]),
-  taxIds: z.array(z.string().trim().min(1)).optional().default([]),
   lines: z.array(appointmentOrderLineInputSchema).min(1),
 })
 

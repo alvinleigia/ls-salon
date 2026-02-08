@@ -10,9 +10,11 @@ import {
   useReactTable,
 } from "@tanstack/react-table"
 import {
+  Day,
   Inject,
   Month,
   ScheduleComponent,
+  Week,
   ViewDirective,
   ViewsDirective,
 } from "@syncfusion/ej2-react-schedule"
@@ -37,6 +39,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import { useDateFormatter } from "@/hooks/use-date-formatter"
+import { weekdayToSchedulerFirstDay } from "@/lib/formatting"
 import { cn } from "@/lib/utils"
 import type { ListResponse } from "@/types/api"
 import type {
@@ -48,6 +51,7 @@ import type {
   AppointmentStaffOption,
   AppointmentStatus,
 } from "@/types/appointments"
+import type { AppSettingsPayload } from "@/types/scheduling"
 import { AppointmentFormFields } from "./appointment-form-fields"
 import {
   buildEndTimePreview,
@@ -62,6 +66,7 @@ type CalendarEvent = {
   Subject: string
   StartTime: Date
   EndTime: Date
+  Status: AppointmentStatus
   CategoryColor?: string
 }
 
@@ -118,6 +123,17 @@ const toTimeInput = (value: Date) => {
   return `${hours}:${minutes}`
 }
 
+const toMinutes = (value: string) => {
+  const [hours, minutes] = value.split(":").map((part) => Number(part))
+  return (Number.isNaN(hours) ? 0 : hours) * 60 + (Number.isNaN(minutes) ? 0 : minutes)
+}
+
+const minutesToTime = (value: number) => {
+  const hours = Math.floor(value / 60)
+  const minutes = value % 60
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
+}
+
 export default function AppointmentsPage() {
   const router = useRouter()
   const { formatDate } = useDateFormatter()
@@ -131,6 +147,15 @@ export default function AppointmentsPage() {
   const [customers, setCustomers] = React.useState<AppointmentCustomerOption[]>([])
   const [staff, setStaff] = React.useState<AppointmentStaffOption[]>([])
   const [services, setServices] = React.useState<AppointmentServiceOption[]>([])
+  const [firstDayOfWeek, setFirstDayOfWeek] = React.useState(0)
+  const [calendarHourMode, setCalendarHourMode] = React.useState<"working" | "full">("working")
+  const [calendarStatusFilter, setCalendarStatusFilter] = React.useState<
+    "non_canceled" | "all" | AppointmentStatus
+  >("non_canceled")
+  const [workingHourBounds, setWorkingHourBounds] = React.useState({
+    startHour: "09:00",
+    endHour: "18:00",
+  })
   const [totalRows, setTotalRows] = React.useState(0)
 
   const [search, setSearch] = React.useState("")
@@ -185,12 +210,13 @@ export default function AppointmentsPage() {
   )
 
   const loadLookups = React.useCallback(async () => {
-    const [customerRes, staffRes, serviceRes] = await Promise.all([
+    const [customerRes, staffRes, serviceRes, settingsRes] = await Promise.all([
       fetch("/api/users?role=CUSTOMER&status=ACTIVE&page=1&pageSize=100", { cache: "no-store" }),
       fetch("/api/users?role=STAFF&status=ACTIVE&page=1&pageSize=100", { cache: "no-store" }),
       fetch("/api/services?status=ACTIVE&page=1&pageSize=100&sort=name&order=asc", {
         cache: "no-store",
       }),
+      fetch("/api/settings", { cache: "no-store" }),
     ])
 
     if (customerRes.ok) {
@@ -212,6 +238,28 @@ export default function AppointmentsPage() {
         items?: Array<{ id: string; name: string; durationMinutes: number }>
       }
       setServices(data.items ?? [])
+    }
+
+    if (settingsRes.ok) {
+      const data = (await settingsRes.json()) as { settings?: AppSettingsPayload }
+      setFirstDayOfWeek(weekdayToSchedulerFirstDay(data.settings?.firstDayOfWeek))
+      const workingPeriods =
+        data.settings?.workingHours
+          ?.flatMap((day) =>
+            day.isOpen
+              ? (day.periods ?? []).filter((period) => period.kind === "WORK")
+              : []
+          ) ?? []
+      if (workingPeriods.length) {
+        const start = Math.min(...workingPeriods.map((period) => toMinutes(period.startTime)))
+        const end = Math.max(...workingPeriods.map((period) => toMinutes(period.endTime)))
+        if (end > start) {
+          setWorkingHourBounds({
+            startHour: minutesToTime(start),
+            endHour: minutesToTime(end),
+          })
+        }
+      }
     }
   }, [])
 
@@ -254,7 +302,9 @@ export default function AppointmentsPage() {
     params.set("pageSize", "100")
     params.set("startDate", startDate)
     params.set("endDate", endDate)
-    if (statusFilter !== "all") params.set("status", statusFilter)
+    if (calendarStatusFilter !== "all" && calendarStatusFilter !== "non_canceled") {
+      params.set("status", calendarStatusFilter)
+    }
     if (staffFilter !== "all") params.set("staffId", staffFilter)
 
     const response = await fetch(`/api/appointments?${params.toString()}`, {
@@ -266,8 +316,12 @@ export default function AppointmentsPage() {
       return
     }
     const data = (await response.json()) as ListResponse<AppointmentRow>
+    if (calendarStatusFilter === "non_canceled") {
+      setCalendarAppointments(data.items.filter((item) => item.status !== "CANCELED"))
+      return
+    }
     setCalendarAppointments(data.items)
-  }, [staffFilter, statusFilter, viewDates])
+  }, [calendarStatusFilter, staffFilter, viewDates])
 
   React.useEffect(() => {
     void loadLookups()
@@ -482,14 +536,12 @@ export default function AppointmentsPage() {
       calendarAppointments.map((appointment) => {
         const customerLabel = appointment.customer?.name || appointment.customer?.email || "Customer"
         const serviceLabel = appointment.service?.name || "Service"
-        const orderLabel = appointment.orderLine?.order
-          ? ` [${appointment.orderLine.order.status}]`
-          : ""
         return {
           Id: appointment.id,
-          Subject: `${serviceLabel}${orderLabel} - ${customerLabel}`,
+          Subject: `${serviceLabel} [${appointment.status}] - ${customerLabel}`,
           StartTime: new Date(appointment.startAt),
           EndTime: new Date(appointment.endAt),
+          Status: appointment.status,
           CategoryColor: STATUS_COLORS[appointment.status],
         }
       }),
@@ -504,24 +556,46 @@ export default function AppointmentsPage() {
     [openCreateDialog]
   )
 
+  const openAppointmentEditor = React.useCallback(
+    (appointment: AppointmentRow, mode: "edit" | "reschedule" = "edit") => {
+      const orderId = appointment.orderLine?.order?.id
+      if (orderId) {
+        router.push(`/appointments/${orderId}/edit`)
+        return
+      }
+      openEditDialog(appointment, mode)
+    },
+    [openEditDialog, router]
+  )
+
   const handleEventClick = React.useCallback(
     (args: { event?: Record<string, unknown> }) => {
       const eventId = args.event?.Id as string | undefined
       if (!eventId) return
       const appointment = calendarAppointments.find((item) => item.id === eventId)
       if (!appointment) return
-      router.push(`/appointments/${appointment.id}/edit`)
+      openAppointmentEditor(appointment)
     },
-    [calendarAppointments, router]
+    [calendarAppointments, openAppointmentEditor]
   )
 
   const handleEventRendered = React.useCallback(
     (args: { data?: Record<string, unknown>; element?: HTMLElement }) => {
       const color = args.data?.CategoryColor as string | undefined
+      const status = args.data?.Status as AppointmentStatus | undefined
       if (color && args.element) {
         args.element.style.backgroundColor = color
         args.element.style.borderColor = color
         args.element.style.color = "#ffffff"
+        if (status === "CANCELED") {
+          args.element.style.opacity = "0.6"
+          args.element.style.textDecoration = "line-through"
+        } else if (status === "COMPLETED") {
+          args.element.style.opacity = "0.85"
+        } else {
+          args.element.style.opacity = "1"
+          args.element.style.textDecoration = "none"
+        }
       }
     },
     []
@@ -614,11 +688,11 @@ export default function AppointmentsPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => router.push(`/appointments/${appointment.id}/edit`)}>
+                <DropdownMenuItem onSelect={() => openAppointmentEditor(appointment)}>
                   Edit
                 </DropdownMenuItem>
                 {canReschedule ? (
-                  <DropdownMenuItem onSelect={() => router.push(`/appointments/${appointment.id}/edit`)}>
+                  <DropdownMenuItem onSelect={() => openAppointmentEditor(appointment, "reschedule")}>
                     Reschedule
                   </DropdownMenuItem>
                 ) : null}
@@ -636,7 +710,7 @@ export default function AppointmentsPage() {
         },
       },
     ],
-    [formatDate, requestCancelAppointment, router]
+    [formatDate, openAppointmentEditor, requestCancelAppointment]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -668,9 +742,47 @@ export default function AppointmentsPage() {
       </div>
 
       <div className="rounded-xl border bg-card p-3 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+          <select
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+            value={calendarStatusFilter}
+            onChange={(event) =>
+              setCalendarStatusFilter(
+                event.target.value as "non_canceled" | "all" | AppointmentStatus
+              )
+            }
+          >
+            <option value="non_canceled">Calendar: Active only</option>
+            <option value="all">Calendar: All statuses</option>
+            {APPOINTMENT_STATUS_OPTIONS.filter((status) => status !== "all").map((status) => (
+              <option key={`calendar-${status}`} value={status}>
+                Calendar: {status}
+              </option>
+            ))}
+          </select>
+          <Button
+            type="button"
+            size="sm"
+            variant={calendarHourMode === "working" ? "default" : "outline"}
+            onClick={() => setCalendarHourMode("working")}
+          >
+            Working hours
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={calendarHourMode === "full" ? "default" : "outline"}
+            onClick={() => setCalendarHourMode("full")}
+          >
+            Full day
+          </Button>
+        </div>
         <ScheduleComponent
           ref={scheduleRef}
-          currentView="Month"
+          currentView="Week"
+          firstDayOfWeek={firstDayOfWeek}
+          startHour={calendarHourMode === "full" ? "00:00" : workingHourBounds.startHour}
+          endHour={calendarHourMode === "full" ? "24:00" : workingHourBounds.endHour}
           showQuickInfo={false}
           readonly
           allowDragAndDrop={false}
@@ -693,9 +805,11 @@ export default function AppointmentsPage() {
           height="auto"
         >
           <ViewsDirective>
+            <ViewDirective option="Day" />
+            <ViewDirective option="Week" />
             <ViewDirective option="Month" />
           </ViewsDirective>
-          <Inject services={[Month]} />
+          <Inject services={[Day, Week, Month]} />
         </ScheduleComponent>
       </div>
 

@@ -32,8 +32,9 @@ import {
   DataTablePagination,
   DataTableToolbar,
 } from "@/components/data-table"
+import { useDateFormatter } from "@/hooks/use-date-formatter"
 import { useFormErrors } from "@/hooks/use-form-errors"
-import { formatDateForDisplay, toISODate } from "@/lib/date"
+import { toISODate } from "@/lib/date"
 import type { ListResponse } from "@/types/api"
 import { WEEKDAY_OPTIONS } from "@/types/scheduling"
 import type {
@@ -93,17 +94,21 @@ const summarizeAssignments = (schedule: ShiftSchedule) => {
   return `${names.slice(0, 2).join(", ")} +${names.length - 2}`
 }
 
-const summarizeAssignmentRange = (schedule: ShiftSchedule) => {
+const summarizeAssignmentRange = (
+  schedule: ShiftSchedule,
+  formatDate: (value?: string | Date | null) => string
+) => {
   const assignments = schedule.assignments ?? []
   if (!assignments.length) return "-"
   const rangeStart = assignments[0]?.startDate
   const rangeEnd = assignments[0]?.endDate
   if (!rangeStart) return "-"
-  if (!rangeEnd) return `${formatDateForDisplay(rangeStart)} onward`
-  return `${formatDateForDisplay(rangeStart)} - ${formatDateForDisplay(rangeEnd)}`
+  if (!rangeEnd) return `${formatDate(rangeStart)} onward`
+  return `${formatDate(rangeStart)} - ${formatDate(rangeEnd)}`
 }
 
 export default function ShiftSchedulesPage() {
+  const { formatDate } = useDateFormatter()
   type PaginationState = { pageIndex: number; pageSize: number }
 
   const [schedules, setSchedules] = React.useState<ShiftSchedule[]>([])
@@ -396,7 +401,7 @@ export default function ShiftSchedulesPage() {
             </div>
             <span className="text-xs text-muted-foreground">
               {row.original.startDate
-                ? formatDateForDisplay(row.original.startDate)
+                ? formatDate(row.original.startDate)
                 : "-"}
             </span>
           </div>
@@ -420,7 +425,7 @@ export default function ShiftSchedulesPage() {
           <div className="flex flex-col gap-1 text-sm text-muted-foreground">
             <span>{summarizeAssignments(row.original)}</span>
             <span className="text-xs text-muted-foreground">
-              {summarizeAssignmentRange(row.original)}
+              {summarizeAssignmentRange(row.original, formatDate)}
             </span>
           </div>
         ),
@@ -442,7 +447,7 @@ export default function ShiftSchedulesPage() {
         cell: ({ row }) => (
           <span className="text-sm text-muted-foreground">
             {row.original.startDate
-              ? formatDateForDisplay(row.original.startDate)
+              ? formatDate(row.original.startDate)
               : "-"}
           </span>
         ),
@@ -500,7 +505,7 @@ export default function ShiftSchedulesPage() {
             <SortIndicator value={column.getIsSorted()} />
           </button>
         ),
-        cell: ({ row }) => formatDateForDisplay(row.original.updatedAt),
+        cell: ({ row }) => formatDate(row.original.updatedAt),
       },
       {
         id: "actions",
@@ -528,7 +533,7 @@ export default function ShiftSchedulesPage() {
         ),
       },
     ],
-    [requestDelete, startEdit]
+    [formatDate, requestDelete, startEdit]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library

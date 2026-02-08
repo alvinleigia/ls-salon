@@ -21,6 +21,9 @@ export const createEmptyOrderLine = (): AppointmentOrderLineForm => ({
   unitPriceCents: 0,
   discountType: "NONE",
   discountValue: 0,
+  taxIds: [],
+  taxMode: "EXCLUSIVE",
+  lineTaxCents: 0,
   note: "",
 })
 
@@ -32,7 +35,6 @@ export const defaultAppointmentOrderFormValues = (): AppointmentOrderFormValues 
     appointmentStartTime: toTimeInput(now),
     couponInput: "",
     coupons: [],
-    taxIds: [],
     status: "DRAFT",
     customerNote: "",
     internalNote: "",

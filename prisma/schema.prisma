@@ -93,6 +93,25 @@ enum AppSettingPeriodType {
   BREAK
 }
 
+enum CurrencySymbolPlacement {
+  BEFORE
+  AFTER
+}
+
+enum NumberFormatStyle {
+  US_UK
+  EUROPEAN
+  ISO_DECIMAL_POINT
+  ISO_DECIMAL_COMMA
+  COMPACT_DECIMAL_POINT
+  COMPACT_DECIMAL_COMMA
+}
+
+enum TaxMode {
+  EXCLUSIVE
+  INCLUSIVE
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String?
@@ -147,6 +166,7 @@ model Service {
   priceCents      Int
   status          ServiceStatus @default(ACTIVE)
   type            ServiceType   @default(STANDARD)
+  taxMode         TaxMode       @default(EXCLUSIVE)
   categoryId      String
   category        ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   packageItems    ServicePackageItem[] @relation("PackageItems")
@@ -225,8 +245,11 @@ model AppointmentOrderLine {
   unitPriceCents    Int
   discountType      DiscountType @default(NONE)
   discountValue     Float    @default(0)
+  taxMode           TaxMode  @default(EXCLUSIVE)
+  taxIds            String[] @default([])
   lineSubtotalCents Int      @default(0)
   lineDiscountCents Int      @default(0)
+  lineTaxCents      Int      @default(0)
   lineTotalCents    Int      @default(0)
   startAt           DateTime
   endAt             DateTime
@@ -279,6 +302,9 @@ model AppSetting {
   currency   String   @default("USD")
   timeZone   String   @default("America/New_York")
   dateFormat String   @default("MM/dd/yyyy")
+  firstDayOfWeek Weekday @default(SUNDAY)
+  currencySymbolPlacement CurrencySymbolPlacement @default(BEFORE)
+  numberFormat NumberFormatStyle @default(US_UK)
   updatedAt  DateTime @updatedAt
   workingDays AppSettingDay[]
   overrides  AppSettingOverride[]

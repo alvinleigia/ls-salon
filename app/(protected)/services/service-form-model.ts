@@ -17,4 +17,5 @@ export const defaultServiceFormValues: ServiceFormValues = {
   type: "STANDARD",
   packageItemIds: [],
   taxIds: [],
+  taxMode: "EXCLUSIVE",
 }
