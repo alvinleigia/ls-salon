@@ -33,6 +33,8 @@ This is the baseline for new modules (API + UI) in this codebase.
 ## Forms
 - Use `FormField` from `components/form-field.tsx` for label/input/error.
 - Use `useFormErrors` from `hooks/use-form-errors.ts` to map Zod field errors.
+- For async form submits, use `Button` loading state (`loading` + `loadingText`) instead of text-only toggles; this shows a spinner and disables the action consistently.
+- For large/dynamic master-data selectors (staff, services, products, suppliers, categories, templates), use shadcn searchable combobox (`components/searchable-select.tsx`) instead of plain `<select>`.
 - Use the standard edit flow (list/detail pattern) used in Users: list view + dedicated edit page.
 - Avoid bespoke split-edit panels for core admin flows unless explicitly required.
 - Keep actions consistent with Users: primary save in page header; destructive actions require confirmation.
@@ -51,13 +53,14 @@ This is the baseline for new modules (API + UI) in this codebase.
 
 ## Settings
 - Global settings live under `/settings` (admin/manager).
-- Start with locale, currency, time zone, date format, first day of week, currency symbol placement, and number format.
+- Start with locale, currency, time zone, date format, time format, first day of week, currency symbol placement, and number format.
 - Store working hours in settings with day-based periods (WORK/BREAK) and allow multiple breaks.
 - Support special date overrides in settings (date-specific periods override weekly hours).
 - Validate working hours/overrides: start < end and no overlapping periods.
 - **Date storage:** persist date-only values as Postgres `DATE` (Prisma `DateTime @db.Date`) and use ISO `YYYY-MM-DD` in APIs.
 - **Date display:** format dates for UI using `settings.dateFormat` (use `lib/date.ts` helpers).
 - Use settings for formatting (no hard-coded currency/locale).
+- Settings selectors for locale/currency/time zone should use shared constants from `lib/constants/localization.ts` (with custom-value fallback when existing data is outside curated options).
 - Settings API is dynamic (no caching).
 - Taxes are managed in `/settings/taxes`; appointment orders can apply multiple selected taxes and pricing must be server-authoritative.
 - When formatting values (currency/locale), ensure memoized columns include formatter dependencies.
@@ -104,8 +107,22 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Billing-oriented appointment creation/editing should use dedicated full pages (`/appointments/new`, `/appointments/[id]/edit`) rather than modal-only flows.
 - Appointment order APIs live under `/api/appointments/orders` and persist invoice-style bookings (lines + coupons + totals).
 - Appointment order lines store `startAt/endAt` and link to `Appointment` via `Appointment.orderLineId` when booking is confirmed.
+- Appointment orders support two line types:
+  - service lines (`AppointmentOrderLine`) for schedulable services/staff/time windows.
+  - product lines (`AppointmentOrderProductLine`) for inventory sale items (non-schedulable).
+- Product lines must not create/update `Appointment` schedule rows; only service lines participate in slot scheduling.
+- Order pricing totals (subtotal, discounts, coupons, taxes, grand total) must aggregate across both service and product lines, with server-authoritative calculations.
 - Coupons support multiple codes; keep phase-1 rules simple and deterministic (server-authoritative pricing).
 - Coupon definitions are managed in `/appointments/coupons` via `/api/appointments/coupons` (CRUD).
+- Coupon definitions support scope metadata for enforcement:
+  - `appliesTo`: `ORDER`, `SERVICE_LINES`, or `PRODUCT_LINES`.
+  - allow-lists: `allowedServiceIds`, `allowedCategoryIds`, `allowedProductIds`.
+  - thresholds/rules: `minSubtotalCents`, `stackingMode` (`STACKABLE` or `EXCLUSIVE`).
+- Coupon scope fields should be backward compatible: default to order-wide + stackable + no allow-list restrictions.
+- Appointment order pricing enforces coupon scope server-side:
+  - eligibility is line-based (service/product/category allow-lists + `appliesTo`),
+  - `minSubtotalCents` is evaluated against the coupon's eligible line subtotal at apply time,
+  - `EXCLUSIVE` coupons do not stack with other coupons.
 - Appointment create/update APIs must enforce staff availability against schedules + overrides + week-off/break windows (not only overlap checks).
 - Appointment UI should call `/api/appointments/availability` as a pre-check and show inline slot status before submit.
 - Appointment flows should expose explicit actions for Edit, Reschedule, and Cancel (with confirmation for cancel).
@@ -118,8 +135,20 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Inventory module lives under `/inventory` with admin/manager access and uses standard list params/response.
 - Inventory module subroutes: `/inventory/categories`, `/inventory/suppliers`, `/inventory/purchases`.
 - Inventory products require CP (`costPriceCents`) and MRP (`mrpCents`), support multiple suppliers, and can define default taxes from `/settings/taxes`.
+- Supplier tax identity must remain global (not country-specific): use `isTaxRegistered` + `taxRegistrationType` (`VAT`, `GST`, `SALES_TAX_ID`, `EIN`, `OTHER`) + `taxRegistrationNumber` instead of single-region fields like GSTIN-only labels.
+- Inventory product units are standardized via shared constants (`lib/constants/inventory.ts` -> `INVENTORY_UNIT_OPTIONS`) and validated in API schemas (no free-text units in create/update flows).
+- Country pickers should use shared constants (`lib/constants/countries.ts` -> `COUNTRY_OPTIONS`) instead of free-text country inputs, including supplier/profile/user forms.
+- State/province input should be country-aware using shared mapping (`lib/constants/countries.ts` -> `COUNTRY_STATE_OPTIONS`): use dropdown when mapping exists, otherwise keep free-text fallback.
 - Product-supplier links store supplier-specific SKU/cost/min-order/lead-time with a single preferred supplier.
 - Purchase receipt updates inventory stock by writing stock movement ledger entries (`InventoryStockMovement`) and incrementing on-hand quantity.
+- Booking product sales/restores must adjust inventory on-hand and write stock movement ledger entries:
+  - `BOOKING_PRODUCT_SALE` for deductions.
+  - `BOOKING_PRODUCT_RESTOCK` for restores.
+- Stock adjustments for booking product lines are status-transition based:
+  - `DRAFT/CANCELED -> CONFIRMED/COMPLETED`: deduct.
+  - `CONFIRMED/COMPLETED -> DRAFT/CANCELED`: restore.
+  - edits within impactful statuses apply quantity deltas.
+- Return 409 for stock conflicts (e.g., insufficient stock) with a clear message.
 - Inventory delete policy follows global rules: soft delete via `INACTIVE` when references exist; hard delete only when unreferenced.
 - List pageSize max is 100 unless explicitly raised (align UI requests accordingly).
 - Seed helpers live in `scripts/` (use `seed-service-categories.js` for defaults).

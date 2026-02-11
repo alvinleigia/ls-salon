@@ -148,8 +148,8 @@ export default function StaffProfilePage() {
           <Button variant="outline" onClick={() => router.push(`/users/${user.id}`)}>
             Back to profile
           </Button>
-          <Button onClick={save} disabled={saving}>
-            {saving ? "Saving..." : "Save"}
+          <Button onClick={save} loading={saving} loadingText="Saving...">
+            Save
           </Button>
         </div>
       </div>
@@ -166,4 +166,3 @@ export default function StaffProfilePage() {
     </div>
   )
 }
-

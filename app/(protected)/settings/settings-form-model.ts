@@ -13,6 +13,7 @@ export type SettingsForm = Required<
     | "currency"
     | "timeZone"
     | "dateFormat"
+    | "timeFormat"
     | "firstDayOfWeek"
     | "currencySymbolPlacement"
     | "numberFormat"
@@ -39,6 +40,7 @@ export const defaultSettings: SettingsForm = {
   currency: "USD",
   timeZone: "America/New_York",
   dateFormat: "MM/dd/yyyy",
+  timeFormat: "H24",
   firstDayOfWeek: "SUNDAY",
   currencySymbolPlacement: "BEFORE",
   numberFormat: "US_UK",

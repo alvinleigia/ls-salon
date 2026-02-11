@@ -1,6 +1,8 @@
 import type { InventoryProductFormValues } from "@/types/inventory"
+import { INVENTORY_UNIT_OPTIONS } from "@/lib/constants/inventory"
 
 export const inventoryProductStatusOptions = ["ACTIVE", "INACTIVE"] as const
+export const inventoryProductUnitOptions = INVENTORY_UNIT_OPTIONS
 
 export const defaultInventoryProductFormValues: InventoryProductFormValues = {
   sku: "",

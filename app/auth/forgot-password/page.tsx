@@ -79,8 +79,8 @@ export default function ForgotPasswordPage() {
                   required
                 />
               </FormField>
-              <Button className="w-full" type="submit" disabled={loading}>
-                {loading ? "Sending..." : "Send reset link"}
+              <Button className="w-full" type="submit" loading={loading} loadingText="Sending...">
+                Send reset link
               </Button>
             </form>
           )}

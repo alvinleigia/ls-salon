@@ -1,4 +1,6 @@
 import type { AppointmentFormValues } from "@/types/appointments"
+import { formatTimeFrom24h } from "@/lib/formatting"
+import type { TimeFormat } from "@/types/scheduling"
 
 const toTimeInput = (value: Date) => {
   const hours = String(value.getHours()).padStart(2, "0")
@@ -26,7 +28,8 @@ export const combineLocalDateTimeToISO = (date: string, time: string) => {
 export const buildEndTimePreview = (
   date: string,
   startTime: string,
-  durationMinutes?: number
+  durationMinutes?: number,
+  options?: { timeFormat?: TimeFormat }
 ) => {
   if (!date || !startTime || !durationMinutes) return null
   const start = new Date(`${date}T${startTime}:00`)
@@ -35,6 +38,9 @@ export const buildEndTimePreview = (
   end.setMinutes(end.getMinutes() + durationMinutes)
   const hh = String(end.getHours()).padStart(2, "0")
   const mm = String(end.getMinutes()).padStart(2, "0")
+  const formatted = formatTimeFrom24h(`${hh}:${mm}`, {
+    timeFormat: options?.timeFormat,
+  })
   const crossesDay = end.toDateString() !== start.toDateString()
-  return `${hh}:${mm}${crossesDay ? " (next day)" : ""}`
+  return `${formatted}${crossesDay ? " (next day)" : ""}`
 }

@@ -1,6 +1,7 @@
 "use client"
 
 import { FormField } from "@/components/form-field"
+import { SearchableSelect } from "@/components/searchable-select"
 import { Input } from "@/components/ui/input"
 import type {
   CategoryOption,
@@ -78,19 +79,17 @@ export function ServiceFormFields({
         label="Category"
         error={errors.categoryId}
       >
-        <select
+        <SearchableSelect
           id={fieldId("service-category")}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
           value={values.categoryId}
-          onChange={(event) => update("categoryId", event.target.value)}
-        >
-          <option value="">Select a category</option>
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
+          placeholder="Select a category"
+          searchPlaceholder="Search category..."
+          options={categories.map((category) => ({
+            value: category.id,
+            label: category.name,
+          }))}
+          onChange={(nextValue) => update("categoryId", nextValue)}
+        />
       </FormField>
       <FormField
         id={fieldId("service-duration")}

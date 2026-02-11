@@ -37,6 +37,7 @@ import {
   DataTablePagination,
   DataTableToolbar,
 } from "@/components/data-table"
+import { SearchableSelect } from "@/components/searchable-select"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import type { AppSettingsPayload, TaxRow } from "@/types/scheduling"
 import { formatCurrencyFromCents } from "@/lib/formatting"
@@ -728,18 +729,21 @@ export default function ServicesPage() {
             </option>
           ))}
         </select>
-        <select
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-          value={categoryFilter}
-          onChange={(event) => setCategoryFilter(event.target.value)}
-        >
-          <option value="all">All categories</option>
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
+        <div className="w-56">
+          <SearchableSelect
+            value={categoryFilter}
+            placeholder="All categories"
+            searchPlaceholder="Search category..."
+            options={[
+              { value: "all", label: "All categories" },
+              ...categories.map((category) => ({
+                value: category.id,
+                label: category.name,
+              })),
+            ]}
+            onChange={(nextValue) => setCategoryFilter(nextValue)}
+          />
+        </div>
       </DataTableToolbar>
 
       <DataTable table={table} loading={loading} emptyMessage="No services found." />
@@ -803,8 +807,8 @@ export default function ServicesPage() {
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={createService} disabled={saving}>
-              {saving ? "Saving..." : "Create service"}
+            <Button onClick={createService} loading={saving} loadingText="Saving...">
+              Create service
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -842,8 +846,8 @@ export default function ServicesPage() {
             <Button variant="outline" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={saveEdit} disabled={saving}>
-              {saving ? "Saving..." : "Save changes"}
+            <Button onClick={saveEdit} loading={saving} loadingText="Saving...">
+              Save changes
             </Button>
           </DialogFooter>
         </DialogContent>

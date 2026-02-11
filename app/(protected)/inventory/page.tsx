@@ -481,8 +481,8 @@ export default function InventoryProductsPage() {
             <Button variant="outline" onClick={() => setFormOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={save} disabled={saving}>
-              {saving ? "Saving..." : editing ? "Save changes" : "Create product"}
+            <Button onClick={save} loading={saving} loadingText="Saving...">
+              {editing ? "Save changes" : "Create product"}
             </Button>
           </DialogFooter>
         </DialogContent>

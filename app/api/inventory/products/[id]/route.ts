@@ -101,7 +101,7 @@ export async function PATCH(
         ...(data.description !== undefined
           ? { description: data.description?.trim() || null }
           : {}),
-        ...(data.unit?.trim() ? { unit: data.unit.trim() } : {}),
+        ...(data.unit ? { unit: data.unit } : {}),
         ...(data.categoryId ? { categoryId: data.categoryId } : {}),
         ...(data.status ? { status: data.status } : {}),
         ...(typeof data.costPriceCents === "number"

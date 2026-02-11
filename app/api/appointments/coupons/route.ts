@@ -34,6 +34,12 @@ const serializeCoupon = (coupon: {
   name: string | null
   discountType: "NONE" | "PERCENT" | "AMOUNT"
   discountValue: number
+  appliesTo?: "ORDER" | "SERVICE_LINES" | "PRODUCT_LINES"
+  allowedServiceIds?: string[]
+  allowedCategoryIds?: string[]
+  allowedProductIds?: string[]
+  minSubtotalCents?: number
+  stackingMode?: "STACKABLE" | "EXCLUSIVE"
   isActive: boolean
   validFrom: Date | null
   validTo: Date | null
@@ -47,6 +53,12 @@ const serializeCoupon = (coupon: {
   name: coupon.name,
   discountType: coupon.discountType,
   discountValue: coupon.discountValue,
+  appliesTo: coupon.appliesTo ?? "ORDER",
+  allowedServiceIds: coupon.allowedServiceIds ?? [],
+  allowedCategoryIds: coupon.allowedCategoryIds ?? [],
+  allowedProductIds: coupon.allowedProductIds ?? [],
+  minSubtotalCents: coupon.minSubtotalCents ?? 0,
+  stackingMode: coupon.stackingMode ?? "STACKABLE",
   isActive: coupon.isActive,
   validFrom: coupon.validFrom ? coupon.validFrom.toISOString().slice(0, 10) : null,
   validTo: coupon.validTo ? coupon.validTo.toISOString().slice(0, 10) : null,
@@ -130,11 +142,17 @@ export async function POST(request: Request) {
       name: data.name?.trim() || null,
       discountType: data.discountType,
       discountValue: data.discountValue,
+      appliesTo: data.appliesTo,
+      allowedServiceIds: data.allowedServiceIds,
+      allowedCategoryIds: data.allowedCategoryIds,
+      allowedProductIds: data.allowedProductIds,
+      minSubtotalCents: data.minSubtotalCents,
+      stackingMode: data.stackingMode,
       isActive: data.isActive ?? true,
       validFrom,
       validTo,
       maxUses: data.maxUses ?? null,
-    },
+    } as unknown as Prisma.CouponUncheckedCreateInput,
   })
 
   return NextResponse.json({ coupon: serializeCoupon(coupon) }, { status: 201 })

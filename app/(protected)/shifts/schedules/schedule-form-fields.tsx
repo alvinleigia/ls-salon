@@ -1,11 +1,13 @@
 "use client"
 
 import * as React from "react"
+import { Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { FormField } from "@/components/form-field"
+import { SearchableSelect } from "@/components/searchable-select"
 import { WEEKDAY_OPTIONS } from "@/types/scheduling"
 import type { Weekday } from "@/types/scheduling"
 import type {
@@ -123,24 +125,22 @@ export function ScheduleFormFields({
             </div>
           </div>
         ) : (
-          <select
+          <SearchableSelect
             id={fieldId("schedule-staff")}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
             value={form.staffIds[0] ?? ""}
-            onChange={(event) =>
+            placeholder="Select staff"
+            searchPlaceholder="Search staff..."
+            options={staffOptions.map((staff) => ({
+              value: staff.id,
+              label: staff.name?.trim() || staff.email,
+            }))}
+            onChange={(nextValue) =>
               setForm((prev) => ({
                 ...prev,
-                staffIds: event.target.value ? [event.target.value] : [],
+                staffIds: nextValue ? [nextValue] : [],
               }))
             }
-          >
-            <option value="">Select staff</option>
-            {staffOptions.map((staff) => (
-              <option key={staff.id} value={staff.id}>
-                {staff.name?.trim() || staff.email}
-              </option>
-            ))}
-          </select>
+          />
         )}
       </FormField>
       {!form.isDefault ? (
@@ -294,23 +294,21 @@ export function ScheduleFormFields({
                 id={fieldId(`block-template-${index}`)}
                 label={`Shift template ${index + 1}`}
               >
-                <select
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                <SearchableSelect
                   value={block.templateId}
-                  onChange={(event) =>
+                  placeholder="Select template"
+                  searchPlaceholder="Search template..."
+                  options={templates.map((template) => ({
+                    value: template.id,
+                    label: template.name,
+                  }))}
+                  onChange={(nextValue) =>
                     updateBlock(index, (current) => ({
                       ...current,
-                      templateId: event.target.value,
+                      templateId: nextValue,
                     }))
                   }
-                >
-                  <option value="">Select template</option>
-                  {templates.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
+                />
               </FormField>
               <FormField id={fieldId(`block-repeat-${index}`)} label="Repeat days">
                 <Input
@@ -325,8 +323,13 @@ export function ScheduleFormFields({
                   }
                 />
               </FormField>
-              <Button variant="outline" onClick={() => removeBlock(index)}>
-                Remove
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="Remove shift block"
+                onClick={() => removeBlock(index)}
+              >
+                <Trash2Icon className="h-4 w-4" />
               </Button>
             </div>
           ))}

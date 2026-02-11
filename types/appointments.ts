@@ -9,6 +9,8 @@ export type AppointmentStatus =
 export type AppointmentResolveAction = "cancel" | "reassign" | "reschedule"
 export type DiscountType = "NONE" | "PERCENT" | "AMOUNT"
 export type TaxMode = "EXCLUSIVE" | "INCLUSIVE"
+export type CouponAppliesTo = "ORDER" | "SERVICE_LINES" | "PRODUCT_LINES"
+export type CouponStackingMode = "STACKABLE" | "EXCLUSIVE"
 
 export type AppointmentCustomerOption = {
   id: string
@@ -25,10 +27,20 @@ export type AppointmentStaffOption = {
 export type AppointmentServiceOption = {
   id: string
   name: string
+  categoryId?: string
   durationMinutes: number
   priceCents?: number
   taxIds?: string[]
   taxMode?: TaxMode
+}
+
+export type AppointmentProductOption = {
+  id: string
+  sku: string
+  name: string
+  categoryId?: string
+  mrpCents: number
+  taxIds?: string[]
 }
 
 export type AppointmentCore = {
@@ -133,6 +145,19 @@ export type AppointmentOrderLineForm = {
   note: string
 }
 
+export type AppointmentOrderProductLineForm = {
+  id: string
+  productId: string
+  quantity: number
+  unitPriceCents: number
+  discountType: DiscountType
+  discountValue: number
+  taxIds: string[]
+  taxMode: TaxMode
+  lineTaxCents?: number
+  note: string
+}
+
 export type AppointmentOrderCouponForm = {
   code: string
 }
@@ -155,6 +180,7 @@ export type AppointmentOrderFormValues = {
   internalNote: string
   status?: "DRAFT" | "CONFIRMED" | "COMPLETED" | "CANCELED"
   lines: AppointmentOrderLineForm[]
+  productLines?: AppointmentOrderProductLineForm[]
 }
 
 export type AppointmentOrderStatus = "DRAFT" | "CONFIRMED" | "COMPLETED" | "CANCELED"
@@ -165,6 +191,12 @@ export type CouponRow = {
   name: string | null
   discountType: DiscountType
   discountValue: number
+  appliesTo: CouponAppliesTo
+  allowedServiceIds: string[]
+  allowedCategoryIds: string[]
+  allowedProductIds: string[]
+  minSubtotalCents: number
+  stackingMode: CouponStackingMode
   isActive: boolean
   validFrom: string | null
   validTo: string | null
@@ -209,6 +241,28 @@ export type AppointmentOrderLineRow = {
   } | null
 }
 
+export type AppointmentOrderProductLineRow = {
+  id: string
+  sortOrder: number
+  productId: string
+  quantity: number
+  unitPriceCents: number
+  discountType: DiscountType
+  discountValue: number
+  lineSubtotalCents: number
+  lineDiscountCents: number
+  lineTaxCents: number
+  lineTotalCents: number
+  taxIds: string[]
+  taxMode: TaxMode
+  note: string | null
+  product?: {
+    id: string
+    sku: string
+    name: string
+  } | null
+}
+
 export type AppointmentOrderCouponRow = {
   id: string
   code: string
@@ -246,6 +300,7 @@ export type AppointmentOrderRow = {
     email: string
   } | null
   lines: AppointmentOrderLineRow[]
+  productLines?: AppointmentOrderProductLineRow[]
   coupons: AppointmentOrderCouponRow[]
   taxes: AppointmentOrderTaxRow[]
 }

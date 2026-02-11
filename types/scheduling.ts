@@ -9,6 +9,7 @@ export type Weekday =
 
 export type PeriodKind = "WORK" | "BREAK"
 export type CurrencySymbolPlacement = "BEFORE" | "AFTER"
+export type TimeFormat = "H12" | "H24"
 export type NumberFormatStyle =
   | "US_UK"
   | "EUROPEAN"
@@ -56,6 +57,11 @@ export const NUMBER_FORMAT_OPTIONS: Array<{ value: NumberFormatStyle; label: str
   { value: "COMPACT_DECIMAL_COMMA", label: "1000000,00 (Compact format with decimal comma)" },
 ]
 
+export const TIME_FORMAT_OPTIONS: Array<{ value: TimeFormat; label: string }> = [
+  { value: "H12", label: "12-hour (02:30 PM)" },
+  { value: "H24", label: "24-hour (14:30)" },
+]
+
 export type WorkingPeriod = {
   id?: string
   kind: PeriodKind
@@ -83,6 +89,7 @@ export type AppSettingsPayload = {
   currency?: string
   timeZone?: string
   dateFormat?: string
+  timeFormat?: TimeFormat
   firstDayOfWeek?: Weekday
   currencySymbolPlacement?: CurrencySymbolPlacement
   numberFormat?: NumberFormatStyle

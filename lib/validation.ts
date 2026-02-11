@@ -1,4 +1,6 @@
 import { z } from "zod"
+import { INVENTORY_UNIT_OPTIONS } from "@/lib/constants/inventory"
+import { getStateOptionsByCountry } from "@/lib/constants/countries"
 
 export const roleSchema = z.enum(["ADMIN", "MANAGER", "STAFF", "CUSTOMER"])
 export const genderSchema = z.enum([
@@ -15,6 +17,13 @@ export const serviceTypeSchema = z.enum(["STANDARD", "PACKAGE"])
 export const taxModeSchema = z.enum(["EXCLUSIVE", "INCLUSIVE"])
 export const inventoryCategoryStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
 export const supplierStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
+export const taxRegistrationTypeSchema = z.enum([
+  "VAT",
+  "GST",
+  "SALES_TAX_ID",
+  "EIN",
+  "OTHER",
+])
 export const inventoryProductStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
 export const purchaseOrderStatusSchema = z.enum([
   "DRAFT",
@@ -42,6 +51,7 @@ export const weekdaySchema = z.enum([
 ])
 export const appSettingPeriodTypeSchema = z.enum(["WORK", "BREAK"])
 export const currencySymbolPlacementSchema = z.enum(["BEFORE", "AFTER"])
+export const timeFormatSchema = z.enum(["H12", "H24"])
 export const numberFormatStyleSchema = z.enum([
   "US_UK",
   "EUROPEAN",
@@ -50,6 +60,12 @@ export const numberFormatStyleSchema = z.enum([
   "COMPACT_DECIMAL_POINT",
   "COMPACT_DECIMAL_COMMA",
 ])
+export const couponAppliesToSchema = z.enum([
+  "ORDER",
+  "SERVICE_LINES",
+  "PRODUCT_LINES",
+])
+export const couponStackingModeSchema = z.enum(["STACKABLE", "EXCLUSIVE"])
 
 const optionalDate = z
   .preprocess((value) => {
@@ -61,7 +77,22 @@ const optionalDate = z
 
 const optionalString = z.string().trim().optional().or(z.literal(""))
 
-export const signUpSchema = z.object({
+const addCountryStateValidation = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) =>
+  schema.superRefine((values, ctx) => {
+    const data = values as Record<string, unknown>
+    const country = String(data.country ?? "").trim()
+    const state = String(data.state ?? "").trim()
+    const stateOptions = getStateOptionsByCountry(country)
+    if (stateOptions && state && !stateOptions.includes(state)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Select a valid state/province for the selected country.",
+        path: ["state"],
+      })
+    }
+  })
+
+export const signUpSchema = addCountryStateValidation(z.object({
   name: z.string().trim().min(1).max(100).optional().or(z.literal("")),
   email: z.string().trim().email(),
   password: z.string().trim().min(6).max(100),
@@ -76,9 +107,9 @@ export const signUpSchema = z.object({
   state: optionalString,
   postalCode: optionalString,
   country: optionalString,
-})
+}))
 
-export const createUserSchema = z.object({
+export const createUserSchema = addCountryStateValidation(z.object({
   name: z.string().trim().min(1).max(100).optional().or(z.literal("")),
   email: z.string().trim().email(),
   role: roleSchema.optional(),
@@ -96,9 +127,9 @@ export const createUserSchema = z.object({
   state: optionalString,
   postalCode: optionalString,
   country: optionalString,
-})
+}))
 
-export const updateUserSchema = z.object({
+export const updateUserSchema = addCountryStateValidation(z.object({
   name: z.string().trim().min(1).max(100).optional().or(z.literal("")),
   email: z.string().trim().email().optional().or(z.literal("")),
   role: roleSchema.optional(),
@@ -143,7 +174,7 @@ export const updateUserSchema = z.object({
         .optional(),
     })
     .optional(),
-})
+}))
 
 export const inviteUserSchema = z.object({
   email: z.string().trim().email(),
@@ -222,6 +253,7 @@ export const appSettingsSchema = z
   currency: z.string().trim().min(3).max(3),
   timeZone: z.string().trim().min(2).max(64),
   dateFormat: z.string().trim().min(4).max(20),
+  timeFormat: timeFormatSchema.default("H24"),
   firstDayOfWeek: weekdaySchema.default("SUNDAY"),
   currencySymbolPlacement: currencySymbolPlacementSchema.default("BEFORE"),
   numberFormat: numberFormatStyleSchema.default("US_UK"),
@@ -361,12 +393,14 @@ export type UpdateInventoryCategoryInput = z.infer<
   typeof updateInventoryCategorySchema
 >
 
-export const createSupplierSchema = z.object({
+const supplierSchemaBase = z.object({
   name: z.string().trim().min(2).max(140),
   contactPerson: z.string().trim().max(120).optional().or(z.literal("")),
   email: z.string().trim().email().optional().or(z.literal("")),
   phone: z.string().trim().max(30).optional().or(z.literal("")),
-  taxId: z.string().trim().max(60).optional().or(z.literal("")),
+  isTaxRegistered: z.boolean().optional().default(false),
+  taxRegistrationType: taxRegistrationTypeSchema.optional(),
+  taxRegistrationNumber: z.string().trim().max(60).optional().or(z.literal("")),
   leadTimeDays: z.coerce.number().int().min(0).max(365).optional(),
   addressLine1: z.string().trim().max(200).optional().or(z.literal("")),
   addressLine2: z.string().trim().max(200).optional().or(z.literal("")),
@@ -378,10 +412,41 @@ export const createSupplierSchema = z.object({
   status: supplierStatusSchema.optional(),
 })
 
-export const updateSupplierSchema = createSupplierSchema.partial().refine(
-  (value) => Object.keys(value).length > 0,
-  { message: "At least one field is required." }
-)
+const validateSupplierTaxRegistration = (
+  values: {
+    isTaxRegistered?: boolean
+    taxRegistrationType?: unknown
+    taxRegistrationNumber?: string
+  },
+  ctx: z.RefinementCtx
+) => {
+  const hasNumber = Boolean(values.taxRegistrationNumber && values.taxRegistrationNumber.trim())
+  if (values.isTaxRegistered) {
+    if (!values.taxRegistrationType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Tax registration type is required when tax registered.",
+        path: ["taxRegistrationType"],
+      })
+    }
+    if (!hasNumber) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Tax registration number is required when tax registered.",
+        path: ["taxRegistrationNumber"],
+      })
+    }
+  }
+}
+
+export const createSupplierSchema = addCountryStateValidation(supplierSchemaBase)
+  .superRefine(validateSupplierTaxRegistration)
+
+export const updateSupplierSchema = addCountryStateValidation(supplierSchemaBase.partial())
+  .superRefine(validateSupplierTaxRegistration)
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required.",
+  })
 
 export type CreateSupplierInput = z.infer<typeof createSupplierSchema>
 export type UpdateSupplierInput = z.infer<typeof updateSupplierSchema>
@@ -399,7 +464,7 @@ export const createInventoryProductSchema = z.object({
   sku: z.string().trim().min(2).max(80),
   name: z.string().trim().min(2).max(160),
   description: z.string().trim().max(1000).optional().or(z.literal("")),
-  unit: z.string().trim().min(1).max(30).optional(),
+  unit: z.enum(INVENTORY_UNIT_OPTIONS).optional().default("unit"),
   categoryId: z.string().trim().min(1),
   status: inventoryProductStatusSchema.optional(),
   costPriceCents: z.coerce.number().int().min(0).max(100000000),
@@ -672,6 +737,18 @@ export const appointmentOrderLineInputSchema = z.object({
   note: z.string().trim().max(500).optional().or(z.literal("")),
 })
 
+export const appointmentOrderProductLineInputSchema = z.object({
+  id: z.string().optional(),
+  productId: z.string().trim().min(1),
+  quantity: z.coerce.number().int().min(1).max(1000),
+  unitPriceCents: z.coerce.number().int().min(0).max(100000000),
+  discountType: z.enum(["NONE", "PERCENT", "AMOUNT"]),
+  discountValue: z.coerce.number().min(0).max(1000000),
+  taxIds: z.array(z.string().trim().min(1)).optional().default([]),
+  taxMode: taxModeSchema.default("EXCLUSIVE"),
+  note: z.string().trim().max(500).optional().or(z.literal("")),
+})
+
 export const appointmentOrderCreateSchema = z.object({
   customerId: z.string().trim().min(1),
   appointmentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -682,6 +759,7 @@ export const appointmentOrderCreateSchema = z.object({
   internalNote: z.string().trim().max(2000).optional().or(z.literal("")),
   coupons: z.array(z.string().trim().min(2).max(40)).optional().default([]),
   lines: z.array(appointmentOrderLineInputSchema).min(1),
+  productLines: z.array(appointmentOrderProductLineInputSchema).optional().default([]),
 })
 
 export const appointmentOrderUpdateSchema = appointmentOrderCreateSchema.partial().refine(
@@ -708,6 +786,12 @@ export const couponCreateSchema = z.object({
   validFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
   validTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
   maxUses: z.coerce.number().int().min(1).max(1000000).optional(),
+  appliesTo: couponAppliesToSchema.optional().default("ORDER"),
+  allowedServiceIds: z.array(z.string().trim().min(1)).optional().default([]),
+  allowedCategoryIds: z.array(z.string().trim().min(1)).optional().default([]),
+  allowedProductIds: z.array(z.string().trim().min(1)).optional().default([]),
+  minSubtotalCents: z.coerce.number().int().min(0).max(100000000).optional().default(0),
+  stackingMode: couponStackingModeSchema.optional().default("STACKABLE"),
 })
 
 export const couponUpdateSchema = couponCreateSchema.partial().refine(

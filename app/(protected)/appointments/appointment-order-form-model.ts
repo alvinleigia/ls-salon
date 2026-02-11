@@ -2,6 +2,7 @@ import type {
   AppointmentOrderCouponForm,
   AppointmentOrderFormValues,
   AppointmentOrderLineForm,
+  AppointmentOrderProductLineForm,
   AppointmentOrderTotals,
   DiscountType,
 } from "@/types/appointments"
@@ -27,6 +28,19 @@ export const createEmptyOrderLine = (): AppointmentOrderLineForm => ({
   note: "",
 })
 
+export const createEmptyProductLine = (): AppointmentOrderProductLineForm => ({
+  id: crypto.randomUUID(),
+  productId: "",
+  quantity: 1,
+  unitPriceCents: 0,
+  discountType: "NONE",
+  discountValue: 0,
+  taxIds: [],
+  taxMode: "EXCLUSIVE",
+  lineTaxCents: 0,
+  note: "",
+})
+
 export const defaultAppointmentOrderFormValues = (): AppointmentOrderFormValues => {
   const now = new Date()
   return {
@@ -39,6 +53,7 @@ export const defaultAppointmentOrderFormValues = (): AppointmentOrderFormValues 
     customerNote: "",
     internalNote: "",
     lines: [createEmptyOrderLine()],
+    productLines: [],
   }
 }
 

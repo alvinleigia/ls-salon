@@ -22,6 +22,7 @@ import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, MoreHorizontalIcon } from 
 import { toast } from "sonner"
 
 import { DataTable, DataTablePagination, DataTableToolbar } from "@/components/data-table"
+import { SearchableSelect } from "@/components/searchable-select"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -148,6 +149,7 @@ export default function AppointmentsPage() {
   const [staff, setStaff] = React.useState<AppointmentStaffOption[]>([])
   const [services, setServices] = React.useState<AppointmentServiceOption[]>([])
   const [firstDayOfWeek, setFirstDayOfWeek] = React.useState(0)
+  const [timeFormat, setTimeFormat] = React.useState<AppSettingsPayload["timeFormat"]>("H24")
   const [calendarHourMode, setCalendarHourMode] = React.useState<"working" | "full">("working")
   const [calendarStatusFilter, setCalendarStatusFilter] = React.useState<
     "non_canceled" | "all" | AppointmentStatus
@@ -204,9 +206,10 @@ export default function AppointmentsPage() {
       buildEndTimePreview(
         formValues.date,
         formValues.startTime,
-        selectedService?.durationMinutes
+        selectedService?.durationMinutes,
+        { timeFormat }
       ),
-    [formValues.date, formValues.startTime, selectedService?.durationMinutes]
+    [formValues.date, formValues.startTime, selectedService?.durationMinutes, timeFormat]
   )
 
   const loadLookups = React.useCallback(async () => {
@@ -243,6 +246,7 @@ export default function AppointmentsPage() {
     if (settingsRes.ok) {
       const data = (await settingsRes.json()) as { settings?: AppSettingsPayload }
       setFirstDayOfWeek(weekdayToSchedulerFirstDay(data.settings?.firstDayOfWeek))
+      setTimeFormat(data.settings?.timeFormat ?? "H24")
       const workingPeriods =
         data.settings?.workingHours
           ?.flatMap((day) =>
@@ -827,18 +831,21 @@ export default function AppointmentsPage() {
             </option>
           ))}
         </select>
-        <select
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-          value={staffFilter}
-          onChange={(event) => setStaffFilter(event.target.value)}
-        >
-          <option value="all">All staff</option>
-          {staff.map((member) => (
-            <option key={member.id} value={member.id}>
-              {member.name?.trim() || member.email}
-            </option>
-          ))}
-        </select>
+        <div className="w-56">
+          <SearchableSelect
+            value={staffFilter}
+            placeholder="All staff"
+            searchPlaceholder="Search staff..."
+            options={[
+              { value: "all", label: "All staff" },
+              ...staff.map((member) => ({
+                value: member.id,
+                label: member.name?.trim() || member.email,
+              })),
+            ]}
+            onChange={(nextValue) => setStaffFilter(nextValue)}
+          />
+        </div>
       </DataTableToolbar>
 
       <DataTable table={table} loading={loading} emptyMessage="No appointments found." />
@@ -957,8 +964,13 @@ export default function AppointmentsPage() {
                 {deleting ? "Canceling..." : "Cancel appointment"}
               </Button>
             ) : null}
-            <Button onClick={submitForm} disabled={saving || availabilityChecking || availability?.available === false}>
-              {saving ? "Saving..." : editingId ? "Save changes" : "Create appointment"}
+            <Button
+              onClick={submitForm}
+              loading={saving}
+              loadingText="Saving..."
+              disabled={availabilityChecking || availability?.available === false}
+            >
+              {editingId ? "Save changes" : "Create appointment"}
             </Button>
           </DialogFooter>
         </DialogContent>

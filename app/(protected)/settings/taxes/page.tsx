@@ -291,8 +291,8 @@ export default function SettingsTaxesPage() {
             <Button variant="outline" onClick={() => setFormOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={save} disabled={saving}>
-              {saving ? "Saving..." : editing ? "Save changes" : "Create tax"}
+            <Button onClick={save} loading={saving} loadingText="Saving...">
+              {editing ? "Save changes" : "Create tax"}
             </Button>
           </DialogFooter>
         </DialogContent>

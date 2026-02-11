@@ -15,6 +15,7 @@ import { FormField } from "@/components/form-field"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { COUNTRY_OPTIONS, getStateOptionsByCountry } from "@/lib/constants/countries"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import type { ListResponse } from "@/types/api"
 import type { SupplierRow } from "@/types/inventory"
@@ -24,9 +25,12 @@ type SupplierFormValues = {
   contactPerson: string
   email: string
   phone: string
-  taxId: string
+  isTaxRegistered: boolean
+  taxRegistrationType: "VAT" | "GST" | "SALES_TAX_ID" | "EIN" | "OTHER" | ""
+  taxRegistrationNumber: string
   leadTimeDays: number
   city: string
+  state: string
   country: string
   notes: string
   status: "ACTIVE" | "INACTIVE"
@@ -37,9 +41,12 @@ const defaultValues: SupplierFormValues = {
   contactPerson: "",
   email: "",
   phone: "",
-  taxId: "",
+  isTaxRegistered: false,
+  taxRegistrationType: "",
+  taxRegistrationNumber: "",
   leadTimeDays: 0,
   city: "",
+  state: "",
   country: "",
   notes: "",
   status: "ACTIVE",
@@ -65,6 +72,7 @@ export default function InventorySuppliersPage() {
   const [formValues, setFormValues] = React.useState<SupplierFormValues>(defaultValues)
   const [saving, setSaving] = React.useState(false)
   const { errors, setErrorsFromResponse, clearErrors } = useFormErrors()
+  const stateOptions = getStateOptionsByCountry(formValues.country)
 
   const loadItems = React.useCallback(async () => {
     setLoading(true)
@@ -183,9 +191,12 @@ export default function InventorySuppliersPage() {
                   contactPerson: row.original.contactPerson ?? "",
                   email: row.original.email ?? "",
                   phone: row.original.phone ?? "",
-                  taxId: row.original.taxId ?? "",
+                  isTaxRegistered: row.original.isTaxRegistered ?? false,
+                  taxRegistrationType: row.original.taxRegistrationType ?? "",
+                  taxRegistrationNumber: row.original.taxRegistrationNumber ?? "",
                   leadTimeDays: row.original.leadTimeDays,
                   city: row.original.city ?? "",
+                  state: row.original.state ?? "",
                   country: row.original.country ?? "",
                   notes: "",
                   status: row.original.status,
@@ -261,7 +272,7 @@ export default function InventorySuppliersPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[90vh] overflow-y-auto max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit supplier" : "New supplier"}</DialogTitle>
           </DialogHeader>
@@ -299,13 +310,6 @@ export default function InventorySuppliersPage() {
                   onChange={(event) => setFormValues((prev) => ({ ...prev, phone: event.target.value }))}
                 />
               </FormField>
-              <FormField id="sup-tax" label="Tax ID" error={errors.taxId}>
-                <Input
-                  id="sup-tax"
-                  value={formValues.taxId}
-                  onChange={(event) => setFormValues((prev) => ({ ...prev, taxId: event.target.value }))}
-                />
-              </FormField>
               <FormField id="sup-lead" label="Lead days" error={errors.leadTimeDays}>
                 <Input
                   id="sup-lead"
@@ -320,6 +324,84 @@ export default function InventorySuppliersPage() {
                   }
                 />
               </FormField>
+              <FormField id="sup-status" label="Status" error={errors.status}>
+                <select
+                  id="sup-status"
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={formValues.status}
+                  onChange={(event) =>
+                    setFormValues((prev) => ({
+                      ...prev,
+                      status: event.target.value as SupplierFormValues["status"],
+                    }))
+                  }
+                >
+                  <option value="ACTIVE">Active</option>
+                  <option value="INACTIVE">Inactive</option>
+                </select>
+              </FormField>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <FormField id="sup-tax-registered" label="Tax registered" error={errors.isTaxRegistered}>
+                <select
+                  id="sup-tax-registered"
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={formValues.isTaxRegistered ? "YES" : "NO"}
+                  onChange={(event) =>
+                    setFormValues((prev) => ({
+                      ...prev,
+                      isTaxRegistered: event.target.value === "YES",
+                      taxRegistrationType: event.target.value === "YES" ? prev.taxRegistrationType : "",
+                      taxRegistrationNumber: event.target.value === "YES" ? prev.taxRegistrationNumber : "",
+                    }))
+                  }
+                >
+                  <option value="NO">No</option>
+                  <option value="YES">Yes</option>
+                </select>
+              </FormField>
+              <FormField
+                id="sup-tax-type"
+                label="Tax registration type"
+                error={errors.taxRegistrationType}
+              >
+                <select
+                  id="sup-tax-type"
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={formValues.taxRegistrationType}
+                  disabled={!formValues.isTaxRegistered}
+                  onChange={(event) =>
+                    setFormValues((prev) => ({
+                      ...prev,
+                      taxRegistrationType: event.target.value as SupplierFormValues["taxRegistrationType"],
+                    }))
+                  }
+                >
+                  <option value="">Select type</option>
+                  <option value="VAT">VAT</option>
+                  <option value="GST">GST</option>
+                  <option value="SALES_TAX_ID">Sales Tax ID</option>
+                  <option value="EIN">EIN</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </FormField>
+              <FormField
+                id="sup-tax-number"
+                label="Tax registration no."
+                error={errors.taxRegistrationNumber}
+              >
+                <Input
+                  id="sup-tax-number"
+                  value={formValues.taxRegistrationNumber}
+                  disabled={!formValues.isTaxRegistered}
+                  onChange={(event) =>
+                    setFormValues((prev) => ({
+                      ...prev,
+                      taxRegistrationNumber: event.target.value,
+                    }))
+                  }
+                />
+              </FormField>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <FormField id="sup-city" label="City" error={errors.city}>
@@ -329,12 +411,59 @@ export default function InventorySuppliersPage() {
                   onChange={(event) => setFormValues((prev) => ({ ...prev, city: event.target.value }))}
                 />
               </FormField>
+              <FormField id="sup-state" label="State / province" error={errors.state}>
+                {stateOptions ? (
+                  <select
+                    id="sup-state"
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={formValues.state}
+                    onChange={(event) => setFormValues((prev) => ({ ...prev, state: event.target.value }))}
+                  >
+                    <option value="">Select state/province</option>
+                    {stateOptions.map((state) => (
+                      <option key={state} value={state}>
+                        {state}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <Input
+                    id="sup-state"
+                    placeholder="State / province / region"
+                    value={formValues.state}
+                    onChange={(event) => setFormValues((prev) => ({ ...prev, state: event.target.value }))}
+                  />
+                )}
+              </FormField>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
               <FormField id="sup-country" label="Country" error={errors.country}>
-                <Input
+                <select
                   id="sup-country"
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                   value={formValues.country}
-                  onChange={(event) => setFormValues((prev) => ({ ...prev, country: event.target.value }))}
-                />
+                  onChange={(event) =>
+                    setFormValues((prev) => {
+                      const country = event.target.value
+                      const nextStateOptions = getStateOptionsByCountry(country)
+                      const shouldResetState = Boolean(
+                        nextStateOptions && prev.state && !nextStateOptions.includes(prev.state)
+                      )
+                      return {
+                        ...prev,
+                        country,
+                        state: shouldResetState ? "" : prev.state,
+                      }
+                    })
+                  }
+                >
+                  <option value="">Select country</option>
+                  {COUNTRY_OPTIONS.map((country) => (
+                    <option key={country} value={country}>
+                      {country}
+                    </option>
+                  ))}
+                </select>
               </FormField>
             </div>
             <FormField id="sup-notes" label="Notes" error={errors.notes}>
@@ -344,29 +473,13 @@ export default function InventorySuppliersPage() {
                 onChange={(event) => setFormValues((prev) => ({ ...prev, notes: event.target.value }))}
               />
             </FormField>
-            <FormField id="sup-status" label="Status" error={errors.status}>
-              <select
-                id="sup-status"
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                value={formValues.status}
-                onChange={(event) =>
-                  setFormValues((prev) => ({
-                    ...prev,
-                    status: event.target.value as SupplierFormValues["status"],
-                  }))
-                }
-              >
-                <option value="ACTIVE">Active</option>
-                <option value="INACTIVE">Inactive</option>
-              </select>
-            </FormField>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFormOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={save} disabled={saving}>
-              {saving ? "Saving..." : editing ? "Save changes" : "Create supplier"}
+            <Button onClick={save} loading={saving} loadingText="Saving...">
+              {editing ? "Save changes" : "Create supplier"}
             </Button>
           </DialogFooter>
         </DialogContent>

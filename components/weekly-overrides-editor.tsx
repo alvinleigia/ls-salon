@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -218,6 +219,8 @@ export function WeeklyOverridesEditor({
                           </div>
                           <Button
                             variant="outline"
+                            size="icon-sm"
+                            aria-label="Remove period"
                             onClick={() =>
                               onChange(
                                 overrides.map((item, idx) =>
@@ -233,7 +236,7 @@ export function WeeklyOverridesEditor({
                               )
                             }
                           >
-                            Remove
+                            <Trash2Icon className="h-4 w-4" />
                           </Button>
                         </div>
                       ))}

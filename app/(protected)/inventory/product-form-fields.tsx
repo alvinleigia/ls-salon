@@ -1,6 +1,8 @@
 "use client"
 
 import { FormField } from "@/components/form-field"
+import { Trash2Icon } from "lucide-react"
+import { SearchableSelect } from "@/components/searchable-select"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type {
@@ -8,8 +10,12 @@ import type {
   InventoryProductFormValues,
   SupplierOption,
 } from "@/types/inventory"
+import type { InventoryUnit } from "@/lib/constants/inventory"
 import type { TaxRow } from "@/types/scheduling"
-import { inventoryProductStatusOptions } from "./product-form-model"
+import {
+  inventoryProductStatusOptions,
+  inventoryProductUnitOptions,
+} from "./product-form-model"
 
 type ProductFormFieldsProps = {
   values: InventoryProductFormValues
@@ -37,6 +43,13 @@ export function ProductFormFields({
   taxes,
   onChange,
 }: ProductFormFieldsProps) {
+  const activeCategoryOptions = categories
+    .filter((category) => category.status === "ACTIVE")
+    .map((category) => ({ value: category.id, label: category.name }))
+  const activeSupplierOptions = suppliers
+    .filter((supplier) => supplier.status === "ACTIVE")
+    .map((supplier) => ({ value: supplier.id, label: supplier.name }))
+
   return (
     <div className="grid gap-4 py-1">
       <div className="grid gap-4 md:grid-cols-2">
@@ -66,28 +79,30 @@ export function ProductFormFields({
 
       <div className="grid gap-4 md:grid-cols-3">
         <FormField id="product-unit" label="Unit" error={errors.unit}>
-          <Input
+          <select
             id="product-unit"
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
             value={values.unit}
-            onChange={(event) => onChange({ ...values, unit: event.target.value })}
-          />
+            onChange={(event) =>
+              onChange({ ...values, unit: event.target.value as InventoryUnit })
+            }
+          >
+            {inventoryProductUnitOptions.map((unit) => (
+              <option key={unit} value={unit}>
+                {unit}
+              </option>
+            ))}
+          </select>
         </FormField>
         <FormField id="product-category" label="Category" error={errors.categoryId}>
-          <select
+          <SearchableSelect
             id="product-category"
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
             value={values.categoryId}
-            onChange={(event) => onChange({ ...values, categoryId: event.target.value })}
-          >
-            <option value="">Select category</option>
-            {categories
-              .filter((category) => category.status === "ACTIVE")
-              .map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-          </select>
+            placeholder="Select category"
+            searchPlaceholder="Search category..."
+            options={activeCategoryOptions}
+            onChange={(nextValue) => onChange({ ...values, categoryId: nextValue })}
+          />
         </FormField>
         <FormField id="product-status" label="Status" error={errors.status}>
           <select
@@ -248,28 +263,21 @@ export function ProductFormFields({
                 label="Supplier"
                 error={errors[`supplierLinks.${index}.supplierId`]}
               >
-                <select
+                <SearchableSelect
                   id={`supplier-${index}`}
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                   value={link.supplierId}
-                  onChange={(event) =>
+                  placeholder="Select supplier"
+                  searchPlaceholder="Search supplier..."
+                  options={activeSupplierOptions}
+                  onChange={(nextValue) =>
                     onChange({
                       ...values,
                       supplierLinks: updateSupplierLink(values, index, {
-                        supplierId: event.target.value,
+                        supplierId: nextValue,
                       }),
                     })
                   }
-                >
-                  <option value="">Select supplier</option>
-                  {suppliers
-                    .filter((supplier) => supplier.status === "ACTIVE")
-                    .map((supplier) => (
-                      <option key={supplier.id} value={supplier.id}>
-                        {supplier.name}
-                      </option>
-                    ))}
-                </select>
+                />
               </FormField>
               <FormField
                 id={`supplier-sku-${index}`}
@@ -371,7 +379,8 @@ export function ProductFormFields({
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
+                size="icon-sm"
+                aria-label="Remove supplier link"
                 onClick={() =>
                   onChange({
                     ...values,
@@ -381,7 +390,7 @@ export function ProductFormFields({
                   })
                 }
               >
-                Remove
+                <Trash2Icon className="h-4 w-4" />
               </Button>
             </div>
           </div>

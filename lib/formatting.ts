@@ -2,6 +2,7 @@ import type {
   AppSettingsPayload,
   CurrencySymbolPlacement,
   NumberFormatStyle,
+  TimeFormat,
   Weekday,
 } from "@/types/scheduling"
 
@@ -9,6 +10,7 @@ const DEFAULTS = {
   locale: "en-US",
   currency: "USD",
   currencySymbolPlacement: "BEFORE" as CurrencySymbolPlacement,
+  timeFormat: "H24" as TimeFormat,
   numberFormat: "US_UK" as NumberFormatStyle,
 }
 
@@ -76,6 +78,41 @@ export const formatCurrencyFromCents = (
   const symbol = resolveCurrencySymbol(currency, locale)
   const number = formatNumberValue(value, numberFormat, 2)
   return placement === "BEFORE" ? `${symbol} ${number}` : `${number} ${symbol}`
+}
+
+const parseTime24 = (value: string) => {
+  const match = value.match(/^(\d{2}):(\d{2})$/)
+  if (!match) return null
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+  return { hours, minutes }
+}
+
+export const formatTimeFrom24h = (
+  value: string,
+  settings?: Pick<AppSettingsPayload, "timeFormat">
+) => {
+  const parsed = parseTime24(value)
+  if (!parsed) return value
+  const timeFormat = settings?.timeFormat ?? DEFAULTS.timeFormat
+  if (timeFormat === "H24") {
+    return `${String(parsed.hours).padStart(2, "0")}:${String(parsed.minutes).padStart(2, "0")}`
+  }
+  const period = parsed.hours >= 12 ? "PM" : "AM"
+  const hour12 = parsed.hours % 12 || 12
+  return `${String(hour12).padStart(2, "0")}:${String(parsed.minutes).padStart(2, "0")} ${period}`
+}
+
+export const formatTimeFromDate = (
+  value: string | Date,
+  settings?: Pick<AppSettingsPayload, "timeFormat">
+) => {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return typeof value === "string" ? value : ""
+  const hours = String(date.getHours()).padStart(2, "0")
+  const minutes = String(date.getMinutes()).padStart(2, "0")
+  return formatTimeFrom24h(`${hours}:${minutes}`, settings)
 }
 
 export const weekdayToSchedulerFirstDay = (weekday?: Weekday) => {

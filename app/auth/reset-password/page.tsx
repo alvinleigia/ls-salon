@@ -83,8 +83,8 @@ export default function ResetPasswordPage() {
                   onChange={(event) => setConfirm(event.target.value)}
                 />
               </FormField>
-              <Button className="w-full" type="submit" disabled={loading}>
-                {loading ? "Resetting..." : "Reset password"}
+              <Button className="w-full" type="submit" loading={loading} loadingText="Resetting...">
+                Reset password
               </Button>
             </form>
           )}

@@ -4,26 +4,36 @@ import fs from "fs"
 
 import type { AppointmentOrderRow } from "@/types/appointments"
 import type { AppSettingsPayload } from "@/types/scheduling"
-import { formatCurrencyFromCents, formatNumberValue } from "@/lib/formatting"
+import {
+  formatCurrencyFromCents,
+  formatNumberValue,
+  formatTimeFromDate,
+} from "@/lib/formatting"
+import { DEFAULT_DATE_FORMAT, formatDateForDisplay } from "@/lib/date"
 
 type InvoiceInput = {
   order: AppointmentOrderRow
   settings?: Pick<
     AppSettingsPayload,
-    "locale" | "currency" | "currencySymbolPlacement" | "numberFormat"
+    | "locale"
+    | "currency"
+    | "currencySymbolPlacement"
+    | "numberFormat"
+    | "dateFormat"
+    | "timeFormat"
   >
 }
 
-const formatDateTime = (value: string) => {
+const formatDateTime = (
+  value: string,
+  format?: string,
+  timeFormat?: AppSettingsPayload["timeFormat"]
+) => {
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value
-  return parsed.toLocaleString("en-GB", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+  const dateLabel = formatDateForDisplay(value, format ?? DEFAULT_DATE_FORMAT)
+  const timeLabel = formatTimeFromDate(parsed, { timeFormat })
+  return `${dateLabel} ${timeLabel}`
 }
 
 export const buildAppointmentOrderInvoicePdf = async ({
@@ -166,7 +176,10 @@ export const buildAppointmentOrderInvoicePdf = async ({
     drawCentered(line.trim(), index === 0 ? 12 : 9, index === 0)
   })
   drawCentered("Invoice", 10, true)
-  drawCentered(`Date: ${formatDateTime(order.appointmentStartAt)}`, 9)
+  drawCentered(
+    `Date: ${formatDateTime(order.appointmentStartAt, settings?.dateFormat, settings?.timeFormat)}`,
+    9
+  )
   drawSeparator()
 
   drawCentered(order.customer?.name || order.customer?.email || "Customer", 9, true)

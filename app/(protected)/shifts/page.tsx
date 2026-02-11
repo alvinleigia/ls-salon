@@ -33,7 +33,9 @@ import {
   DataTablePagination,
   DataTableToolbar,
 } from "@/components/data-table"
+import { useDateFormatter } from "@/hooks/use-date-formatter"
 import { useFormErrors } from "@/hooks/use-form-errors"
+import { formatTimeFrom24h } from "@/lib/formatting"
 import type { AppSettingsPayload, WorkingDay } from "@/types/scheduling"
 import type { ListResponse } from "@/types/api"
 import type {
@@ -54,13 +56,19 @@ const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
   return <ArrowUpDownIcon className="h-4 w-4" />
 }
 
-const summarizeBreaks = (breaks: ShiftTemplateBreak[]) => {
+const summarizeBreaks = (
+  breaks: ShiftTemplateBreak[],
+  formatTime: (value: string) => string
+) => {
   if (!breaks.length) return "-"
-  return breaks.map((item) => `${item.startTime}-${item.endTime}`).join(" - ")
+  return breaks
+    .map((item) => `${formatTime(item.startTime)}-${formatTime(item.endTime)}`)
+    .join(" - ")
 }
 
 export default function ShiftsPage() {
   type PaginationState = { pageIndex: number; pageSize: number }
+  const { formatDate } = useDateFormatter()
 
   const [templates, setTemplates] = React.useState<ShiftTemplateRow[]>([])
   const [loading, setLoading] = React.useState(true)
@@ -100,6 +108,7 @@ export default function ShiftsPage() {
   )
 
   const [workingHours, setWorkingHours] = React.useState<WorkingDay[]>([])
+  const [timeFormat, setTimeFormat] = React.useState<AppSettingsPayload["timeFormat"]>("H24")
 
   const {
     errors: createErrors,
@@ -121,7 +130,13 @@ export default function ShiftsPage() {
     }
     const data = (await response.json()) as { settings?: AppSettingsPayload }
     setWorkingHours(data.settings?.workingHours ?? [])
+    setTimeFormat(data.settings?.timeFormat ?? "H24")
   }, [])
+
+  const formatTemplateTime = React.useCallback(
+    (value: string) => formatTimeFrom24h(value, { timeFormat }),
+    [timeFormat]
+  )
 
   const loadTemplates = React.useCallback(async () => {
     setLoading(true)
@@ -415,10 +430,12 @@ export default function ShiftsPage() {
             <SortIndicator value={column.getIsSorted()} />
           </button>
         ),
-        accessorFn: (row) => `${row.startTime}-${row.endTime}`,
+        accessorFn: (row) =>
+          `${formatTemplateTime(row.startTime)}-${formatTemplateTime(row.endTime)}`,
         cell: ({ row }) => (
           <span className="text-sm text-muted-foreground">
-            {row.original.startTime}-{row.original.endTime}
+            {formatTemplateTime(row.original.startTime)}-
+            {formatTemplateTime(row.original.endTime)}
           </span>
         ),
       },
@@ -435,10 +452,10 @@ export default function ShiftsPage() {
             <SortIndicator value={column.getIsSorted()} />
           </button>
         ),
-        accessorFn: (row) => summarizeBreaks(row.breaks),
+        accessorFn: (row) => summarizeBreaks(row.breaks, formatTemplateTime),
         cell: ({ row }) => (
           <span className="text-sm text-muted-foreground">
-            {summarizeBreaks(row.original.breaks)}
+            {summarizeBreaks(row.original.breaks, formatTemplateTime)}
           </span>
         ),
       },
@@ -480,7 +497,7 @@ export default function ShiftsPage() {
             <SortIndicator value={column.getIsSorted()} />
           </button>
         ),
-        cell: ({ row }) => new Date(row.original.updatedAt).toLocaleDateString(),
+        cell: ({ row }) => formatDate(row.original.updatedAt),
       },
       {
         id: "actions",
@@ -508,7 +525,7 @@ export default function ShiftsPage() {
         ),
       },
     ],
-    [requestDelete, startEdit]
+    [formatDate, formatTemplateTime, requestDelete, startEdit]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -625,8 +642,8 @@ export default function ShiftsPage() {
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={createTemplate} disabled={saving}>
-              {saving ? "Saving..." : "Create template"}
+            <Button onClick={createTemplate} loading={saving} loadingText="Saving...">
+              Create template
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -666,8 +683,8 @@ export default function ShiftsPage() {
             <Button variant="outline" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={saveEdit} disabled={saving}>
-              {saving ? "Saving..." : "Save changes"}
+            <Button onClick={saveEdit} loading={saving} loadingText="Saving...">
+              Save changes
             </Button>
           </DialogFooter>
         </DialogContent>

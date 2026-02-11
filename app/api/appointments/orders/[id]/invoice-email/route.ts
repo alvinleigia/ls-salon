@@ -38,6 +38,8 @@ export async function POST(
       currency: true,
       currencySymbolPlacement: true,
       numberFormat: true,
+      dateFormat: true,
+      timeFormat: true,
     },
   })
 

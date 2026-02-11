@@ -1,6 +1,24 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
+import {
+  ArrowLeft,
+  Ban,
+  Check,
+  Copy,
+  Eye,
+  Filter,
+  Loader2,
+  Mail,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Save,
+  Search,
+  Send,
+  Trash2,
+  X,
+} from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -36,26 +54,89 @@ const buttonVariants = cva(
   }
 )
 
+const derivePlainTextChildren = (children: React.ReactNode): string | null => {
+  let result = ""
+  let hasNonPrimitive = false
+  React.Children.forEach(children, (child) => {
+    if (typeof child === "string" || typeof child === "number") {
+      result += String(child)
+      return
+    }
+    if (child === null || child === undefined || typeof child === "boolean") {
+      return
+    }
+    if (React.isValidElement(child) && child.type === React.Fragment) {
+      const fragmentChildren = (child.props as { children?: React.ReactNode }).children
+      const nested = derivePlainTextChildren(fragmentChildren)
+      if (nested === null) {
+        hasNonPrimitive = true
+        return
+      }
+      result += nested
+      return
+    }
+    hasNonPrimitive = true
+  })
+  if (hasNonPrimitive) return null
+  return result.trim()
+}
+
+const iconForLabel = (label: string) => {
+  const value = label.toLowerCase()
+  if (value.startsWith("add") || value.startsWith("new") || value.startsWith("create")) return Plus
+  if (value.startsWith("save") || value.startsWith("update")) return Save
+  if (value.startsWith("edit")) return Pencil
+  if (value.startsWith("delete") || value.startsWith("remove")) return Trash2
+  if (value.startsWith("cancel") || value.startsWith("close")) return X
+  if (value.startsWith("back")) return ArrowLeft
+  if (value.startsWith("search")) return Search
+  if (value.startsWith("filter")) return Filter
+  if (value.startsWith("apply") || value.startsWith("confirm") || value.startsWith("mark")) return Check
+  if (value.startsWith("send") || value.startsWith("submit") || value.startsWith("invite")) return Send
+  if (value.startsWith("email")) return Mail
+  if (value.startsWith("copy")) return Copy
+  if (value.startsWith("reset")) return RotateCcw
+  if (value.startsWith("revoke")) return Ban
+  if (value.startsWith("view")) return Eye
+  return null
+}
+
 function Button({
   className,
   variant = "default",
   size = "default",
   asChild = false,
+  loading = false,
+  loadingText,
+  autoIcon = true,
+  disabled,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
+    loading?: boolean
+    loadingText?: string
+    autoIcon?: boolean
   }) {
   const Comp = asChild ? Slot : "button"
+  const plainText = derivePlainTextChildren(children)
+  const AutoIcon = autoIcon && plainText ? iconForLabel(plainText) : null
 
   return (
     <Comp
       data-slot="button"
       data-variant={variant}
       data-size={size}
+      aria-busy={loading || undefined}
       className={cn(buttonVariants({ variant, size, className }))}
+      disabled={loading || disabled}
       {...props}
-    />
+    >
+      {loading && !asChild ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+      {!loading && !asChild && AutoIcon ? <AutoIcon className="h-4 w-4" /> : null}
+      {loading && loadingText ? loadingText : children}
+    </Comp>
   )
 }
 

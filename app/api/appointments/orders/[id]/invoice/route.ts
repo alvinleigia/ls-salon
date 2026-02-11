@@ -34,6 +34,8 @@ export async function GET(
       currency: true,
       currencySymbolPlacement: true,
       numberFormat: true,
+      dateFormat: true,
+      timeFormat: true,
     },
   })
 

@@ -297,8 +297,8 @@ export default function InventoryCategoriesPage() {
             <Button variant="outline" onClick={() => setFormOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={save} disabled={saving}>
-              {saving ? "Saving..." : editing ? "Save changes" : "Create category"}
+            <Button onClick={save} loading={saving} loadingText="Saving...">
+              {editing ? "Save changes" : "Create category"}
             </Button>
           </DialogFooter>
         </DialogContent>

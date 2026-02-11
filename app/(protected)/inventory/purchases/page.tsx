@@ -7,11 +7,12 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, PlusIcon } from "lucide-react"
+import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { DataTable, DataTablePagination, DataTableToolbar } from "@/components/data-table"
 import { FormField } from "@/components/form-field"
+import { SearchableSelect } from "@/components/searchable-select"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -78,6 +79,18 @@ export default function InventoryPurchasesPage() {
   const formatMoney = React.useCallback(
     (cents: number) => formatCurrencyFromCents(cents, settings),
     [settings]
+  )
+  const productOptions = React.useMemo(
+    () =>
+      products.map((product) => ({
+        value: product.id,
+        label: `${product.sku} - ${product.name}`,
+      })),
+    [products]
+  )
+  const supplierOptions = React.useMemo(
+    () => suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name })),
+    [suppliers]
   )
 
   const loadItems = React.useCallback(async () => {
@@ -292,21 +305,16 @@ export default function InventoryPurchasesPage() {
           <div className="flex-1 overflow-y-auto space-y-4 px-1">
             <div className="grid gap-3 md:grid-cols-4">
               <FormField id="po-supplier" label="Supplier">
-                <select
+                <SearchableSelect
                   id="po-supplier"
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
                   value={formValues.supplierId}
-                  onChange={(event) =>
-                    setFormValues((prev) => ({ ...prev, supplierId: event.target.value }))
+                  placeholder="Select supplier"
+                  searchPlaceholder="Search supplier..."
+                  options={supplierOptions}
+                  onChange={(nextValue) =>
+                    setFormValues((prev) => ({ ...prev, supplierId: nextValue }))
                   }
-                >
-                  <option value="">Select supplier</option>
-                  {suppliers.map((supplier) => (
-                    <option key={supplier.id} value={supplier.id}>
-                      {supplier.name}
-                    </option>
-                  ))}
-                </select>
+                />
               </FormField>
               <FormField id="po-order-date" label="Order date">
                 <Input
@@ -377,26 +385,22 @@ export default function InventoryPurchasesPage() {
               {formValues.items.map((item, index) => (
                 <div key={index} className="grid gap-3 md:grid-cols-[2fr_1fr_1fr_auto]">
                   <FormField id={`po-item-product-${index}`} label="Product">
-                    <select
+                    <SearchableSelect
                       id={`po-item-product-${index}`}
-                      className="h-9 rounded-md border border-input bg-background px-3 text-sm"
                       value={item.productId}
+                      placeholder="Select product"
+                      searchPlaceholder="Search by SKU or product name..."
+                      emptyLabel="No products found."
+                      options={productOptions}
                       onChange={(event) =>
                         setFormValues((prev) => ({
                           ...prev,
                           items: prev.items.map((row, rowIndex) =>
-                            rowIndex === index ? { ...row, productId: event.target.value } : row
+                            rowIndex === index ? { ...row, productId: event } : row
                           ),
                         }))
                       }
-                    >
-                      <option value="">Select product</option>
-                      {products.map((product) => (
-                        <option key={product.id} value={product.id}>
-                          {product.sku} - {product.name}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </FormField>
                   <FormField id={`po-item-qty-${index}`} label="Qty">
                     <Input
@@ -434,7 +438,8 @@ export default function InventoryPurchasesPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
+                      size="icon-sm"
+                      aria-label="Remove item"
                       onClick={() =>
                         setFormValues((prev) => ({
                           ...prev,
@@ -443,7 +448,7 @@ export default function InventoryPurchasesPage() {
                       }
                       disabled={formValues.items.length === 1}
                     >
-                      Remove
+                      <Trash2Icon className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
@@ -454,8 +459,8 @@ export default function InventoryPurchasesPage() {
             <Button variant="outline" onClick={() => setFormOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={save} disabled={saving}>
-              {saving ? "Saving..." : "Create PO"}
+            <Button onClick={save} loading={saving} loadingText="Saving...">
+              Create PO
             </Button>
           </DialogFooter>
         </DialogContent>

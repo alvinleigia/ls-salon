@@ -5,6 +5,7 @@ import { z } from "zod"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import type { InventoryUnit } from "@/lib/constants/inventory"
 import {
   createInventoryProductSchema,
   inventoryProductStatusSchema,
@@ -211,7 +212,7 @@ export async function POST(request: Request) {
       sku: data.sku.trim(),
       name: data.name.trim(),
       description: data.description?.trim() || undefined,
-      unit: data.unit?.trim() || "unit",
+      unit: data.unit ?? "unit",
       categoryId: data.categoryId,
       status: data.status ?? "ACTIVE",
       costPriceCents: data.costPriceCents,

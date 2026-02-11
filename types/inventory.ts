@@ -1,5 +1,8 @@
+import type { InventoryUnit } from "@/lib/constants/inventory"
+
 export type InventoryCategoryStatus = "ACTIVE" | "INACTIVE"
 export type SupplierStatus = "ACTIVE" | "INACTIVE"
+export type TaxRegistrationType = "VAT" | "GST" | "SALES_TAX_ID" | "EIN" | "OTHER"
 export type InventoryProductStatus = "ACTIVE" | "INACTIVE"
 export type PurchaseOrderStatus = "DRAFT" | "ORDERED" | "RECEIVED" | "CANCELED"
 
@@ -24,10 +27,13 @@ export type SupplierRow = {
   contactPerson: string | null
   email: string | null
   phone: string | null
-  taxId: string | null
+  isTaxRegistered: boolean
+  taxRegistrationType: TaxRegistrationType | null
+  taxRegistrationNumber: string | null
   leadTimeDays: number
   status: SupplierStatus
   city: string | null
+  state: string | null
   country: string | null
   createdAt: string
 }
@@ -62,7 +68,7 @@ export type InventoryProductRow = {
   sku: string
   name: string
   description: string | null
-  unit: string
+  unit: InventoryUnit
   category: { id: string; name: string }
   status: InventoryProductStatus
   costPriceCents: number
@@ -80,7 +86,7 @@ export type InventoryProductFormValues = {
   sku: string
   name: string
   description: string
-  unit: string
+  unit: InventoryUnit
   categoryId: string
   status: InventoryProductStatus
   costPrice: string

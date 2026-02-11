@@ -1,6 +1,7 @@
 "use client"
 
 import { FormField } from "@/components/form-field"
+import { Trash2Icon } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import type { ShiftTemplateBreak, ShiftTemplateForm } from "@/types/shifts"
@@ -169,10 +170,11 @@ export function TemplateFormFields({
               <div className="flex items-end">
                 <button
                   type="button"
-                  className="h-9 rounded-md border border-input px-3 text-sm hover:bg-muted"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-input hover:bg-muted"
+                  aria-label="Remove break"
                   onClick={() => onRemoveBreak(index)}
                 >
-                  Remove
+                  <Trash2Icon className="h-4 w-4" />
                 </button>
               </div>
             </div>

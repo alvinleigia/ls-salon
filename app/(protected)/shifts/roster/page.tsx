@@ -14,8 +14,13 @@ import {
 import { toast } from "sonner"
 
 import { formatDateForDisplay, parseISODate, toISODate } from "@/lib/date"
-import { weekdayToSchedulerFirstDay } from "@/lib/formatting"
+import {
+  formatTimeFrom24h,
+  formatTimeFromDate,
+  weekdayToSchedulerFirstDay,
+} from "@/lib/formatting"
 import { Button } from "@/components/ui/button"
+import { SearchableSelect } from "@/components/searchable-select"
 import {
   Dialog,
   DialogContent,
@@ -110,6 +115,7 @@ export default function RosterPage() {
           overrides: nextSettings.overrides ?? [],
           timeZone: nextSettings.timeZone,
           dateFormat: nextSettings.dateFormat,
+          timeFormat: nextSettings.timeFormat,
         })
         setFirstDayOfWeek(weekdayToSchedulerFirstDay(nextSettings.firstDayOfWeek))
       }
@@ -387,7 +393,13 @@ export default function RosterPage() {
         const end = new Date(start)
         end.setDate(end.getDate() + 1)
         const breaks = (template?.breaks ?? [])
-          .map((period) => `${period.startTime} - ${period.endTime}`)
+          .map(
+            (period) =>
+              `${formatTimeFrom24h(period.startTime, settings)} - ${formatTimeFrom24h(
+                period.endTime,
+                settings
+              )}`
+          )
           .filter(Boolean)
         list.push({
           Id: `${member.id}-${formatDateKey(day)}`,
@@ -411,6 +423,7 @@ export default function RosterPage() {
     formatDateKey,
     getStaffPeriodsForDate,
     getStaffTemplateForDate,
+    settings,
     templateColorMap,
   ])
 
@@ -436,7 +449,8 @@ export default function RosterPage() {
         <div className="font-medium">{data.Subject}</div>
         {data.templateStart && data.templateEnd ? (
           <div>
-            Shift: {data.templateStart} - {data.templateEnd}
+            Shift: {formatTimeFrom24h(data.templateStart, settings)} -{" "}
+            {formatTimeFrom24h(data.templateEnd, settings)}
           </div>
         ) : null}
         {data.templateBreaks?.length ? (
@@ -461,7 +475,7 @@ export default function RosterPage() {
         ) : null}
       </div>
     )
-  }, [openOverrideEditor])
+  }, [openOverrideEditor, settings])
 
   React.useEffect(() => {
     if (scheduleRef.current) {
@@ -492,13 +506,17 @@ export default function RosterPage() {
       formatDateForDisplay(value, settings.dateFormat)
     const byStaff = filteredStaff.map((member) => ({
       staff: member.name?.trim() || member.email,
-      dates: availabilityDates.map((day) => ({
-        date: formatShort(day),
-        periods: getStaffPeriodsForDate(day, member.id).map(
-          (period) => `${period.startTime}-${period.endTime}`
-        ),
-      })),
-    }))
+        dates: availabilityDates.map((day) => ({
+          date: formatShort(day),
+          periods: getStaffPeriodsForDate(day, member.id).map(
+            (period) =>
+              `${formatTimeFrom24h(period.startTime, settings)}-${formatTimeFrom24h(
+                period.endTime,
+                settings
+              )}`
+          ),
+        })),
+      }))
     return {
       selectedDate: formatShort(date),
       viewDates: availabilityDates.map((day) => formatShort(day)),
@@ -514,6 +532,7 @@ export default function RosterPage() {
     filteredStaff,
     getStaffPeriodsForDate,
     settings.dateFormat,
+    settings,
   ])
 
   const syncViewDates = React.useCallback(() => {
@@ -833,18 +852,21 @@ export default function RosterPage() {
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div className="flex flex-col gap-2">
           <label className="text-sm font-medium">Staff filter</label>
-          <select
-            className="h-10 w-full min-w-[220px] rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-[280px]"
+          <div className="w-full min-w-[220px] md:w-[280px]">
+            <SearchableSelect
             value={staffFilter}
-            onChange={(event) => setStaffFilter(event.target.value)}
-          >
-            <option value="all">All staff</option>
-            {staff.map((member) => (
-              <option key={member.id} value={member.id}>
-                {member.name?.trim() || member.email}
-              </option>
-            ))}
-          </select>
+            placeholder="All staff"
+            searchPlaceholder="Search staff..."
+            options={[
+              { value: "all", label: "All staff" },
+              ...staff.map((member) => ({
+                value: member.id,
+                label: member.name?.trim() || member.email,
+              })),
+            ]}
+            onChange={(nextValue) => setStaffFilter(nextValue)}
+          />
+          </div>
         </div>
       </div>
 
@@ -914,34 +936,33 @@ export default function RosterPage() {
           <div className="space-y-4">
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">Staff</Label>
-              <select
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              <SearchableSelect
                 value={overrideStaffId}
-                onChange={(event) => setOverrideStaffId(event.target.value)}
-              >
-                <option value="">Select staff</option>
-                {staff.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.name?.trim() || member.email}
-                  </option>
-                ))}
-              </select>
+                placeholder="Select staff"
+                searchPlaceholder="Search staff..."
+                options={staff.map((member) => ({
+                  value: member.id,
+                  label: member.name?.trim() || member.email,
+                }))}
+                onChange={(nextValue) => setOverrideStaffId(nextValue)}
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">Shift template</Label>
-              <select
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              <SearchableSelect
                 value={overrideTemplateId}
-                onChange={(event) => setOverrideTemplateId(event.target.value)}
+                placeholder="Select template"
+                searchPlaceholder="Search template..."
+                options={templates.map((template) => ({
+                  value: template.id,
+                  label: `${template.name} (${formatTimeFrom24h(
+                    template.startTime,
+                    settings
+                  )}-${formatTimeFrom24h(template.endTime, settings)})`,
+                }))}
+                onChange={(nextValue) => setOverrideTemplateId(nextValue)}
                 disabled={overrideUnavailable}
-              >
-                <option value="">Select template</option>
-                {templates.map((template) => (
-                  <option key={template.id} value={template.id}>
-                    {template.name} ({template.startTime}-{template.endTime})
-                  </option>
-                ))}
-              </select>
+              />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
@@ -1015,7 +1036,8 @@ export default function RosterPage() {
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {item.customerName || item.customerEmail || "Customer"} •{" "}
-                    {formatDateForDisplay(item.startAt, settings.dateFormat)}
+                    {formatDateForDisplay(item.startAt, settings.dateFormat)}{" "}
+                    {formatTimeFromDate(item.startAt, settings)}
                   </div>
                 </div>
               ))}
@@ -1037,18 +1059,16 @@ export default function RosterPage() {
             {conflictAction === "reassign" ? (
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Reassign staff</Label>
-                <select
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                <SearchableSelect
                   value={conflictStaffId}
-                  onChange={(event) => setConflictStaffId(event.target.value)}
-                >
-                  <option value="">Select staff</option>
-                  {staff.map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.name?.trim() || member.email}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Select staff"
+                  searchPlaceholder="Search staff..."
+                  options={staff.map((member) => ({
+                    value: member.id,
+                    label: member.name?.trim() || member.email,
+                  }))}
+                  onChange={(nextValue) => setConflictStaffId(nextValue)}
+                />
               </div>
             ) : null}
             {conflictAction === "reschedule" ? (

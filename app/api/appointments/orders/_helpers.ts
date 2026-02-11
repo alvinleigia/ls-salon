@@ -6,6 +6,12 @@ export const appointmentOrderInclude = {
   customer: { select: { id: true, name: true, email: true } },
   coupons: true,
   taxes: true,
+  productLines: {
+    include: {
+      product: { select: { id: true, sku: true, name: true } },
+    },
+    orderBy: { sortOrder: "asc" },
+  },
   lines: {
     include: {
       service: { select: { id: true, name: true, durationMinutes: true, priceCents: true } },
@@ -72,6 +78,23 @@ export const serializeAppointmentOrder = (
     note: line.note,
     service: line.service,
     staffProfile: line.staffProfile,
+  })),
+  productLines: order.productLines.map((line) => ({
+    id: line.id,
+    sortOrder: line.sortOrder,
+    productId: line.productId,
+    quantity: line.quantity,
+    unitPriceCents: line.unitPriceCents,
+    discountType: line.discountType,
+    discountValue: line.discountValue,
+    lineSubtotalCents: line.lineSubtotalCents,
+    lineDiscountCents: line.lineDiscountCents,
+    lineTaxCents: line.lineTaxCents,
+    lineTotalCents: line.lineTotalCents,
+    taxIds: line.taxIds,
+    taxMode: line.taxMode,
+    note: line.note,
+    product: line.product,
   })),
 })
 

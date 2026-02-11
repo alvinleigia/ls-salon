@@ -116,8 +116,8 @@ export default function MyProfilePage() {
         />
 
         <div className="mt-6 flex justify-end">
-          <Button onClick={saveProfile} disabled={saving}>
-            {saving ? "Saving..." : "Save changes"}
+          <Button onClick={saveProfile} loading={saving} loadingText="Saving...">
+            Save changes
           </Button>
         </div>
       </div>

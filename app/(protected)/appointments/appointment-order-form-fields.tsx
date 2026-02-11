@@ -10,6 +10,7 @@ import { SearchableSelect } from "@/components/searchable-select"
 import type {
   AppointmentCustomerOption,
   AppointmentOrderFormValues,
+  AppointmentProductOption,
   AppointmentServiceOption,
   AppointmentStaffOption,
   DiscountType,
@@ -17,6 +18,7 @@ import type {
 import {
   addCouponCode,
   createEmptyOrderLine,
+  createEmptyProductLine,
   formatCurrencyCents,
 } from "./appointment-order-form-model"
 
@@ -27,7 +29,14 @@ type AppointmentOrderFormFieldsProps = {
   customers: AppointmentCustomerOption[]
   staff: AppointmentStaffOption[]
   services: AppointmentServiceOption[]
-  couponOptions?: string[]
+  products: AppointmentProductOption[]
+  couponOptions?: Array<{ value: string; label: string }>
+  couponHints?: Array<{
+    code: string
+    eligible: boolean
+    reason?: string
+    discountCents?: number
+  }>
   formatCurrencyCentsValue?: (valueInCents: number) => string
   allowMultipleLines?: boolean
   lineTaxCentsById?: Record<string, number>
@@ -48,7 +57,9 @@ export function AppointmentOrderFormFields({
   customers,
   staff,
   services,
+  products,
   couponOptions = [],
+  couponHints = [],
   formatCurrencyCentsValue = formatCurrencyCents,
   allowMultipleLines = true,
   lineTaxCentsById = {},
@@ -357,6 +368,217 @@ export function AppointmentOrderFormFields({
             </div>
           ))}
         </div>
+
+        <div className="mt-6 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Product items</h2>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              setValues((prev) => ({
+                ...prev,
+                productLines: [...(prev.productLines ?? []), createEmptyProductLine()],
+              }))
+            }
+          >
+            Add product
+          </Button>
+        </div>
+
+        {!(values.productLines ?? []).length ? (
+          <p className="text-xs text-muted-foreground">No products added.</p>
+        ) : null}
+
+        <div className="space-y-3">
+          {(values.productLines ?? []).map((line, index) => (
+            <div key={line.id} className="rounded-lg border bg-background p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-medium text-muted-foreground">Product {index + 1}</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() =>
+                    setValues((prev) => ({
+                      ...prev,
+                      productLines: (prev.productLines ?? []).filter((item) => item.id !== line.id),
+                    }))
+                  }
+                >
+                  <Trash2Icon className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+                <FormField id={`line-product-${line.id}`} label="Product">
+                  <SearchableSelect
+                    id={`line-product-${line.id}`}
+                    value={line.productId}
+                    placeholder="Select product"
+                    searchPlaceholder="Search product..."
+                    options={products.map((product) => ({
+                      value: product.id,
+                      label: `${product.name} (${product.sku})`,
+                    }))}
+                    onChange={(nextValue) => {
+                      const product = products.find((item) => item.id === nextValue)
+                      setValues((prev) => ({
+                        ...prev,
+                        productLines: (prev.productLines ?? []).map((item) =>
+                          item.id === line.id
+                            ? {
+                                ...item,
+                                productId: nextValue,
+                                unitPriceCents: product?.mrpCents ?? item.unitPriceCents,
+                                taxIds: product?.taxIds ?? [],
+                              }
+                            : item
+                        ),
+                      }))
+                    }}
+                  />
+                </FormField>
+                <FormField id={`line-product-qty-${line.id}`} label="Qty">
+                  <Input
+                    id={`line-product-qty-${line.id}`}
+                    type="number"
+                    min={1}
+                    value={line.quantity}
+                    onChange={(event) =>
+                      setValues((prev) => ({
+                        ...prev,
+                        productLines: (prev.productLines ?? []).map((item) =>
+                          item.id === line.id
+                            ? { ...item, quantity: Math.max(1, Number(event.target.value || 1)) }
+                            : item
+                        ),
+                      }))
+                    }
+                  />
+                </FormField>
+                <FormField id={`line-product-price-${line.id}`} label="Unit price">
+                  <Input
+                    id={`line-product-price-${line.id}`}
+                    type="text"
+                    inputMode="decimal"
+                    min={0}
+                    value={getPriceInputValue(`product-${line.id}`, line.unitPriceCents)}
+                    onChange={(event) => {
+                      const inputKey = `product-${line.id}`
+                      const nextValue = event.target.value
+                      setPriceInputs((prev) => ({ ...prev, [inputKey]: nextValue }))
+                      const parsed = Number.parseFloat(nextValue)
+                      if (Number.isNaN(parsed)) return
+                      setValues((prev) => ({
+                        ...prev,
+                        productLines: (prev.productLines ?? []).map((item) =>
+                          item.id === line.id
+                            ? {
+                                ...item,
+                                unitPriceCents: Math.max(0, Math.round(parsed * 100)),
+                              }
+                            : item
+                        ),
+                      }))
+                    }}
+                    onBlur={() => {
+                      const inputKey = `product-${line.id}`
+                      const raw = priceInputs[inputKey]
+                      if (raw === undefined) return
+                      const parsed = Number.parseFloat(raw)
+                      if (!Number.isNaN(parsed)) {
+                        const normalized = Math.max(0, parsed).toFixed(2)
+                        setPriceInputs((prev) => ({ ...prev, [inputKey]: normalized }))
+                      } else {
+                        setPriceInputs((prev) => {
+                          const next = { ...prev }
+                          delete next[inputKey]
+                          return next
+                        })
+                      }
+                    }}
+                  />
+                </FormField>
+                <FormField id={`line-product-discount-type-${line.id}`} label="Discount type">
+                  <select
+                    id={`line-product-discount-type-${line.id}`}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={line.discountType}
+                    onChange={(event) =>
+                      setValues((prev) => ({
+                        ...prev,
+                        productLines: (prev.productLines ?? []).map((item) =>
+                          item.id === line.id
+                            ? { ...item, discountType: event.target.value as DiscountType }
+                            : item
+                        ),
+                      }))
+                    }
+                  >
+                    <option value="NONE">None</option>
+                    <option value="PERCENT">Percent</option>
+                    <option value="AMOUNT">Amount</option>
+                  </select>
+                </FormField>
+                <FormField id={`line-product-discount-value-${line.id}`} label="Discount value">
+                  <Input
+                    id={`line-product-discount-value-${line.id}`}
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={line.discountValue}
+                    onChange={(event) =>
+                      setValues((prev) => ({
+                        ...prev,
+                        productLines: (prev.productLines ?? []).map((item) =>
+                          item.id === line.id
+                            ? { ...item, discountValue: Math.max(0, Number(event.target.value || 0)) }
+                            : item
+                        ),
+                      }))
+                    }
+                  />
+                </FormField>
+              </div>
+
+              <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                <FormField id={`line-product-note-${line.id}`} label="Line note">
+                  <Input
+                    id={`line-product-note-${line.id}`}
+                    value={line.note}
+                    onChange={(event) =>
+                      setValues((prev) => ({
+                        ...prev,
+                        productLines: (prev.productLines ?? []).map((item) =>
+                          item.id === line.id ? { ...item, note: event.target.value } : item
+                        ),
+                      }))
+                    }
+                  />
+                </FormField>
+                <div className="justify-self-end text-right">
+                  <div className="grid gap-1 text-right text-xs text-muted-foreground">
+                    <div className="flex items-center justify-end gap-3">
+                      <span>Total</span>
+                      <span className="min-w-[80px] text-sm font-semibold text-foreground">
+                        {formatCurrencyCentsValue(
+                          getLineTotalCents(
+                            line.quantity,
+                            line.unitPriceCents,
+                            line.discountType,
+                            line.discountValue
+                          )
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -395,11 +617,13 @@ export function AppointmentOrderFormFields({
             <FormField id="order-coupon" label="Coupon code">
               <div className="space-y-2">
                 <div className="flex gap-2">
-                  <Input
+                  <SearchableSelect
                     id="order-coupon"
                     value={values.couponInput}
-                    onChange={(event) => update("couponInput", event.target.value)}
-                    placeholder="Enter code"
+                    placeholder="Select coupon"
+                    searchPlaceholder="Search coupon..."
+                    options={couponOptions}
+                    onChange={(nextValue) => update("couponInput", nextValue)}
                   />
                   <Button
                     type="button"
@@ -439,8 +663,23 @@ export function AppointmentOrderFormFields({
                 )}
                 {couponOptions.length ? (
                   <p className="text-xs text-muted-foreground">
-                    Available: {couponOptions.join(", ")}
+                    Select from active coupons. Click an applied coupon chip to remove it.
                   </p>
+                ) : null}
+                {couponHints.length ? (
+                  <div className="space-y-1 rounded-md border border-input p-2">
+                    {couponHints.map((hint) => (
+                      <p
+                        key={hint.code}
+                        className={`text-xs ${hint.eligible ? "text-emerald-600" : "text-amber-700"}`}
+                      >
+                        {hint.code}:{" "}
+                        {hint.eligible
+                          ? `Applied (${formatCurrencyCentsValue(hint.discountCents ?? 0)})`
+                          : hint.reason ?? "Not applicable"}
+                      </p>
+                    ))}
+                  </div>
                 ) : null}
               </div>
             </FormField>

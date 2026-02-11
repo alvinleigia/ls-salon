@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { Prisma } from "@prisma/client"
 
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
@@ -21,6 +22,12 @@ const serializeCoupon = (coupon: {
   name: string | null
   discountType: "NONE" | "PERCENT" | "AMOUNT"
   discountValue: number
+  appliesTo?: "ORDER" | "SERVICE_LINES" | "PRODUCT_LINES"
+  allowedServiceIds?: string[]
+  allowedCategoryIds?: string[]
+  allowedProductIds?: string[]
+  minSubtotalCents?: number
+  stackingMode?: "STACKABLE" | "EXCLUSIVE"
   isActive: boolean
   validFrom: Date | null
   validTo: Date | null
@@ -34,6 +41,12 @@ const serializeCoupon = (coupon: {
   name: coupon.name,
   discountType: coupon.discountType,
   discountValue: coupon.discountValue,
+  appliesTo: coupon.appliesTo ?? "ORDER",
+  allowedServiceIds: coupon.allowedServiceIds ?? [],
+  allowedCategoryIds: coupon.allowedCategoryIds ?? [],
+  allowedProductIds: coupon.allowedProductIds ?? [],
+  minSubtotalCents: coupon.minSubtotalCents ?? 0,
+  stackingMode: coupon.stackingMode ?? "STACKABLE",
   isActive: coupon.isActive,
   validFrom: coupon.validFrom ? coupon.validFrom.toISOString().slice(0, 10) : null,
   validTo: coupon.validTo ? coupon.validTo.toISOString().slice(0, 10) : null,
@@ -91,11 +104,17 @@ export async function PATCH(
       ...(data.name !== undefined ? { name: data.name?.trim() || null } : {}),
       ...(data.discountType !== undefined ? { discountType: data.discountType } : {}),
       ...(data.discountValue !== undefined ? { discountValue: data.discountValue } : {}),
+      ...(data.appliesTo !== undefined ? { appliesTo: data.appliesTo } : {}),
+      ...(data.allowedServiceIds !== undefined ? { allowedServiceIds: data.allowedServiceIds } : {}),
+      ...(data.allowedCategoryIds !== undefined ? { allowedCategoryIds: data.allowedCategoryIds } : {}),
+      ...(data.allowedProductIds !== undefined ? { allowedProductIds: data.allowedProductIds } : {}),
+      ...(data.minSubtotalCents !== undefined ? { minSubtotalCents: data.minSubtotalCents } : {}),
+      ...(data.stackingMode !== undefined ? { stackingMode: data.stackingMode } : {}),
       ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
       ...(validFrom !== undefined ? { validFrom } : {}),
       ...(validTo !== undefined ? { validTo } : {}),
       ...(data.maxUses !== undefined ? { maxUses: data.maxUses } : {}),
-    },
+    } as unknown as Prisma.CouponUncheckedUpdateInput,
   })
 
   return NextResponse.json({ coupon: serializeCoupon(coupon) })

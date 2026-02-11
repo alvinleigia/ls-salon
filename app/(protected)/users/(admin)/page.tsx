@@ -71,6 +71,7 @@ export default function UsersPage() {
   const [users, setUsers] = React.useState<UserRow[]>([])
   const [loading, setLoading] = React.useState(true)
   const [creating, setCreating] = React.useState(false)
+  const [updating, setUpdating] = React.useState(false)
   const [createOpen, setCreateOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
   const [editingUser, setEditingUser] = React.useState<UserRow | null>(null)
@@ -191,6 +192,8 @@ export default function UsersPage() {
 
   const saveEdit = async () => {
     if (!editingUser) return
+    setUpdating(true)
+    clearEditErrors()
     const response = await fetch(`/api/users/${editingUser.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -204,10 +207,12 @@ export default function UsersPage() {
       }
       setEditErrorsFromResponse(data)
       toast.error(data.error ?? "Unable to update user.")
+      setUpdating(false)
       return
     }
 
     toast.success("User updated.")
+    setUpdating(false)
     setEditOpen(false)
     setEditingUser(null)
     await loadUsers()
@@ -469,8 +474,8 @@ export default function UsersPage() {
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={createUser} disabled={creating}>
-              {creating ? "Creating..." : "Create user"}
+            <Button onClick={createUser} loading={creating} loadingText="Creating...">
+              Create user
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -507,7 +512,9 @@ export default function UsersPage() {
             <Button variant="outline" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={saveEdit}>Save changes</Button>
+            <Button onClick={saveEdit} loading={updating} loadingText="Saving...">
+              Save changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

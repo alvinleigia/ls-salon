@@ -464,8 +464,8 @@ export default function ServiceCategoriesPage() {
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={createCategory} disabled={saving}>
-              {saving ? "Saving..." : "Create category"}
+            <Button onClick={createCategory} loading={saving} loadingText="Saving...">
+              Create category
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -498,8 +498,8 @@ export default function ServiceCategoriesPage() {
             <Button variant="outline" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={saveEdit} disabled={saving}>
-              {saving ? "Saving..." : "Save changes"}
+            <Button onClick={saveEdit} loading={saving} loadingText="Saving...">
+              Save changes
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -88,8 +88,8 @@ export default function InvitePage() {
                   onChange={(event) => setPassword(event.target.value)}
                 />
               </FormField>
-              <Button className="w-full" onClick={submit} disabled={loading}>
-                {loading ? "Submitting..." : "Create account"}
+              <Button className="w-full" onClick={submit} loading={loading} loadingText="Submitting...">
+                Create account
               </Button>
             </>
           )}

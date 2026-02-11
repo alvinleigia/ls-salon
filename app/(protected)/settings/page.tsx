@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { toast } from "sonner"
+import { Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,9 +10,15 @@ import { FormField } from "@/components/form-field"
 import { Label } from "@/components/ui/label"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import {
+  CURRENCY_OPTIONS,
+  LOCALE_OPTIONS,
+  TIME_ZONE_OPTIONS,
+} from "@/lib/constants/localization"
+import {
   CURRENCY_SYMBOL_PLACEMENT_OPTIONS,
   DATE_FORMAT_OPTIONS,
   NUMBER_FORMAT_OPTIONS,
+  TIME_FORMAT_OPTIONS,
   WEEKDAY_OPTIONS,
 } from "@/types/scheduling"
 import type {
@@ -45,6 +52,24 @@ export default function SettingsPage() {
   const [saving, setSaving] = React.useState(false)
   const [form, setForm] = React.useState<SettingsForm>(defaultSettings)
   const { errors, setErrorsFromResponse, clearErrors } = useFormErrors()
+  const localeOptions = React.useMemo(() => {
+    if (LOCALE_OPTIONS.some((option) => option.value === form.locale)) {
+      return LOCALE_OPTIONS
+    }
+    return [{ value: form.locale, label: `${form.locale} (Custom)` }, ...LOCALE_OPTIONS]
+  }, [form.locale])
+  const currencyOptions = React.useMemo(() => {
+    if (CURRENCY_OPTIONS.some((option) => option.value === form.currency)) {
+      return CURRENCY_OPTIONS
+    }
+    return [{ value: form.currency, label: `${form.currency} (Custom)` }, ...CURRENCY_OPTIONS]
+  }, [form.currency])
+  const timeZoneOptions = React.useMemo(() => {
+    if (TIME_ZONE_OPTIONS.some((option) => option.value === form.timeZone)) {
+      return TIME_ZONE_OPTIONS
+    }
+    return [{ value: form.timeZone, label: `${form.timeZone} (Custom)` }, ...TIME_ZONE_OPTIONS]
+  }, [form.timeZone])
 
   React.useEffect(() => {
     const load = async () => {
@@ -238,27 +263,46 @@ export default function SettingsPage() {
       <div className="rounded-xl border bg-card p-6">
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField id="settings-locale" label="Locale" error={errors.locale}>
-            <Input
+            <select
               id="settings-locale"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               value={form.locale}
               onChange={(event) => updateField("locale", event.target.value)}
-            />
+            >
+              {localeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </FormField>
           <FormField id="settings-currency" label="Currency" error={errors.currency}>
-            <Input
+            <select
               id="settings-currency"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               value={form.currency}
-              onChange={(event) =>
-                updateField("currency", event.target.value.toUpperCase())
-              }
-            />
+              onChange={(event) => updateField("currency", event.target.value)}
+            >
+              {currencyOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </FormField>
           <FormField id="settings-timezone" label="Time zone" error={errors.timeZone}>
-            <Input
+            <select
               id="settings-timezone"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               value={form.timeZone}
               onChange={(event) => updateField("timeZone", event.target.value)}
-            />
+            >
+              {timeZoneOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </FormField>
           <FormField
             id="settings-date-format"
@@ -272,6 +316,24 @@ export default function SettingsPage() {
               onChange={(event) => updateField("dateFormat", event.target.value)}
             >
               {DATE_FORMAT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <FormField
+            id="settings-time-format"
+            label="Time format"
+            error={errors.timeFormat}
+          >
+            <select
+              id="settings-time-format"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={form.timeFormat}
+              onChange={(event) => updateField("timeFormat", event.target.value)}
+            >
+              {TIME_FORMAT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -420,9 +482,11 @@ export default function SettingsPage() {
                       </InlineField>
                       <Button
                         variant="outline"
+                        size="icon-sm"
+                        aria-label="Remove period"
                         onClick={() => removePeriod(dayIndex, periodIndex)}
                       >
-                        Remove
+                        <Trash2Icon className="h-4 w-4" />
                       </Button>
                     </div>
                   ))}
@@ -516,9 +580,11 @@ export default function SettingsPage() {
                     </label>
                     <Button
                       variant="outline"
+                      size="icon-sm"
+                      aria-label="Remove override"
                       onClick={() => removeOverride(overrideIndex)}
                     >
-                      Remove
+                      <Trash2Icon className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
@@ -583,11 +649,13 @@ export default function SettingsPage() {
                         </InlineField>
                         <Button
                           variant="outline"
+                          size="icon-sm"
+                          aria-label="Remove period"
                           onClick={() =>
                             removeOverridePeriod(overrideIndex, periodIndex)
                           }
                         >
-                          Remove
+                          <Trash2Icon className="h-4 w-4" />
                         </Button>
                       </div>
                     ))}
@@ -622,8 +690,8 @@ export default function SettingsPage() {
       </div>
 
       <div className="flex justify-end">
-        <Button onClick={save} disabled={saving}>
-          {saving ? "Saving..." : "Save settings"}
+        <Button onClick={save} loading={saving} loadingText="Saving...">
+          Save settings
         </Button>
       </div>
     </div>

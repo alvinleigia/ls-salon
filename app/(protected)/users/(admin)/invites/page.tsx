@@ -331,8 +331,8 @@ export default function InvitesPage() {
             <Button variant="outline" onClick={() => setInviteOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={sendInvite} disabled={inviting}>
-              {inviting ? "Sending..." : "Send invite"}
+            <Button onClick={sendInvite} loading={inviting} loadingText="Sending...">
+              Send invite
             </Button>
           </DialogFooter>
         </DialogContent>

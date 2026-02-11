@@ -11,12 +11,13 @@ import type {
   CouponRow,
   AppointmentOrderRow,
   AppointmentOrderFormValues,
+  AppointmentProductOption,
   AppointmentServiceOption,
   AppointmentStaffOption,
   TaxMode,
 } from "@/types/appointments"
 import type { AppSettingsPayload, TaxRow } from "@/types/scheduling"
-import { formatCurrencyFromCents } from "@/lib/formatting"
+import { formatCurrencyFromCents, formatTimeFromDate } from "@/lib/formatting"
 import { AppointmentOrderFormFields } from "./appointment-order-form-fields"
 import {
   calculateCouponDiscountFromCodes,
@@ -73,6 +74,19 @@ const allocateCouponByWeight = (amounts: number[], couponCents: number) => {
   return rawAllocations.map((item) => item.base)
 }
 
+const calculateDiscountCents = (
+  discountType: "NONE" | "PERCENT" | "AMOUNT",
+  discountValue: number,
+  baseCents: number
+) => {
+  const normalizedBase = Math.max(0, baseCents)
+  if (discountType === "NONE" || discountValue <= 0 || normalizedBase <= 0) return 0
+  if (discountType === "AMOUNT") {
+    return Math.min(normalizedBase, Math.round(discountValue * 100))
+  }
+  return Math.min(normalizedBase, Math.round((normalizedBase * discountValue) / 100))
+}
+
 const toDateInput = (value: Date) => {
   const year = value.getFullYear()
   const month = String(value.getMonth() + 1).padStart(2, "0")
@@ -84,6 +98,12 @@ const toTimeInput = (value: Date) => {
   const hours = String(value.getHours()).padStart(2, "0")
   const minutes = String(value.getMinutes()).padStart(2, "0")
   return `${hours}:${minutes}`
+}
+
+const formatCouponScopeLabel = (coupon: CouponRow) => {
+  if (coupon.appliesTo === "SERVICE_LINES") return "Services"
+  if (coupon.appliesTo === "PRODUCT_LINES") return "Products"
+  return "Order"
 }
 
 export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrderEditorProps) {
@@ -98,6 +118,7 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
   const [customers, setCustomers] = React.useState<AppointmentCustomerOption[]>([])
   const [staff, setStaff] = React.useState<AppointmentStaffOption[]>([])
   const [services, setServices] = React.useState<AppointmentServiceOption[]>([])
+  const [products, setProducts] = React.useState<AppointmentProductOption[]>([])
   const [coupons, setCoupons] = React.useState<CouponRow[]>([])
   const [taxes, setTaxes] = React.useState<TaxRow[]>([])
   const [startSuggestion, setStartSuggestion] = React.useState<StartSuggestion | null>(null)
@@ -108,6 +129,7 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
     currency: "USD",
     currencySymbolPlacement: "BEFORE",
     numberFormat: "US_UK",
+    timeFormat: "H24",
   })
   const { errors } = useFormErrors()
 
@@ -128,38 +150,81 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
   )
 
   const pricingPreview = React.useMemo(() => {
-    const lineBase = values.lines.map((line) => ({
-      line,
-      subtotalCents: Math.max(0, line.quantity) * Math.max(0, line.unitPriceCents),
-      discountCents:
-        line.discountType === "NONE"
+    const toLineBase = (
+      quantity: number,
+      unitPriceCents: number,
+      discountType: "NONE" | "PERCENT" | "AMOUNT",
+      discountValue: number
+    ) => {
+      const subtotalCents = Math.max(0, quantity) * Math.max(0, unitPriceCents)
+      const discountCents =
+        discountType === "NONE"
           ? 0
-          : line.discountType === "AMOUNT"
-            ? Math.round(Math.max(0, line.discountValue) * 100)
-            : Math.round(
-                ((Math.max(0, line.quantity) * Math.max(0, line.unitPriceCents)) *
-                  Math.max(0, line.discountValue)) /
-                  100
-              ),
-    })).map((entry) => ({
-      ...entry,
-      discountCents: Math.min(entry.subtotalCents, Math.max(0, entry.discountCents)),
-      afterDiscountCents: Math.max(0, entry.subtotalCents - Math.max(0, entry.discountCents)),
-    }))
+          : discountType === "AMOUNT"
+            ? Math.round(Math.max(0, discountValue) * 100)
+            : Math.round((subtotalCents * Math.max(0, discountValue)) / 100)
+      return {
+        subtotalCents,
+        discountCents: Math.min(subtotalCents, Math.max(0, discountCents)),
+      }
+    }
 
-    const lineNetBeforeCoupon = lineBase.map((entry) => {
+    const serviceBase = values.lines.map((line) => {
+      const base = toLineBase(
+        line.quantity,
+        line.unitPriceCents,
+        line.discountType,
+        line.discountValue
+      )
+      return {
+        line,
+        ...base,
+        afterDiscountCents: Math.max(0, base.subtotalCents - base.discountCents),
+      }
+    })
+
+    const productBase = (values.productLines ?? []).map((line) => {
+      const base = toLineBase(
+        line.quantity,
+        line.unitPriceCents,
+        line.discountType,
+        line.discountValue
+      )
+      return {
+        line,
+        ...base,
+        afterDiscountCents: Math.max(0, base.subtotalCents - base.discountCents),
+      }
+    })
+
+    const serviceNetBeforeCoupon = serviceBase.map((entry) => {
       const percents = entry.line.taxIds
         .map((taxId) => taxes.find((tax) => tax.id === taxId)?.percent ?? 0)
       if (entry.line.taxMode === "INCLUSIVE") {
         return Math.max(
           0,
-          entry.afterDiscountCents - extractTaxFromInclusiveGross(entry.afterDiscountCents, percents)
+          entry.afterDiscountCents -
+            extractTaxFromInclusiveGross(entry.afterDiscountCents, percents)
         )
       }
       return entry.afterDiscountCents
     })
 
-    const netSubtotalAfterDiscount = lineNetBeforeCoupon.reduce((sum, value) => sum + value, 0)
+    const productNetBeforeCoupon = productBase.map((entry) => {
+      const percents = entry.line.taxIds
+        .map((taxId) => taxes.find((tax) => tax.id === taxId)?.percent ?? 0)
+      if (entry.line.taxMode === "INCLUSIVE") {
+        return Math.max(
+          0,
+          entry.afterDiscountCents -
+            extractTaxFromInclusiveGross(entry.afterDiscountCents, percents)
+        )
+      }
+      return entry.afterDiscountCents
+    })
+
+    const allNetBeforeCoupon = [...serviceNetBeforeCoupon, ...productNetBeforeCoupon]
+    const netSubtotalAfterDiscount = allNetBeforeCoupon.reduce((sum, value) => sum + value, 0)
     const couponDiscountCents = calculateCouponDiscountFromCodes(
       netSubtotalAfterDiscount,
       values.coupons,
@@ -169,22 +234,46 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
         discountValue: coupon.discountValue,
       }))
     )
-    const couponAllocations = allocateCouponByWeight(lineNetBeforeCoupon, couponDiscountCents)
-    const lineTaxCents = lineBase.map((entry, index) => {
+    const couponAllocations = allocateCouponByWeight(allNetBeforeCoupon, couponDiscountCents)
+    const serviceCouponAllocations = couponAllocations.slice(0, serviceBase.length)
+    const productCouponAllocations = couponAllocations.slice(serviceBase.length)
+    const lineTaxCents = serviceBase.map((entry, index) => {
       const percents = entry.line.taxIds
         .map((taxId) => taxes.find((tax) => tax.id === taxId)?.percent ?? 0)
-      const netAfterCoupon = Math.max(0, lineNetBeforeCoupon[index] - couponAllocations[index])
+      const netAfterCoupon = Math.max(
+        0,
+        serviceNetBeforeCoupon[index] - serviceCouponAllocations[index]
+      )
       return calculateExclusiveTaxFromNet(netAfterCoupon, percents)
     })
-    const taxCents = lineTaxCents.reduce((sum, value) => sum + value, 0)
+    const productLineTaxCents = productBase.map((entry, index) => {
+      const percents = entry.line.taxIds
+        .map((taxId) => taxes.find((tax) => tax.id === taxId)?.percent ?? 0)
+      const netAfterCoupon = Math.max(
+        0,
+        productNetBeforeCoupon[index] - productCouponAllocations[index]
+      )
+      return calculateExclusiveTaxFromNet(netAfterCoupon, percents)
+    })
+    const taxCents =
+      lineTaxCents.reduce((sum, value) => sum + value, 0) +
+      productLineTaxCents.reduce((sum, value) => sum + value, 0)
 
-    const subtotalCents = lineNetBeforeCoupon.reduce((sum, value) => sum + value, 0)
-    const lineDiscountCents = lineBase.reduce((sum, entry) => sum + entry.discountCents, 0)
-    const totalCents = lineNetBeforeCoupon
+    const subtotalCents = allNetBeforeCoupon.reduce((sum, value) => sum + value, 0)
+    const lineDiscountCents =
+      serviceBase.reduce((sum, entry) => sum + entry.discountCents, 0) +
+      productBase.reduce((sum, entry) => sum + entry.discountCents, 0)
+    const serviceTotalCents = serviceNetBeforeCoupon
       .map((netBeforeCoupon, index) =>
-        Math.max(0, netBeforeCoupon - couponAllocations[index]) + lineTaxCents[index]
+        Math.max(0, netBeforeCoupon - serviceCouponAllocations[index]) + lineTaxCents[index]
       )
       .reduce((sum, value) => sum + value, 0)
+    const productTotalCents = productNetBeforeCoupon
+      .map((netBeforeCoupon, index) =>
+        Math.max(0, netBeforeCoupon - productCouponAllocations[index]) + productLineTaxCents[index]
+      )
+      .reduce((sum, value) => sum + value, 0)
+    const totalCents = serviceTotalCents + productTotalCents
     return {
       totals: {
         subtotalCents,
@@ -197,8 +286,189 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
         values.lines.map((line, index) => [line.id, lineTaxCents[index] ?? 0])
       ) as Record<string, number>,
     }
-  }, [coupons, taxes, values.coupons, values.lines])
+  }, [coupons, taxes, values.coupons, values.lines, values.productLines])
   const totals = pricingPreview.totals
+
+  const couponHints = React.useMemo(() => {
+    if (!values.coupons.length) return []
+    const serviceById = new Map(services.map((service) => [service.id, service]))
+    const productById = new Map(products.map((product) => [product.id, product]))
+
+    const toLineBase = (
+      quantity: number,
+      unitPriceCents: number,
+      discountType: "NONE" | "PERCENT" | "AMOUNT",
+      discountValue: number
+    ) => {
+      const subtotalCents = Math.max(0, quantity) * Math.max(0, unitPriceCents)
+      const discountCents = calculateDiscountCents(discountType, Math.max(0, discountValue), subtotalCents)
+      return {
+        subtotalCents,
+        discountCents,
+        afterDiscountCents: Math.max(0, subtotalCents - discountCents),
+      }
+    }
+
+    const serviceBase = values.lines.map((line) => {
+      const base = toLineBase(line.quantity, line.unitPriceCents, line.discountType, line.discountValue)
+      const percents = line.taxIds
+        .map((taxId) => taxes.find((tax) => tax.id === taxId)?.percent ?? 0)
+      return {
+        line,
+        ...base,
+        netBeforeCoupon:
+          line.taxMode === "INCLUSIVE"
+            ? Math.max(0, base.afterDiscountCents - extractTaxFromInclusiveGross(base.afterDiscountCents, percents))
+            : base.afterDiscountCents,
+      }
+    })
+
+    const productBase = (values.productLines ?? []).map((line) => {
+      const base = toLineBase(line.quantity, line.unitPriceCents, line.discountType, line.discountValue)
+      const percents = line.taxIds
+        .map((taxId) => taxes.find((tax) => tax.id === taxId)?.percent ?? 0)
+      return {
+        line,
+        ...base,
+        netBeforeCoupon:
+          line.taxMode === "INCLUSIVE"
+            ? Math.max(0, base.afterDiscountCents - extractTaxFromInclusiveGross(base.afterDiscountCents, percents))
+            : base.afterDiscountCents,
+      }
+    })
+
+    const couponByCode = new Map(coupons.map((coupon) => [coupon.code.toUpperCase(), coupon]))
+    const scopeLines = [
+      ...serviceBase.map((entry) => ({
+        type: "SERVICE" as const,
+        serviceId: entry.line.serviceId,
+        categoryId: serviceById.get(entry.line.serviceId)?.categoryId,
+      })),
+      ...productBase.map((entry) => ({
+        type: "PRODUCT" as const,
+        productId: entry.line.productId,
+        categoryId: productById.get(entry.line.productId)?.categoryId,
+      })),
+    ]
+    const runningAmounts = [
+      ...serviceBase.map((entry) => entry.netBeforeCoupon),
+      ...productBase.map((entry) => entry.netBeforeCoupon),
+    ]
+
+    let hasAppliedAnyCoupon = false
+    let hasAppliedExclusiveCoupon = false
+
+    return values.coupons.map((applied) => {
+      const coupon = couponByCode.get(applied.code.toUpperCase())
+      if (!coupon) {
+        return {
+          code: applied.code,
+          eligible: false,
+          reason: "Coupon is not active or not found.",
+        }
+      }
+
+      if (hasAppliedExclusiveCoupon) {
+        return {
+          code: applied.code,
+          eligible: false,
+          reason: "Another exclusive coupon is already applied.",
+        }
+      }
+
+      if (coupon.stackingMode === "EXCLUSIVE" && hasAppliedAnyCoupon) {
+        return {
+          code: applied.code,
+          eligible: false,
+          reason: "Exclusive coupon cannot be combined with other coupons.",
+        }
+      }
+
+      const eligibleIndices = runningAmounts
+        .map((amount, index) => ({ amount, index }))
+        .filter(({ amount, index }) => {
+          if (amount <= 0) return false
+          const line = scopeLines[index]
+          if (coupon.appliesTo === "SERVICE_LINES" && line.type !== "SERVICE") return false
+          if (coupon.appliesTo === "PRODUCT_LINES" && line.type !== "PRODUCT") return false
+
+          if (line.type === "SERVICE") {
+            if (coupon.allowedServiceIds.length && !coupon.allowedServiceIds.includes(line.serviceId)) {
+              return false
+            }
+            if (coupon.allowedCategoryIds.length) {
+              if (!line.categoryId || !coupon.allowedCategoryIds.includes(line.categoryId)) {
+                return false
+              }
+            }
+            return true
+          }
+
+          if (coupon.allowedProductIds.length && !coupon.allowedProductIds.includes(line.productId)) {
+            return false
+          }
+          if (coupon.allowedCategoryIds.length) {
+            if (!line.categoryId || !coupon.allowedCategoryIds.includes(line.categoryId)) {
+              return false
+            }
+          }
+          return true
+        })
+        .map(({ index }) => index)
+
+      if (!eligibleIndices.length) {
+        return {
+          code: applied.code,
+          eligible: false,
+          reason: "No eligible services/products for this coupon.",
+        }
+      }
+
+      const eligibleSubtotal = eligibleIndices.reduce((sum, index) => sum + runningAmounts[index], 0)
+      if (eligibleSubtotal < coupon.minSubtotalCents) {
+        return {
+          code: applied.code,
+          eligible: false,
+          reason: `Minimum eligible subtotal is ${formatCurrencyFromCents(coupon.minSubtotalCents, settings)}.`,
+        }
+      }
+
+      const discountCents = calculateDiscountCents(
+        coupon.discountType,
+        coupon.discountValue,
+        eligibleSubtotal
+      )
+      if (discountCents <= 0) {
+        return {
+          code: applied.code,
+          eligible: false,
+          reason: "Coupon discount is zero for current cart values.",
+        }
+      }
+
+      const allocations = allocateCouponByWeight(
+        eligibleIndices.map((index) => runningAmounts[index]),
+        discountCents
+      )
+      eligibleIndices.forEach((lineIndex, allocationIndex) => {
+        runningAmounts[lineIndex] = Math.max(
+          0,
+          runningAmounts[lineIndex] - (allocations[allocationIndex] ?? 0)
+        )
+      })
+
+      hasAppliedAnyCoupon = true
+      if (coupon.stackingMode === "EXCLUSIVE") {
+        hasAppliedExclusiveCoupon = true
+      }
+
+      return {
+        code: applied.code,
+        eligible: true,
+        discountCents,
+      }
+    })
+  }, [coupons, products, services, settings, taxes, values.coupons, values.lines, values.productLines])
 
   const requestKey = React.useMemo(
     () => buildRequestKey(values),
@@ -212,8 +482,7 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
     )
     if (Number.isNaN(start.getTime())) return []
 
-    const formatTime = (value: Date) =>
-      `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`
+    const formatTime = (value: Date) => formatTimeFromDate(value, settings)
 
     const useSavedSchedule = savedLineScheduleKey === requestKey
     let cursor = new Date(start)
@@ -248,6 +517,7 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
     requestKey,
     savedLineSchedule,
     savedLineScheduleKey,
+    settings,
     services,
     staff,
     values.appointmentDate,
@@ -298,6 +568,18 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
           lineTaxCents: line.lineTaxCents ?? 0,
           note: line.note ?? "",
         })),
+        productLines: (order.productLines ?? []).map((line) => ({
+          id: line.id,
+          productId: line.productId,
+          quantity: line.quantity,
+          unitPriceCents: line.unitPriceCents,
+          discountType: line.discountType,
+          discountValue: line.discountValue,
+          taxIds: line.taxIds ?? [],
+          taxMode: line.taxMode ?? "EXCLUSIVE",
+          lineTaxCents: line.lineTaxCents ?? 0,
+          note: line.note ?? "",
+        })),
       }
       setValues(nextValues)
       setSavedLineSchedule(
@@ -313,7 +595,7 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
 
   React.useEffect(() => {
     const loadLookups = async () => {
-      const [customerRes, staffRes, serviceRes, couponRes, taxesRes, settingsRes] = await Promise.all([
+      const [customerRes, staffRes, serviceRes, productRes, couponRes, taxesRes, settingsRes] = await Promise.all([
         fetch("/api/users?role=CUSTOMER&status=ACTIVE&page=1&pageSize=100", {
           cache: "no-store",
         }),
@@ -323,7 +605,10 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
         fetch("/api/services?status=ACTIVE&page=1&pageSize=100&sort=name&order=asc", {
           cache: "no-store",
         }),
-        fetch("/api/appointments/coupons?page=1&pageSize=100", {
+        fetch("/api/inventory/products?status=ACTIVE&page=1&pageSize=100&sort=name&order=asc", {
+          cache: "no-store",
+        }),
+        fetch("/api/appointments/coupons?page=1&pageSize=100&active=true", {
           cache: "no-store",
         }),
         fetch("/api/settings/taxes?page=1&pageSize=100&active=true", { cache: "no-store" }),
@@ -349,13 +634,43 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
           items?: Array<{
             id: string
             name: string
+            category?: { id: string }
             durationMinutes: number
             priceCents?: number
             taxMode?: TaxMode
             taxIds?: string[]
           }>
         }
-        setServices(data.items ?? [])
+        setServices((data.items ?? []).map((service) => ({
+          id: service.id,
+          name: service.name,
+          categoryId: service.category?.id,
+          durationMinutes: service.durationMinutes,
+          priceCents: service.priceCents,
+          taxMode: service.taxMode,
+          taxIds: service.taxIds,
+        })))
+      }
+
+      if (productRes.ok) {
+        const data = (await productRes.json()) as {
+          items?: Array<{
+            id: string
+            sku: string
+            name: string
+            category?: { id: string }
+            mrpCents: number
+            taxIds?: string[]
+          }>
+        }
+        setProducts((data.items ?? []).map((product) => ({
+          id: product.id,
+          sku: product.sku,
+          name: product.name,
+          categoryId: product.category?.id,
+          mrpCents: product.mrpCents,
+          taxIds: product.taxIds,
+        })))
       }
 
       if (couponRes.ok) {
@@ -444,6 +759,16 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
               line.unitPriceCents > 0
                 ? line.unitPriceCents
                 : services.find((service) => service.id === line.serviceId)?.priceCents ?? 0,
+            discountType: line.discountType,
+            discountValue: line.discountValue,
+            taxMode: line.taxMode,
+            taxIds: line.taxIds,
+            note: line.note,
+          })),
+          productLines: (values.productLines ?? []).map((line) => ({
+            productId: line.productId,
+            quantity: line.quantity,
+            unitPriceCents: line.unitPriceCents,
             discountType: line.discountType,
             discountValue: line.discountValue,
             taxMode: line.taxMode,
@@ -561,14 +886,16 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
           <Button
             variant="outline"
             onClick={() => void handleEmailInvoice()}
-            disabled={!editingId || emailing}
+            loading={emailing}
+            loadingText="Emailing..."
+            disabled={!editingId}
           >
-            {emailing ? "Emailing..." : "Email invoice"}
+            Email invoice
           </Button>
-          <Button variant="outline" onClick={() => void handleSave("draft")} disabled={saving}>
+          <Button variant="outline" onClick={() => void handleSave("draft")} loading={saving} loadingText="Saving...">
             Save draft
           </Button>
-          <Button onClick={() => void handleSave("confirm")} disabled={saving}>
+          <Button onClick={() => void handleSave("confirm")} loading={saving} loadingText="Saving...">
             Confirm booking
           </Button>
         </div>
@@ -579,8 +906,9 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
           <p className="text-amber-200">{activeSuggestion.reason}</p>
           <p className="mt-1 text-amber-200/90">
             Next available start:{" "}
-            {`${toDateInput(new Date(activeSuggestion.suggestedStartAt))} ${toTimeInput(
-              new Date(activeSuggestion.suggestedStartAt)
+            {`${toDateInput(new Date(activeSuggestion.suggestedStartAt))} ${formatTimeFromDate(
+              new Date(activeSuggestion.suggestedStartAt),
+              settings
             )}`}
           </p>
           <Button
@@ -602,7 +930,12 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
         customers={customers}
         staff={staff}
         services={services}
-        couponOptions={coupons.map((coupon) => coupon.code)}
+        products={products}
+        couponOptions={coupons.map((coupon) => ({
+          value: coupon.code,
+          label: `${coupon.code} (${formatCouponScopeLabel(coupon)})`,
+        }))}
+        couponHints={couponHints}
         formatCurrencyCentsValue={(valueInCents) => formatCurrencyFromCents(valueInCents, settings)}
         allowMultipleLines
         lineTaxCentsById={pricingPreview.lineTaxById}

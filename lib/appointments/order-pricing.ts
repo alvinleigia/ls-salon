@@ -11,6 +11,12 @@ export type CouponRule = {
   code: string
   discountType: DiscountType
   discountValue: number
+  appliesTo?: "ORDER" | "SERVICE_LINES" | "PRODUCT_LINES"
+  allowedServiceIds?: string[]
+  allowedCategoryIds?: string[]
+  allowedProductIds?: string[]
+  minSubtotalCents?: number
+  stackingMode?: "STACKABLE" | "EXCLUSIVE"
 }
 
 export type CalculatedCoupon = CouponRule & {
@@ -27,7 +33,7 @@ export type CalculatedTax = TaxRule & {
   taxCents: number
 }
 
-const toDiscountCents = (
+export const calculateDiscountCents = (
   discountType: DiscountType,
   discountValue: number,
   lineSubtotalCents: number
@@ -42,7 +48,7 @@ const toDiscountCents = (
 
 export const calculateLineAmounts = (line: PriceableOrderLine) => {
   const lineSubtotalCents = Math.max(0, line.quantity) * Math.max(0, line.unitPriceCents)
-  const lineDiscountCents = toDiscountCents(
+  const lineDiscountCents = calculateDiscountCents(
     line.discountType,
     Math.max(0, line.discountValue),
     lineSubtotalCents
@@ -76,7 +82,11 @@ export const calculateCouponDiscounts = (
   const coupons: CalculatedCoupon[] = []
 
   couponRules.forEach((rule) => {
-    const discountCents = toDiscountCents(rule.discountType, rule.discountValue, runningBase)
+    const discountCents = calculateDiscountCents(
+      rule.discountType,
+      rule.discountValue,
+      runningBase
+    )
     runningBase = Math.max(0, runningBase - discountCents)
     coupons.push({ ...rule, discountCents })
   })

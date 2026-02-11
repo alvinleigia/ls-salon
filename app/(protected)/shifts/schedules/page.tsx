@@ -32,6 +32,7 @@ import {
   DataTablePagination,
   DataTableToolbar,
 } from "@/components/data-table"
+import { SearchableSelect } from "@/components/searchable-select"
 import { useDateFormatter } from "@/hooks/use-date-formatter"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import { toISODate } from "@/lib/date"
@@ -575,18 +576,21 @@ export default function ShiftSchedulesPage() {
             value={startDateFilter}
             onChange={(event) => setStartDateFilter(event.target.value)}
           />
-          <select
-            className="h-9 w-48 rounded-md border border-input bg-background px-3 text-sm"
-            value={staffFilter}
-            onChange={(event) => setStaffFilter(event.target.value)}
-          >
-            <option value="all">All staff</option>
-            {staffOptions.map((staff) => (
-              <option key={staff.id} value={staff.id}>
-                {staff.name?.trim() || staff.email}
-              </option>
-            ))}
-          </select>
+          <div className="w-56">
+            <SearchableSelect
+              value={staffFilter}
+              placeholder="All staff"
+              searchPlaceholder="Search staff..."
+              options={[
+                { value: "all", label: "All staff" },
+                ...staffOptions.map((staff) => ({
+                  value: staff.id,
+                  label: staff.name?.trim() || staff.email,
+                })),
+              ]}
+              onChange={(nextValue) => setStaffFilter(nextValue)}
+            />
+          </div>
         </div>
       </DataTableToolbar>
 
@@ -650,8 +654,8 @@ export default function ShiftSchedulesPage() {
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={createSchedule} disabled={saving}>
-              {saving ? "Saving..." : "Create schedule"}
+            <Button onClick={createSchedule} loading={saving} loadingText="Saving...">
+              Create schedule
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -688,8 +692,8 @@ export default function ShiftSchedulesPage() {
             <Button variant="outline" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={saveEdit} disabled={saving}>
-              {saving ? "Saving..." : "Save changes"}
+            <Button onClick={saveEdit} loading={saving} loadingText="Saving...">
+              Save changes
             </Button>
           </DialogFooter>
         </DialogContent>

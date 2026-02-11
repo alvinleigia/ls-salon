@@ -117,8 +117,8 @@ export default function SignUpPage() {
               />
             </FormField>
 
-            <Button className="w-full" type="submit" disabled={loading}>
-              {loading ? "Creating..." : "Create account"}
+            <Button className="w-full" type="submit" loading={loading} loadingText="Creating...">
+              Create account
             </Button>
           </form>
 

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -183,6 +184,8 @@ export function StaffFormFields({
                 </div>
                 <Button
                   variant="outline"
+                  size="icon-sm"
+                  aria-label="Remove document"
                   onClick={() =>
                     setProfile((prev) => ({
                       ...prev,
@@ -190,7 +193,7 @@ export function StaffFormFields({
                     }))
                   }
                 >
-                  Remove
+                  <Trash2Icon className="h-4 w-4" />
                 </Button>
               </div>
             ))}
@@ -270,6 +273,8 @@ export function StaffFormFields({
                 </div>
                 <Button
                   variant="outline"
+                  size="icon-sm"
+                  aria-label="Remove certification"
                   onClick={() =>
                     setProfile((prev) => ({
                       ...prev,
@@ -277,7 +282,7 @@ export function StaffFormFields({
                     }))
                   }
                 >
-                  Remove
+                  <Trash2Icon className="h-4 w-4" />
                 </Button>
               </div>
             ))}
@@ -289,4 +294,3 @@ export function StaffFormFields({
     </>
   )
 }
-

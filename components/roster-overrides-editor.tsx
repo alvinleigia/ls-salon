@@ -16,6 +16,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useDateFormatter } from "@/hooks/use-date-formatter"
+import { formatTimeFrom24h } from "@/lib/formatting"
+import type { TimeFormat } from "@/types/scheduling"
 
 export type RosterOverridePeriod = {
   id?: string
@@ -36,6 +38,7 @@ type RosterOverridesEditorProps = {
   overrides: RosterOverrideDay[]
   onChange: (next: RosterOverrideDay[]) => void
   defaultDate?: string
+  timeFormat?: TimeFormat
   title?: string
   description?: string
   addLabel?: string
@@ -54,10 +57,19 @@ const DEFAULT_BREAK_PERIOD: RosterOverridePeriod = {
   endTime: "13:00",
 }
 
-const summarizePeriods = (periods: RosterOverridePeriod[]) => {
+const summarizePeriods = (
+  periods: RosterOverridePeriod[],
+  timeFormat: TimeFormat
+) => {
   if (!periods.length) return "-"
   return periods
-    .map((period) => `${period.kind} ${period.startTime}-${period.endTime}`)
+    .map(
+      (period) =>
+        `${period.kind} ${formatTimeFrom24h(period.startTime, { timeFormat })}-${formatTimeFrom24h(
+          period.endTime,
+          { timeFormat }
+        )}`
+    )
     .join(", ")
 }
 
@@ -113,8 +125,13 @@ const RosterOverrideForm = ({
             />
             Open
           </label>
-          <Button variant="outline" onClick={onRemove}>
-            Remove
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label="Remove override"
+            onClick={onRemove}
+          >
+            <Trash2Icon className="h-4 w-4" />
           </Button>
         </div>
       </div>
@@ -185,6 +202,8 @@ const RosterOverrideForm = ({
               </div>
               <Button
                 variant="outline"
+                size="icon-sm"
+                aria-label="Remove period"
                 onClick={() =>
                   onChange({
                     ...override,
@@ -192,7 +211,7 @@ const RosterOverrideForm = ({
                   })
                 }
               >
-                Remove
+                <Trash2Icon className="h-4 w-4" />
               </Button>
             </div>
           ))}
@@ -233,6 +252,7 @@ export function RosterOverridesSplit({
   onChange,
   onDeleteCommit,
   defaultDate,
+  timeFormat = "H24",
   title = "Roster overrides",
   description = "Inherits global hours. Add date overrides for this staff member.",
   addLabel = "Add override",
@@ -356,7 +376,7 @@ export function RosterOverridesSplit({
                       <div className="font-medium">{formatDate(override.date)}</div>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {summarizePeriods(override.periods)}
+                      {summarizePeriods(override.periods, timeFormat)}
                     </div>
                     <span className="text-xs">
                       {override.isOpen ? "Open" : "Closed"}
@@ -556,11 +576,13 @@ export function RosterOverridesEditor({
                   </label>
                   <Button
                     variant="outline"
+                    size="icon-sm"
+                    aria-label="Remove override"
                     onClick={() =>
                       onChange(overrides.filter((_, idx) => idx !== overrideIndex))
                     }
                   >
-                    Remove
+                    <Trash2Icon className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
@@ -649,6 +671,8 @@ export function RosterOverridesEditor({
                       </div>
                       <Button
                         variant="outline"
+                        size="icon-sm"
+                        aria-label="Remove period"
                         onClick={() =>
                           onChange(
                             overrides.map((item, idx) =>
@@ -664,7 +688,7 @@ export function RosterOverridesEditor({
                           )
                         }
                       >
-                        Remove
+                        <Trash2Icon className="h-4 w-4" />
                       </Button>
                     </div>
                   ))}

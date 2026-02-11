@@ -41,7 +41,13 @@ export async function PATCH(
         : {}),
       ...(data.email !== undefined ? { email: data.email?.trim() || null } : {}),
       ...(data.phone !== undefined ? { phone: data.phone?.trim() || null } : {}),
-      ...(data.taxId !== undefined ? { taxId: data.taxId?.trim() || null } : {}),
+      ...(data.isTaxRegistered !== undefined ? { isTaxRegistered: data.isTaxRegistered } : {}),
+      ...(data.taxRegistrationType !== undefined
+        ? { taxRegistrationType: data.taxRegistrationType || null }
+        : {}),
+      ...(data.taxRegistrationNumber !== undefined
+        ? { taxRegistrationNumber: data.taxRegistrationNumber?.trim() || null }
+        : {}),
       ...(typeof data.leadTimeDays === "number" ? { leadTimeDays: data.leadTimeDays } : {}),
       ...(data.addressLine1 !== undefined
         ? { addressLine1: data.addressLine1?.trim() || null }
@@ -64,10 +70,13 @@ export async function PATCH(
       contactPerson: true,
       email: true,
       phone: true,
-      taxId: true,
+      isTaxRegistered: true,
+      taxRegistrationType: true,
+      taxRegistrationNumber: true,
       leadTimeDays: true,
       status: true,
       city: true,
+      state: true,
       country: true,
       createdAt: true,
     },
