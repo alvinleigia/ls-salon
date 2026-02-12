@@ -4,6 +4,8 @@ import { FormField } from "@/components/form-field"
 import { Trash2Icon } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { TimePicker } from "@/components/ui/time-picker"
+import type { TimeFormat } from "@/types/scheduling"
 import type { ShiftTemplateBreak, ShiftTemplateForm } from "@/types/shifts"
 import { templateStatusOptions } from "./template-form-model"
 
@@ -11,6 +13,7 @@ type TemplateFormFieldsProps = {
   mode: "create" | "edit"
   template: ShiftTemplateForm
   errors: Record<string, string>
+  timeFormat?: TimeFormat
   minStart: string
   maxEnd: string
   onChange: (next: ShiftTemplateForm) => void
@@ -26,6 +29,7 @@ export function TemplateFormFields({
   mode,
   template,
   errors,
+  timeFormat = "H24",
   minStart,
   maxEnd,
   onChange,
@@ -88,27 +92,23 @@ export function TemplateFormFields({
         <h3 className="text-sm font-medium">Shift timing</h3>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
           <FormField id={fieldId("shift-start")} label="Start" error={errors.startTime}>
-            <Input
+            <TimePicker
               id={fieldId("shift-start")}
-              type="time"
+              timeFormat={timeFormat}
               min={minStart}
               max={maxEnd}
               value={template.startTime}
-              onChange={(event) =>
-                onChange({ ...template, startTime: event.target.value })
-              }
+              onChange={(nextValue) => onChange({ ...template, startTime: nextValue })}
             />
           </FormField>
           <FormField id={fieldId("shift-end")} label="End" error={errors.endTime}>
-            <Input
+            <TimePicker
               id={fieldId("shift-end")}
-              type="time"
+              timeFormat={timeFormat}
               min={minStart}
               max={maxEnd}
               value={template.endTime}
-              onChange={(event) =>
-                onChange({ ...template, endTime: event.target.value })
-              }
+              onChange={(nextValue) => onChange({ ...template, endTime: nextValue })}
             />
           </FormField>
         </div>
@@ -138,31 +138,31 @@ export function TemplateFormFields({
               className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]"
             >
               <FormField id={fieldId(`break-start-${index}`)} label="Start">
-                <Input
+                <TimePicker
                   id={fieldId(`break-start-${index}`)}
-                  type="time"
+                  timeFormat={timeFormat}
                   min={template.startTime}
                   max={template.endTime}
                   value={period.startTime}
-                  onChange={(event) =>
+                  onChange={(nextValue) =>
                     onUpdateBreak(index, (existing) => ({
                       ...existing,
-                      startTime: event.target.value,
+                      startTime: nextValue,
                     }))
                   }
                 />
               </FormField>
               <FormField id={fieldId(`break-end-${index}`)} label="End">
-                <Input
+                <TimePicker
                   id={fieldId(`break-end-${index}`)}
-                  type="time"
+                  timeFormat={timeFormat}
                   min={template.startTime}
                   max={template.endTime}
                   value={period.endTime}
-                  onChange={(event) =>
+                  onChange={(nextValue) =>
                     onUpdateBreak(index, (existing) => ({
                       ...existing,
-                      endTime: event.target.value,
+                      endTime: nextValue,
                     }))
                   }
                 />
@@ -190,3 +190,4 @@ export function TemplateFormFields({
     </div>
   )
 }
+

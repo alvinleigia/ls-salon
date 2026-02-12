@@ -786,6 +786,7 @@ export const couponCreateSchema = z.object({
   validFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
   validTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
   maxUses: z.coerce.number().int().min(1).max(1000000).optional(),
+  maxUsesPerCustomer: z.coerce.number().int().min(1).max(1000000).optional(),
   appliesTo: couponAppliesToSchema.optional().default("ORDER"),
   allowedServiceIds: z.array(z.string().trim().min(1)).optional().default([]),
   allowedCategoryIds: z.array(z.string().trim().min(1)).optional().default([]),

@@ -201,6 +201,7 @@ export type CouponRow = {
   validFrom: string | null
   validTo: string | null
   maxUses: number | null
+  maxUsesPerCustomer: number | null
   usedCount: number
   createdAt: string
   updatedAt: string

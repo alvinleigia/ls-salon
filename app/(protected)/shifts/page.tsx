@@ -628,6 +628,7 @@ export default function ShiftsPage() {
               mode="create"
               template={newTemplate}
               errors={createErrors}
+              timeFormat={timeFormat}
               minStart={getWorkingHoursBounds().minStart}
               maxEnd={getWorkingHoursBounds().maxEnd}
               onChange={setNewTemplate}
@@ -669,6 +670,7 @@ export default function ShiftsPage() {
               mode="edit"
               template={editTemplate}
               errors={editErrors}
+              timeFormat={timeFormat}
               minStart={getWorkingHoursBounds().minStart}
               maxEnd={getWorkingHoursBounds().maxEnd}
               onChange={setEditTemplate}

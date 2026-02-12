@@ -6,6 +6,8 @@ import { Trash2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { TimePicker } from "@/components/ui/time-picker"
+import type { TimeFormat } from "@/types/scheduling"
 
 export type WeeklyOverridePeriod = {
   id?: string
@@ -32,6 +34,7 @@ export type WeeklyOverrideDay = {
 type WeeklyOverridesEditorProps = {
   overrides: WeeklyOverrideDay[]
   onChange: (next: WeeklyOverrideDay[]) => void
+  timeFormat?: TimeFormat
   title?: string
   description?: string
   className?: string
@@ -62,6 +65,7 @@ const DEFAULT_BREAK_PERIOD: WeeklyOverridePeriod = {
 export function WeeklyOverridesEditor({
   overrides,
   onChange,
+  timeFormat = "H24",
   title = "Weekly overrides",
   description = "Override weekly working days and hours for this staff member.",
   className,
@@ -173,10 +177,10 @@ export function WeeklyOverridesEditor({
                           </div>
                           <div className="space-y-1">
                             <Label className="text-xs text-muted-foreground">Start</Label>
-                            <Input
-                              type="time"
+                            <TimePicker
+                              timeFormat={timeFormat}
                               value={period.startTime}
-                              onChange={(event) =>
+                              onChange={(nextValue) =>
                                 onChange(
                                   overrides.map((item, idx) =>
                                     idx === overrideIndex
@@ -184,7 +188,7 @@ export function WeeklyOverridesEditor({
                                           ...item,
                                           periods: item.periods.map((p, pIdx) =>
                                             pIdx === periodIndex
-                                              ? { ...p, startTime: event.target.value }
+                                              ? { ...p, startTime: nextValue }
                                               : p
                                           ),
                                         }
@@ -196,10 +200,10 @@ export function WeeklyOverridesEditor({
                           </div>
                           <div className="space-y-1">
                             <Label className="text-xs text-muted-foreground">End</Label>
-                            <Input
-                              type="time"
+                            <TimePicker
+                              timeFormat={timeFormat}
                               value={period.endTime}
-                              onChange={(event) =>
+                              onChange={(nextValue) =>
                                 onChange(
                                   overrides.map((item, idx) =>
                                     idx === overrideIndex
@@ -207,7 +211,7 @@ export function WeeklyOverridesEditor({
                                           ...item,
                                           periods: item.periods.map((p, pIdx) =>
                                             pIdx === periodIndex
-                                              ? { ...p, endTime: event.target.value }
+                                              ? { ...p, endTime: nextValue }
                                               : p
                                           ),
                                         }
@@ -301,3 +305,4 @@ export function WeeklyOverridesEditor({
     </div>
   )
 }
+

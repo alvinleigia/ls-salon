@@ -55,6 +55,7 @@ type ResolvedOrderTax = {
 
 type ResolveOrderOptions = {
   enforceFutureStartAt?: boolean
+  existingOrderId?: string
 }
 
 const sumPercent = (values: number[]) =>
@@ -172,7 +173,7 @@ export const resolveOrderData = async (
       ...(input.productLines ?? []).flatMap((line) => line.taxIds ?? []),
     ]),
   ]
-  const [customer, services, products, staffProfiles, couponsFromDb, taxesFromDb] =
+  const [customer, services, products, staffProfiles, couponsFromDb, couponUsageRows, taxesFromDb] =
     await Promise.all([
       prisma.user.findUnique({
         where: { id: input.customerId },
@@ -228,7 +229,27 @@ export const resolveOrderData = async (
               code: true,
               discountType: true,
               discountValue: true,
+              maxUsesPerCustomer: true,
+              appliesTo: true,
+              allowedServiceIds: true,
+              allowedCategoryIds: true,
+              allowedProductIds: true,
+              minSubtotalCents: true,
+              stackingMode: true,
             },
+          })
+        : Promise.resolve([]),
+      normalizedCouponCodes.length
+        ? prisma.appointmentOrderCoupon.findMany({
+            where: {
+              code: { in: normalizedCouponCodes },
+              order: {
+                customerId: input.customerId,
+                status: { not: "CANCELED" },
+                ...(options.existingOrderId ? { id: { not: options.existingOrderId } } : {}),
+              },
+            },
+            select: { code: true },
           })
         : Promise.resolve([]),
       normalizedTaxIds.length
@@ -385,26 +406,29 @@ export const resolveOrderData = async (
   const lineDiscountCents =
     lines.reduce((sum, line) => sum + line.lineDiscountCents, 0) +
     productLines.reduce((sum, line) => sum + line.lineDiscountCents, 0)
+  const couponUsageByCode = couponUsageRows.reduce((map, row) => {
+    const code = row.code.trim().toUpperCase()
+    map.set(code, (map.get(code) ?? 0) + 1)
+    return map
+  }, new Map<string, number>())
   const couponRules = pickActiveCouponRules(
     normalizedCouponCodes,
-    couponsFromDb.map((coupon) => ({
-      code: coupon.code,
-      discountType: coupon.discountType,
-      discountValue: coupon.discountValue,
-      appliesTo: (coupon as Record<string, unknown>).appliesTo as
-        | "ORDER"
-        | "SERVICE_LINES"
-        | "PRODUCT_LINES"
-        | undefined,
-      allowedServiceIds: (coupon as Record<string, unknown>).allowedServiceIds as string[] | undefined,
-      allowedCategoryIds: (coupon as Record<string, unknown>).allowedCategoryIds as string[] | undefined,
-      allowedProductIds: (coupon as Record<string, unknown>).allowedProductIds as string[] | undefined,
-      minSubtotalCents: (coupon as Record<string, unknown>).minSubtotalCents as number | undefined,
-      stackingMode: (coupon as Record<string, unknown>).stackingMode as
-        | "STACKABLE"
-        | "EXCLUSIVE"
-        | undefined,
-    }))
+    couponsFromDb.map((coupon) => {
+      const normalizedCode = coupon.code.trim().toUpperCase()
+      return {
+        code: coupon.code,
+        discountType: coupon.discountType,
+        discountValue: coupon.discountValue,
+        appliesTo: coupon.appliesTo,
+        allowedServiceIds: coupon.allowedServiceIds,
+        allowedCategoryIds: coupon.allowedCategoryIds,
+        allowedProductIds: coupon.allowedProductIds,
+        minSubtotalCents: coupon.minSubtotalCents,
+        stackingMode: coupon.stackingMode,
+        maxUsesPerCustomer: coupon.maxUsesPerCustomer ?? undefined,
+        usedByCustomerCount: couponUsageByCode.get(normalizedCode) ?? 0,
+      }
+    })
   )
   const serviceLineNetBeforeCoupon = lines.map((line) =>
     Math.max(0, line.lineTotalCents - line.lineTaxCents)
@@ -441,6 +465,14 @@ export const resolveOrderData = async (
   let hasAppliedExclusiveCoupon = false
 
   couponRules.forEach((coupon) => {
+    if (
+      typeof coupon.maxUsesPerCustomer === "number" &&
+      coupon.maxUsesPerCustomer > 0 &&
+      (coupon.usedByCustomerCount ?? 0) >= coupon.maxUsesPerCustomer
+    ) {
+      throw new Error(`Coupon ${coupon.code} can only be used ${coupon.maxUsesPerCustomer} time(s) per customer.`)
+    }
+
     if (hasAppliedExclusiveCoupon) return
     if (coupon.stackingMode === "EXCLUSIVE" && hasAppliedAnyCoupon) return
 

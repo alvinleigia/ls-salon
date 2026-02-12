@@ -118,11 +118,13 @@ This is the baseline for new modules (API + UI) in this codebase.
   - `appliesTo`: `ORDER`, `SERVICE_LINES`, or `PRODUCT_LINES`.
   - allow-lists: `allowedServiceIds`, `allowedCategoryIds`, `allowedProductIds`.
   - thresholds/rules: `minSubtotalCents`, `stackingMode` (`STACKABLE` or `EXCLUSIVE`).
+  - usage caps: `maxUses` (global), `maxUsesPerCustomer` (per-customer limit).
 - Coupon scope fields should be backward compatible: default to order-wide + stackable + no allow-list restrictions.
 - Appointment order pricing enforces coupon scope server-side:
   - eligibility is line-based (service/product/category allow-lists + `appliesTo`),
   - `minSubtotalCents` is evaluated against the coupon's eligible line subtotal at apply time,
-  - `EXCLUSIVE` coupons do not stack with other coupons.
+  - `EXCLUSIVE` coupons do not stack with other coupons,
+  - `maxUsesPerCustomer` blocks coupon application once the customer reaches the configured limit.
 - Appointment create/update APIs must enforce staff availability against schedules + overrides + week-off/break windows (not only overlap checks).
 - Appointment UI should call `/api/appointments/availability` as a pre-check and show inline slot status before submit.
 - Appointment flows should expose explicit actions for Edit, Reschedule, and Cancel (with confirmation for cancel).

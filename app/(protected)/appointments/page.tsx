@@ -926,6 +926,7 @@ export default function AppointmentsPage() {
               customers={customers}
               services={services}
               staff={staff}
+              timeFormat={timeFormat}
               showStatus={Boolean(editingId)}
               disableParticipantFields={formMode === "reschedule"}
               onChange={setFormValues}

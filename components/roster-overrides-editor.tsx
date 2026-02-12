@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { TimePicker } from "@/components/ui/time-picker"
 import { useDateFormatter } from "@/hooks/use-date-formatter"
 import { formatTimeFrom24h } from "@/lib/formatting"
 import type { TimeFormat } from "@/types/scheduling"
@@ -80,12 +81,14 @@ type RosterOverridesSplitProps = RosterOverridesEditorProps
 
 type RosterOverrideFormProps = {
   override: RosterOverrideDay
+  timeFormat: TimeFormat
   onChange: (next: RosterOverrideDay) => void
   onRemove: () => void
 }
 
 const RosterOverrideForm = ({
   override,
+  timeFormat,
   onChange,
   onRemove,
 }: RosterOverrideFormProps) => {
@@ -168,15 +171,15 @@ const RosterOverrideForm = ({
               </div>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Start</Label>
-                <Input
-                  type="time"
+                <TimePicker
+                  timeFormat={timeFormat}
                   value={period.startTime}
-                  onChange={(event) =>
+                  onChange={(nextValue) =>
                     onChange({
                       ...override,
                       periods: override.periods.map((p, pIdx) =>
                         pIdx === periodIndex
-                          ? { ...p, startTime: event.target.value }
+                          ? { ...p, startTime: nextValue }
                           : p
                       ),
                     })
@@ -185,15 +188,15 @@ const RosterOverrideForm = ({
               </div>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">End</Label>
-                <Input
-                  type="time"
+                <TimePicker
+                  timeFormat={timeFormat}
                   value={period.endTime}
-                  onChange={(event) =>
+                  onChange={(nextValue) =>
                     onChange({
                       ...override,
                       periods: override.periods.map((p, pIdx) =>
                         pIdx === periodIndex
-                          ? { ...p, endTime: event.target.value }
+                          ? { ...p, endTime: nextValue }
                           : p
                       ),
                     })
@@ -417,6 +420,7 @@ export function RosterOverridesSplit({
           {selectedOverride ? (
             <RosterOverrideForm
               override={selectedOverride}
+              timeFormat={timeFormat}
               onChange={(next) =>
                 onChange(
                   overrides.map((item) =>
@@ -480,6 +484,7 @@ export function RosterOverridesEditor({
   overrides,
   onChange,
   defaultDate,
+  timeFormat = "H24",
   title = "Roster overrides",
   description = "Inherits global hours. Add date overrides for this staff member.",
   addLabel = "Add override",
@@ -625,10 +630,10 @@ export function RosterOverridesEditor({
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">Start</Label>
-                        <Input
-                          type="time"
+                        <TimePicker
+                          timeFormat={timeFormat}
                           value={period.startTime}
-                          onChange={(event) =>
+                          onChange={(nextValue) =>
                             onChange(
                               overrides.map((item, idx) =>
                                 idx === overrideIndex
@@ -636,7 +641,7 @@ export function RosterOverridesEditor({
                                       ...item,
                                       periods: item.periods.map((p, pIdx) =>
                                         pIdx === periodIndex
-                                          ? { ...p, startTime: event.target.value }
+                                          ? { ...p, startTime: nextValue }
                                           : p
                                       ),
                                     }
@@ -648,10 +653,10 @@ export function RosterOverridesEditor({
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">End</Label>
-                        <Input
-                          type="time"
+                        <TimePicker
+                          timeFormat={timeFormat}
                           value={period.endTime}
-                          onChange={(event) =>
+                          onChange={(nextValue) =>
                             onChange(
                               overrides.map((item, idx) =>
                                 idx === overrideIndex
@@ -659,7 +664,7 @@ export function RosterOverridesEditor({
                                       ...item,
                                       periods: item.periods.map((p, pIdx) =>
                                         pIdx === periodIndex
-                                          ? { ...p, endTime: event.target.value }
+                                          ? { ...p, endTime: nextValue }
                                           : p
                                       ),
                                     }
@@ -749,3 +754,4 @@ export function RosterOverridesEditor({
     </div>
   )
 }
+

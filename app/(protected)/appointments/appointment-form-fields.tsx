@@ -3,6 +3,7 @@
 import { FormField } from "@/components/form-field"
 import { Input } from "@/components/ui/input"
 import { SearchableSelect } from "@/components/searchable-select"
+import { TimePicker } from "@/components/ui/time-picker"
 import type {
   AppointmentStatus,
   AppointmentCustomerOption,
@@ -10,6 +11,7 @@ import type {
   AppointmentServiceOption,
   AppointmentStaffOption,
 } from "@/types/appointments"
+import type { TimeFormat } from "@/types/scheduling"
 
 type AppointmentFormFieldsProps = {
   values: AppointmentFormValues
@@ -17,6 +19,7 @@ type AppointmentFormFieldsProps = {
   customers: AppointmentCustomerOption[]
   services: AppointmentServiceOption[]
   staff: AppointmentStaffOption[]
+  timeFormat?: TimeFormat
   showStatus?: boolean
   disableParticipantFields?: boolean
   onChange: (next: AppointmentFormValues) => void
@@ -28,6 +31,7 @@ export function AppointmentFormFields({
   customers,
   services,
   staff,
+  timeFormat = "H24",
   showStatus = false,
   disableParticipantFields = false,
   onChange,
@@ -96,11 +100,11 @@ export function AppointmentFormFields({
           />
         </FormField>
         <FormField id="appointment-time" label="Start time" error={errors.startTime}>
-          <Input
+          <TimePicker
             id="appointment-time"
-            type="time"
             value={values.startTime}
-            onChange={(event) => update("startTime", event.target.value)}
+            timeFormat={timeFormat}
+            onChange={(nextValue) => update("startTime", nextValue)}
           />
         </FormField>
       </div>
@@ -125,3 +129,4 @@ export function AppointmentFormFields({
     </div>
   )
 }
+

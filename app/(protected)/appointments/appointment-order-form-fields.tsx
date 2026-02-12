@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { FormField } from "@/components/form-field"
 import { Input } from "@/components/ui/input"
 import { SearchableSelect } from "@/components/searchable-select"
+import { TimePicker } from "@/components/ui/time-picker"
 import type {
   AppointmentCustomerOption,
   AppointmentOrderFormValues,
@@ -15,6 +16,7 @@ import type {
   AppointmentStaffOption,
   DiscountType,
 } from "@/types/appointments"
+import type { TimeFormat } from "@/types/scheduling"
 import {
   addCouponCode,
   createEmptyOrderLine,
@@ -48,6 +50,7 @@ type AppointmentOrderFormFieldsProps = {
       waitMinutes: number
     }
   >
+  timeFormat?: TimeFormat
 }
 
 export function AppointmentOrderFormFields({
@@ -64,6 +67,7 @@ export function AppointmentOrderFormFields({
   allowMultipleLines = true,
   lineTaxCentsById = {},
   lineScheduleMeta = {},
+  timeFormat = "H24",
 }: AppointmentOrderFormFieldsProps) {
   const [priceInputs, setPriceInputs] = React.useState<Record<string, string>>({})
 
@@ -607,11 +611,11 @@ export function AppointmentOrderFormFields({
               />
             </FormField>
             <FormField id="order-start" label="Start time">
-              <Input
+              <TimePicker
                 id="order-start"
-                type="time"
                 value={values.appointmentStartTime}
-                onChange={(event) => update("appointmentStartTime", event.target.value)}
+                timeFormat={timeFormat}
+                onChange={(nextValue) => update("appointmentStartTime", nextValue)}
               />
             </FormField>
             <FormField id="order-coupon" label="Coupon code">
@@ -703,3 +707,4 @@ export function AppointmentOrderFormFields({
     </div>
   )
 }
+

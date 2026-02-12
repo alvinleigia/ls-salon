@@ -42,6 +42,7 @@ type CouponFormValues = {
   validFrom: string
   validTo: string
   maxUses: string
+  maxUsesPerCustomer: string
 }
 
 const defaultCouponFormValues: CouponFormValues = {
@@ -59,6 +60,7 @@ const defaultCouponFormValues: CouponFormValues = {
   validFrom: "",
   validTo: "",
   maxUses: "",
+  maxUsesPerCustomer: "",
 }
 
 type PaginationState = { pageIndex: number; pageSize: number }
@@ -235,6 +237,7 @@ export default function AppointmentCouponsPage() {
       validFrom: coupon.validFrom ?? "",
       validTo: coupon.validTo ?? "",
       maxUses: coupon.maxUses ? String(coupon.maxUses) : "",
+      maxUsesPerCustomer: coupon.maxUsesPerCustomer ? String(coupon.maxUsesPerCustomer) : "",
     })
     clearErrors()
     setFormOpen(true)
@@ -247,6 +250,9 @@ export default function AppointmentCouponsPage() {
       ...formValues,
       minSubtotalCents: Number(formValues.minSubtotalCents || 0),
       maxUses: formValues.maxUses ? Number(formValues.maxUses) : undefined,
+      maxUsesPerCustomer: formValues.maxUsesPerCustomer
+        ? Number(formValues.maxUsesPerCustomer)
+        : undefined,
     }
     const response = await fetch(
       editing ? `/api/appointments/coupons/${editing.id}` : "/api/appointments/coupons",
@@ -593,7 +599,7 @@ export default function AppointmentCouponsPage() {
                 />
               </FormField>
             ) : null}
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <FormField id="coupon-valid-from" label="Valid from" error={errors.validFrom}>
                 <Input
                   id="coupon-valid-from"
@@ -622,6 +628,24 @@ export default function AppointmentCouponsPage() {
                   value={formValues.maxUses}
                   onChange={(event) =>
                     setFormValues((prev) => ({ ...prev, maxUses: event.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField
+                id="coupon-max-uses-per-customer"
+                label="Per customer limit"
+                error={errors.maxUsesPerCustomer}
+              >
+                <Input
+                  id="coupon-max-uses-per-customer"
+                  type="number"
+                  min={1}
+                  value={formValues.maxUsesPerCustomer}
+                  onChange={(event) =>
+                    setFormValues((prev) => ({
+                      ...prev,
+                      maxUsesPerCustomer: event.target.value,
+                    }))
                   }
                 />
               </FormField>

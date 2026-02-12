@@ -407,6 +407,7 @@ model Coupon {
   validFrom     DateTime? @db.Date
   validTo       DateTime? @db.Date
   maxUses       Int?
+  maxUsesPerCustomer Int?
   usedCount     Int      @default(0)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

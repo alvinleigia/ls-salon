@@ -139,7 +139,7 @@ export async function PATCH(
   }
 
   try {
-    const resolved = await resolveOrderData(nextInput)
+    const resolved = await resolveOrderData(nextInput, { existingOrderId: id })
     const existingAppointments = await prisma.appointment.findMany({
       where: { orderLine: { is: { orderId: id } } },
       select: { id: true },

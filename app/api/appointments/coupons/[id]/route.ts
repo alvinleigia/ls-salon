@@ -32,6 +32,7 @@ const serializeCoupon = (coupon: {
   validFrom: Date | null
   validTo: Date | null
   maxUses: number | null
+  maxUsesPerCustomer: number | null
   usedCount: number
   createdAt: Date
   updatedAt: Date
@@ -51,6 +52,7 @@ const serializeCoupon = (coupon: {
   validFrom: coupon.validFrom ? coupon.validFrom.toISOString().slice(0, 10) : null,
   validTo: coupon.validTo ? coupon.validTo.toISOString().slice(0, 10) : null,
   maxUses: coupon.maxUses,
+  maxUsesPerCustomer: coupon.maxUsesPerCustomer,
   usedCount: coupon.usedCount,
   createdAt: coupon.createdAt.toISOString(),
   updatedAt: coupon.updatedAt.toISOString(),
@@ -114,6 +116,9 @@ export async function PATCH(
       ...(validFrom !== undefined ? { validFrom } : {}),
       ...(validTo !== undefined ? { validTo } : {}),
       ...(data.maxUses !== undefined ? { maxUses: data.maxUses } : {}),
+      ...(data.maxUsesPerCustomer !== undefined
+        ? { maxUsesPerCustomer: data.maxUsesPerCustomer }
+        : {}),
     } as unknown as Prisma.CouponUncheckedUpdateInput,
   })
 

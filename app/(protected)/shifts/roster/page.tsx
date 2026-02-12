@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { TimePicker } from "@/components/ui/time-picker"
 import type { AppSettingsPayload } from "@/types/scheduling"
 import type {
   AppointmentConflict,
@@ -1083,10 +1084,10 @@ export default function RosterPage() {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">New time</Label>
-                  <Input
-                    type="time"
+                  <TimePicker
                     value={conflictRescheduleTime}
-                    onChange={(event) => setConflictRescheduleTime(event.target.value)}
+                    timeFormat={settings.timeFormat ?? "H24"}
+                    onChange={(nextValue) => setConflictRescheduleTime(nextValue)}
                   />
                 </div>
               </div>
@@ -1110,3 +1111,4 @@ export default function RosterPage() {
     </div>
   )
 }
+

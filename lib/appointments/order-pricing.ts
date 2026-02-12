@@ -17,6 +17,8 @@ export type CouponRule = {
   allowedProductIds?: string[]
   minSubtotalCents?: number
   stackingMode?: "STACKABLE" | "EXCLUSIVE"
+  maxUsesPerCustomer?: number
+  usedByCustomerCount?: number
 }
 
 export type CalculatedCoupon = CouponRule & {

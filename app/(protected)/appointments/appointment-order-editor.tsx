@@ -931,6 +931,7 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
         staff={staff}
         services={services}
         products={products}
+        timeFormat={settings.timeFormat}
         couponOptions={coupons.map((coupon) => ({
           value: coupon.code,
           label: `${coupon.code} (${formatCouponScopeLabel(coupon)})`,

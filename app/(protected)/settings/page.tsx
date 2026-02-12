@@ -6,6 +6,7 @@ import { Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { TimePicker } from "@/components/ui/time-picker"
 import { FormField } from "@/components/form-field"
 import { Label } from "@/components/ui/label"
 import { useFormErrors } from "@/hooks/use-form-errors"
@@ -457,25 +458,25 @@ export default function SettingsPage() {
                         </select>
                       </InlineField>
                       <InlineField label="Start">
-                        <Input
-                          type="time"
+                        <TimePicker
+                          timeFormat={form.timeFormat}
                           value={period.startTime}
-                          onChange={(event) =>
+                          onChange={(nextValue) =>
                             updatePeriod(dayIndex, periodIndex, (current) => ({
                               ...current,
-                              startTime: event.target.value,
+                              startTime: nextValue,
                             }))
                           }
                         />
                       </InlineField>
                       <InlineField label="End">
-                        <Input
-                          type="time"
+                        <TimePicker
+                          timeFormat={form.timeFormat}
                           value={period.endTime}
-                          onChange={(event) =>
+                          onChange={(nextValue) =>
                             updatePeriod(dayIndex, periodIndex, (current) => ({
                               ...current,
-                              endTime: event.target.value,
+                              endTime: nextValue,
                             }))
                           }
                         />
@@ -616,32 +617,32 @@ export default function SettingsPage() {
                           </select>
                         </InlineField>
                         <InlineField label="Start">
-                          <Input
-                            type="time"
+                          <TimePicker
+                            timeFormat={form.timeFormat}
                             value={period.startTime}
-                            onChange={(event) =>
+                            onChange={(nextValue) =>
                               updateOverridePeriod(
                                 overrideIndex,
                                 periodIndex,
                                 (current) => ({
                                   ...current,
-                                  startTime: event.target.value,
+                                  startTime: nextValue,
                                 })
                               )
                             }
                           />
                         </InlineField>
                         <InlineField label="End">
-                          <Input
-                            type="time"
+                          <TimePicker
+                            timeFormat={form.timeFormat}
                             value={period.endTime}
-                            onChange={(event) =>
+                            onChange={(nextValue) =>
                               updateOverridePeriod(
                                 overrideIndex,
                                 periodIndex,
                                 (current) => ({
                                   ...current,
-                                  endTime: event.target.value,
+                                  endTime: nextValue,
                                 })
                               )
                             }
@@ -697,3 +698,4 @@ export default function SettingsPage() {
     </div>
   )
 }
+
