@@ -104,6 +104,7 @@ export function AppointmentFormFields({
             id="appointment-time"
             value={values.startTime}
             timeFormat={timeFormat}
+            minuteStep={15}
             onChange={(nextValue) => update("startTime", nextValue)}
           />
         </FormField>

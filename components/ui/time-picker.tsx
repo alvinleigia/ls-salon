@@ -13,6 +13,7 @@ type TimePickerProps = {
   disabled?: boolean
   min?: string
   max?: string
+  minuteStep?: number
   className?: string
 }
 
@@ -20,10 +21,6 @@ const HOUR_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index + 1))
 const HOUR_24_OPTIONS = Array.from({ length: 24 }, (_, index) =>
   String(index).padStart(2, "0")
 )
-const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, index) =>
-  String(index).padStart(2, "0")
-)
-
 const parseTime = (value: string) => {
   const [rawHour, rawMinute] = value.split(":")
   const hour = Number(rawHour)
@@ -61,11 +58,24 @@ export function TimePicker({
   disabled = false,
   min,
   max,
+  minuteStep = 1,
   className,
 }: TimePickerProps) {
   const parsed = React.useMemo(() => parseTime(value), [value])
   const [parsedHour] = value.split(":")
   const hour24 = HOUR_24_OPTIONS.includes(parsedHour) ? parsedHour : "00"
+  const normalizedMinuteStep = Math.max(1, Math.min(60, Math.floor(minuteStep)))
+  const minuteOptions = React.useMemo(() => {
+    const options: string[] = []
+    for (let minute = 0; minute < 60; minute += normalizedMinuteStep) {
+      options.push(String(minute).padStart(2, "0"))
+    }
+    if (!options.includes(parsed.minute)) {
+      options.push(parsed.minute)
+      options.sort((a, b) => Number(a) - Number(b))
+    }
+    return options
+  }, [normalizedMinuteStep, parsed.minute])
   const clamp = React.useCallback(
     (nextValue: string) => {
       if (min && nextValue < min) return min
@@ -121,7 +131,7 @@ export function TimePicker({
           onChange(clamp(to24h(parsed.hour12, event.target.value, parsed.meridiem)))
         }
       >
-        {MINUTE_OPTIONS.map((minute) => (
+        {minuteOptions.map((minute) => (
           <option key={minute} value={minute}>
             {minute}
           </option>

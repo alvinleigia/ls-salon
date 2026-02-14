@@ -615,6 +615,7 @@ export function AppointmentOrderFormFields({
                 id="order-start"
                 value={values.appointmentStartTime}
                 timeFormat={timeFormat}
+                minuteStep={15}
                 onChange={(nextValue) => update("appointmentStartTime", nextValue)}
               />
             </FormField>
