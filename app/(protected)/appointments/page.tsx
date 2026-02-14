@@ -22,6 +22,7 @@ import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, MoreHorizontalIcon } from 
 import { toast } from "sonner"
 
 import { DataTable, DataTablePagination, DataTableToolbar } from "@/components/data-table"
+import { DateRangePicker } from "@/components/date-range-picker"
 import { SearchableSelect } from "@/components/searchable-select"
 import { Button } from "@/components/ui/button"
 import {
@@ -43,6 +44,7 @@ import { useDateFormatter } from "@/hooks/use-date-formatter"
 import { weekdayToSchedulerFirstDay } from "@/lib/formatting"
 import { cn } from "@/lib/utils"
 import type { ListResponse } from "@/types/api"
+import type { DateRange } from "react-day-picker"
 import type {
   AppointmentAvailabilityResult,
   AppointmentCustomerOption,
@@ -118,12 +120,6 @@ const toDateInput = (value: Date) => {
   return `${year}-${month}-${day}`
 }
 
-const toTimeInput = (value: Date) => {
-  const hours = String(value.getHours()).padStart(2, "0")
-  const minutes = String(value.getMinutes()).padStart(2, "0")
-  return `${hours}:${minutes}`
-}
-
 const toMinutes = (value: string) => {
   const [hours, minutes] = value.split(":").map((part) => Number(part))
   return (Number.isNaN(hours) ? 0 : hours) * 60 + (Number.isNaN(minutes) ? 0 : minutes)
@@ -163,6 +159,7 @@ export default function AppointmentsPage() {
   const [search, setSearch] = React.useState("")
   const [statusFilter, setStatusFilter] = React.useState<AppointmentStatus | "all">("all")
   const [staffFilter, setStaffFilter] = React.useState<string>("all")
+  const [dateRangeFilter, setDateRangeFilter] = React.useState<DateRange | undefined>(undefined)
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({
     customer: true,
@@ -197,6 +194,8 @@ export default function AppointmentsPage() {
   } = useFormErrors()
 
   const totalPages = Math.max(1, Math.ceil(totalRows / pagination.pageSize))
+  const startDateFilter = dateRangeFilter?.from ? toDateInput(dateRangeFilter.from) : ""
+  const endDateFilter = dateRangeFilter?.to ? toDateInput(dateRangeFilter.to) : ""
   const selectedService = React.useMemo(
     () => services.find((service) => service.id === formValues.serviceId),
     [formValues.serviceId, services]
@@ -275,6 +274,8 @@ export default function AppointmentsPage() {
     if (search.trim()) params.set("q", search.trim())
     if (statusFilter !== "all") params.set("status", statusFilter)
     if (staffFilter !== "all") params.set("staffId", staffFilter)
+    if (startDateFilter) params.set("startDate", startDateFilter)
+    if (endDateFilter) params.set("endDate", endDateFilter)
     if (sorting[0]) {
       params.set("sort", sorting[0].id)
       params.set("order", sorting[0].desc ? "desc" : "asc")
@@ -294,7 +295,16 @@ export default function AppointmentsPage() {
     setAppointments(data.items)
     setTotalRows(data.total)
     setLoading(false)
-  }, [pagination.pageIndex, pagination.pageSize, search, sorting, staffFilter, statusFilter])
+  }, [
+    endDateFilter,
+    pagination.pageIndex,
+    pagination.pageSize,
+    search,
+    sorting,
+    staffFilter,
+    startDateFilter,
+    statusFilter,
+  ])
 
   const loadCalendarAppointments = React.useCallback(async () => {
     if (!viewDates.length) return
@@ -341,7 +351,7 @@ export default function AppointmentsPage() {
 
   React.useEffect(() => {
     setPagination((prev) => (prev.pageIndex === 0 ? prev : { ...prev, pageIndex: 0 }))
-  }, [search, sorting, staffFilter, statusFilter])
+  }, [endDateFilter, search, sorting, staffFilter, startDateFilter, statusFilter])
 
   const handlePaginationChange = React.useCallback(
     (updater: PaginationState | ((prev: PaginationState) => PaginationState)) => {
@@ -366,27 +376,6 @@ export default function AppointmentsPage() {
       setFormMode("create")
       setEditingId(null)
       setFormValues(base)
-      setAvailability(null)
-      setAvailabilityChecking(false)
-      clearErrors()
-      setFormOpen(true)
-    },
-    [clearErrors]
-  )
-
-  const openEditDialog = React.useCallback(
-    (appointment: AppointmentRow, mode: "edit" | "reschedule" = "edit") => {
-      const start = new Date(appointment.startAt)
-      setFormMode(mode)
-      setEditingId(appointment.id)
-      setFormValues({
-        customerId: appointment.customerId,
-        serviceId: appointment.serviceId,
-        staffId: appointment.staffProfile?.user?.id ?? "",
-        date: toDateInput(start),
-        startTime: toTimeInput(start),
-        status: appointment.status,
-      })
       setAvailability(null)
       setAvailabilityChecking(false)
       clearErrors()
@@ -561,15 +550,17 @@ export default function AppointmentsPage() {
   )
 
   const openAppointmentEditor = React.useCallback(
-    (appointment: AppointmentRow, mode: "edit" | "reschedule" = "edit") => {
+    (appointment: AppointmentRow) => {
       const orderId = appointment.orderLine?.order?.id
-      if (orderId) {
-        router.push(`/appointments/${orderId}/edit`)
+      if (!orderId) {
+        toast.error(
+          "Legacy appointment cannot be edited. Cancel it and create a new booking order."
+        )
         return
       }
-      openEditDialog(appointment, mode)
+      router.push(`/appointments/${orderId}/edit`)
     },
-    [openEditDialog, router]
+    [router]
   )
 
   const handleEventClick = React.useCallback(
@@ -696,7 +687,7 @@ export default function AppointmentsPage() {
                   Edit
                 </DropdownMenuItem>
                 {canReschedule ? (
-                  <DropdownMenuItem onSelect={() => openAppointmentEditor(appointment, "reschedule")}>
+                  <DropdownMenuItem onSelect={() => openAppointmentEditor(appointment)}>
                     Reschedule
                   </DropdownMenuItem>
                 ) : null}
@@ -845,6 +836,22 @@ export default function AppointmentsPage() {
             ]}
             onChange={(nextValue) => setStaffFilter(nextValue)}
           />
+        </div>
+        <div className="flex items-center gap-2">
+          <DateRangePicker
+            value={dateRangeFilter}
+            onChange={(nextValue) => setDateRangeFilter(nextValue)}
+            placeholder="Filter by date range"
+          />
+          <Button
+            variant="outline"
+            onClick={() => {
+              setDateRangeFilter(undefined)
+            }}
+            disabled={!startDateFilter && !endDateFilter}
+          >
+            Clear dates
+          </Button>
         </div>
       </DataTableToolbar>
 

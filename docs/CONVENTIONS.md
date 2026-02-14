@@ -69,6 +69,27 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Apply the fixed-footer dialog pattern across all form dialogs.
 - Package item pickers should include a local search input.
 - Shift templates are managed outside Settings (see Shifts module).
+- Seeds admin tools live under `/settings/seeds` with admin/manager access.
+
+## Seeding + reset conventions
+- Seed/clear operations are API-driven via `/api/seeds` and must remain role-gated (`canManageUsers`).
+- Seeds must not create/update/delete admin users; admin records are preserve-only.
+- Seeds must not modify global settings (`AppSetting` + working hours/overrides).
+- Seed groups should be dependency-aware (auto-run prerequisites), and response should include executed groups.
+- Seed users should include 5 customers, 5 staff, and 2 managers (non-admin only).
+- Seed services should include at least 10 services and include `ServiceType.PACKAGE` examples with `ServicePackageItem` composition.
+- Seed tax defaults:
+  - services use GST (`GST 18%`).
+  - inventory products use VAT (`VAT 5%`).
+- Seeding services must also seed staff eligibility (`StaffServiceEligibility`) for seeded staff/users.
+- Seeding appointments must snapshot taxes correctly on order lines and order tax summaries (do not hardcode zero tax).
+- Full clear action preserves only admins + global settings and returns deleted counts.
+- Module clear actions must support:
+  - preview (`previewModulesClear`) with delete counts + expanded modules.
+  - execution (`clearModules`) with dependency-aware expansion and safe delete ordering.
+  - modes: `strict` (error on missing dependencies) and `include_dependents` (auto-expand).
+- Module clear ordering should delete leaves first to satisfy FK constraints:
+  - `appointments -> coupons -> purchases -> inventory -> shifts -> services -> taxes -> users`.
 
 ## Module checklist
 - Prisma model + migration (if new data).
@@ -114,6 +135,7 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Order pricing totals (subtotal, discounts, coupons, taxes, grand total) must aggregate across both service and product lines, with server-authoritative calculations.
 - Coupons support multiple codes; keep phase-1 rules simple and deterministic (server-authoritative pricing).
 - Coupon definitions are managed in `/appointments/coupons` via `/api/appointments/coupons` (CRUD).
+- Coupon reporting endpoints should live under `/api/reports/*` with list pagination shape (`items`, `page`, `pageSize`, `total`, `totalPages`) and role-gated access.
 - Coupon definitions support scope metadata for enforcement:
   - `appliesTo`: `ORDER`, `SERVICE_LINES`, or `PRODUCT_LINES`.
   - allow-lists: `allowedServiceIds`, `allowedCategoryIds`, `allowedProductIds`.
@@ -128,6 +150,9 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Appointment create/update APIs must enforce staff availability against schedules + overrides + week-off/break windows (not only overlap checks).
 - Appointment UI should call `/api/appointments/availability` as a pre-check and show inline slot status before submit.
 - Appointment flows should expose explicit actions for Edit, Reschedule, and Cancel (with confirmation for cancel).
+- Appointment list edit/reschedule should be order-based only:
+  - if `appointment.orderLine.order.id` exists, route to `/appointments/[orderId]/edit`.
+  - legacy/non-order appointments should not fallback to modal edit.
 - Shifts module lives under `/shifts` with admin/manager access and uses standard list params/response.
 - Shift schedules live under `/shifts/schedules` with admin/manager access.
 - Shift templates store a single shift start/end with optional breaks and are reusable across schedules/overrides.
@@ -155,3 +180,8 @@ This is the baseline for new modules (API + UI) in this codebase.
 - List pageSize max is 100 unless explicitly raised (align UI requests accordingly).
 - Seed helpers live in `scripts/` (use `seed-service-categories.js` for defaults).
 - Services seed: `scripts/seed-services.js` (requires categories).
+- Reuse shared date range picker UI instead of duplicating range popover logic:
+  - component: `components/date-range-picker.tsx` (shadcn `Button` + `Popover` + `Calendar`).
+  - current consumers: dashboard and appointments pages.
+  - appointments table date filtering should send `startDate` and `endDate` to `/api/appointments`.
+  - date range picker should support explicit boundary edits (`From`/`To`) and allow restarting range selection cleanly after a completed range exists.

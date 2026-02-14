@@ -140,8 +140,12 @@ export async function PATCH(
 
   try {
     const resolved = await resolveOrderData(nextInput, { existingOrderId: id })
+    const existingOrderLineIds = currentOrder.lines.map((line) => line.id)
     const existingAppointments = await prisma.appointment.findMany({
-      where: { orderLine: { is: { orderId: id } } },
+      where: {
+        orderLineId:
+          existingOrderLineIds.length > 0 ? { in: existingOrderLineIds } : undefined,
+      },
       select: { id: true },
     })
     const excludedIds = existingAppointments.map((item) => item.id)
@@ -229,7 +233,7 @@ export async function PATCH(
 
       if (resolved.status === "CONFIRMED") {
         await tx.appointment.deleteMany({
-          where: { orderLine: { is: { orderId: id } } },
+          where: { id: { in: excludedIds } },
         })
         const createdLineBySortOrder = new Map(
           order.lines.map((line) => [line.sortOrder, line])
@@ -252,20 +256,20 @@ export async function PATCH(
         })
       } else if (resolved.status === "CANCELED") {
         await tx.appointment.updateMany({
-          where: { orderLine: { is: { orderId: id } } },
+          where: { id: { in: excludedIds } },
           data: { status: AppointmentStatus.CANCELED },
         })
       } else if (resolved.status === "COMPLETED") {
         await tx.appointment.updateMany({
           where: {
-            orderLine: { is: { orderId: id } },
+            id: { in: excludedIds },
             status: { in: ACTIVE_APPOINTMENT_STATUSES },
           },
           data: { status: AppointmentStatus.COMPLETED },
         })
       } else {
         await tx.appointment.deleteMany({
-          where: { orderLine: { is: { orderId: id } } },
+          where: { id: { in: excludedIds } },
         })
       }
 

@@ -7,6 +7,7 @@ import { signOut, useSession } from "next-auth/react"
 import { useTheme } from "next-themes"
 import {
   CalendarClockIcon,
+  BarChart3Icon,
   ClockIcon,
   PackageIcon,
   LayoutDashboardIcon,
@@ -97,6 +98,39 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              {canManageUsers(role ?? null) ? (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    data-active={pathname.startsWith("/reports")}
+                  >
+                    <Link href="/reports/coupon-usage" className="flex w-full items-center">
+                      <BarChart3Icon className="h-4 w-4" />
+                      <span>Reports</span>
+                      <span
+                        className={`ml-auto h-2 w-2 rounded-full ${
+                          pathname.startsWith("/reports")
+                            ? "bg-sidebar-primary"
+                            : "bg-transparent"
+                        }`}
+                      />
+                    </Link>
+                  </SidebarMenuButton>
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/reports/coupon-usage"}
+                      >
+                        <Link href="/reports/coupon-usage">
+                          <TagIcon className="h-4 w-4" />
+                          <span>Coupon usage</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  </SidebarMenuSub>
+                </SidebarMenuItem>
+              ) : null}
               {canManageUsers(role ?? null) ? (
                 <SidebarMenuItem>
                   <SidebarMenuButton
@@ -390,6 +424,17 @@ export function AppSidebar() {
                         <Link href="/settings/taxes">
                           <TagIcon className="h-4 w-4" />
                           <span>Taxes</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/settings/seeds"}
+                      >
+                        <Link href="/settings/seeds">
+                          <PackageIcon className="h-4 w-4" />
+                          <span>Seeds</span>
                         </Link>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>

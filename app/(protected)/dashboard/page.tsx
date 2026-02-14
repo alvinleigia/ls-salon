@@ -17,7 +17,6 @@ import {
   YAxis,
 } from "recharts"
 import {
-  CalendarIcon,
   CalendarClockIcon,
   CreditCardIcon,
   ScissorsIcon,
@@ -27,9 +26,7 @@ import {
 import { formatCurrencyFromCents } from "@/lib/formatting"
 import { useDateFormatter } from "@/hooks/use-date-formatter"
 import type { AppSettingsPayload, Weekday } from "@/types/scheduling"
-import { Calendar } from "@/components/ui/calendar"
-import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { DateRangePicker } from "@/components/date-range-picker"
 import type { DateRange } from "react-day-picker"
 
 const serviceMix = [
@@ -247,7 +244,7 @@ export default function DashboardPage() {
       newClients: "48",
       upsellRate: "29%",
     }
-  }, [range])
+  }, [dateRange, range])
 
   return (
     <div className="space-y-8">
@@ -347,34 +344,16 @@ export default function DashboardPage() {
               </button>
             ))}
           </div>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className="h-9 rounded-full px-3 text-xs font-medium"
-              >
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {dateRange?.from
-                  ? dateRange.to
-                    ? `${formatDate(dateRange.from)} - ${formatDate(dateRange.to)}`
-                    : formatDate(dateRange.from)
-                  : "Pick a range"}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="end">
-              <Calendar
-                mode="range"
-                selected={dateRange}
-                onSelect={(next) => {
-                  setDateRange(next)
-                  if (next?.from && next?.to) {
-                    setRange("custom")
-                  }
-                }}
-                numberOfMonths={2}
-              />
-            </PopoverContent>
-          </Popover>
+          <DateRangePicker
+            value={dateRange}
+            onChange={(next) => {
+              setDateRange(next)
+              if (next?.from && next?.to) {
+                setRange("custom")
+              }
+            }}
+            buttonClassName="rounded-full"
+          />
         </div>
       </section>
 
