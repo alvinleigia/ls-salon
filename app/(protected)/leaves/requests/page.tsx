@@ -13,6 +13,7 @@ import { useSession } from "next-auth/react"
 import Link from "next/link"
 import { toast } from "sonner"
 
+import { LeaveRequestDetailsDialog } from "../request-details-dialog"
 import { DataTable, DataTablePagination, DataTableToolbar } from "@/components/data-table"
 import { FormField } from "@/components/form-field"
 import { SearchableSelect } from "@/components/searchable-select"
@@ -105,6 +106,8 @@ export default function LeaveRequestsPage() {
   const [canceling, setCanceling] = React.useState(false)
   const [cancelReason, setCancelReason] = React.useState("")
   const [cancelTarget, setCancelTarget] = React.useState<LeaveRequestRow | null>(null)
+  const [detailOpen, setDetailOpen] = React.useState(false)
+  const [detailRequestId, setDetailRequestId] = React.useState<string | null>(null)
   const { errors, setErrorsFromResponse, clearErrors } = useFormErrors()
 
   const loadLeaveOptions = React.useCallback(async () => {
@@ -163,6 +166,11 @@ export default function LeaveRequestsPage() {
     setCancelTarget(item)
     setCancelReason("")
     setCancelOpen(true)
+  }, [])
+
+  const openDetails = React.useCallback((item: LeaveRequestRow) => {
+    setDetailRequestId(item.id)
+    setDetailOpen(true)
   }, [])
 
   const confirmCancel = React.useCallback(async () => {
@@ -297,6 +305,11 @@ export default function LeaveRequestsPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem
+                  onSelect={() => openDetails(row.original)}
+                >
+                  View details
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   disabled={!canCancel}
                   className={canCancel ? "text-destructive" : undefined}
                   onSelect={() => requestCancel(row.original)}
@@ -309,7 +322,7 @@ export default function LeaveRequestsPage() {
         },
       },
     ],
-    [requestCancel]
+    [openDetails, requestCancel]
   )
 
   const totalPages = Math.max(1, Math.ceil(totalRows / pagination.pageSize))
@@ -473,6 +486,15 @@ export default function LeaveRequestsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <LeaveRequestDetailsDialog
+        requestId={detailRequestId}
+        open={detailOpen}
+        onOpenChange={(open) => {
+          setDetailOpen(open)
+          if (!open) setDetailRequestId(null)
+        }}
+      />
     </div>
   )
 }

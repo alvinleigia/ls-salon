@@ -4,6 +4,7 @@ import { auth } from "@/auth"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import { reviewLeaveRequestSchema } from "@/lib/validation"
+import { notifyLeaveReviewed } from "../../../_notifications"
 import {
   assertReviewTransitionAllowed,
   leaveRequestSelect,
@@ -56,7 +57,20 @@ export async function PATCH(
       select: leaveRequestSelect,
     })
 
-    return NextResponse.json({ item: serializeLeaveRequest(item) })
+    const serialized = serializeLeaveRequest(item)
+    void notifyLeaveReviewed(prisma, {
+      staffUserId: serialized.staff.userId,
+      status: parsed.data.status,
+      reviewerName: serialized.reviewedBy?.name ?? null,
+      reviewerComment: serialized.reviewerComment,
+      leaveCode: serialized.leaveDefinition.code,
+      leaveName: serialized.leaveDefinition.name,
+      startDateIso: serialized.startDate.slice(0, 10),
+      endDateIso: serialized.endDate.slice(0, 10),
+      daysCount: serialized.daysCount,
+    })
+
+    return NextResponse.json({ item: serialized })
   } catch (error) {
     if (error instanceof Error) {
       return NextResponse.json({ error: error.message }, { status: 400 })

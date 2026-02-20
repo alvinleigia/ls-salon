@@ -1039,10 +1039,34 @@ export const reviewLeaveRequestSchema = z
     }
   })
 
+export const bulkReviewLeaveRequestsSchema = z
+  .object({
+    requestIds: z.array(z.string().trim().min(1)).min(1).max(100),
+    status: z.enum(["APPROVED", "REJECTED"]),
+    reviewerComment: z.string().trim().max(500).optional().or(z.literal("")),
+  })
+  .superRefine((value, ctx) => {
+    if (value.requestIds.length !== new Set(value.requestIds).size) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Duplicate leave request ids are not allowed.",
+        path: ["requestIds"],
+      })
+    }
+    if (value.status === "REJECTED" && !value.reviewerComment?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Comment is required when rejecting leave requests.",
+        path: ["reviewerComment"],
+      })
+    }
+  })
+
 export const cancelLeaveRequestSchema = z.object({
   cancelReason: z.string().trim().max(500).optional().or(z.literal("")),
 })
 
 export type CreateLeaveRequestInput = z.infer<typeof createLeaveRequestSchema>
 export type ReviewLeaveRequestInput = z.infer<typeof reviewLeaveRequestSchema>
+export type BulkReviewLeaveRequestsInput = z.infer<typeof bulkReviewLeaveRequestsSchema>
 export type CancelLeaveRequestInput = z.infer<typeof cancelLeaveRequestSchema>

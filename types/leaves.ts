@@ -137,3 +137,25 @@ export type LeaveRequestFormValues = {
   endDate: string
   reason: string
 }
+
+export type LeaveRequestRuleCheck = {
+  key: string
+  label: string
+  passed: boolean
+  detail: string
+}
+
+export type LeaveRequestTimelineEvent = {
+  key: "submitted" | "reviewed" | "canceled"
+  title: string
+  at: string
+  byName: string | null
+  byEmail: string | null
+  comment: string | null
+}
+
+export type LeaveRequestDetail = {
+  item: LeaveRequestRow
+  ruleChecks: LeaveRequestRuleCheck[]
+  timeline: LeaveRequestTimelineEvent[]
+}

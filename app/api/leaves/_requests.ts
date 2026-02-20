@@ -1,5 +1,5 @@
 import { Prisma, Weekday, type PrismaClient } from "@prisma/client"
-import type { LeaveRequestRow } from "@/types/leaves"
+import type { LeaveRequestRow, LeaveRequestRuleCheck, LeaveRequestTimelineEvent } from "@/types/leaves"
 
 type DbClient = PrismaClient | Prisma.TransactionClient
 
@@ -466,3 +466,194 @@ export const serializeLeaveRequest = (item: LeaveRequestWithRelations): LeaveReq
       }
     : null,
 })
+
+type BuildLeaveRequestRuleChecksInput = {
+  tx: DbClient
+  staffProfileId: string
+  staffGender: "MALE" | "FEMALE" | "NON_BINARY" | "OTHER" | "PREFER_NOT_TO_SAY" | null
+  leaveDefinition: {
+    allowedUsers: "MALE" | "FEMALE" | "ALL"
+    minDaysPerRequest: number
+    maxDaysPerRequest: number
+    maxConsecutiveDays: number
+    priorEntryAllowed: boolean
+    noticeDays: number
+    weekOffSingleSideAllowed: boolean
+    weekOffBothSideAllowed: boolean
+    holidaySingleSideAllowed: boolean
+    holidayBothSideAllowed: boolean
+  }
+  startDate: Date
+  endDate: Date
+  createdAt: Date
+}
+
+const passFail = (passed: boolean): string => (passed ? "Pass" : "Fail")
+
+export const buildLeaveRequestRuleChecks = async ({
+  tx,
+  staffProfileId,
+  staffGender,
+  leaveDefinition,
+  startDate,
+  endDate,
+  createdAt,
+}: BuildLeaveRequestRuleChecksInput): Promise<LeaveRequestRuleCheck[]> => {
+  const checks: LeaveRequestRuleCheck[] = []
+  const daysCount = getInclusiveDays(startDate, endDate)
+
+  const allowedUsersPassed =
+    leaveDefinition.allowedUsers === "ALL" ||
+    (leaveDefinition.allowedUsers === "MALE" && staffGender === "MALE") ||
+    (leaveDefinition.allowedUsers === "FEMALE" && staffGender === "FEMALE")
+  checks.push({
+    key: "allowedUsers",
+    label: "Allowed users",
+    passed: allowedUsersPassed,
+    detail: `${passFail(allowedUsersPassed)} (${leaveDefinition.allowedUsers})`,
+  })
+
+  const minMaxPassed =
+    daysCount >= leaveDefinition.minDaysPerRequest &&
+    daysCount <= leaveDefinition.maxDaysPerRequest
+  checks.push({
+    key: "minMaxDays",
+    label: "Min/Max days per request",
+    passed: minMaxPassed,
+    detail: `${passFail(minMaxPassed)} (${daysCount} day(s), allowed ${leaveDefinition.minDaysPerRequest}-${leaveDefinition.maxDaysPerRequest})`,
+  })
+
+  const consecutivePassed = daysCount <= leaveDefinition.maxConsecutiveDays
+  checks.push({
+    key: "maxConsecutiveDays",
+    label: "Max consecutive days",
+    passed: consecutivePassed,
+    detail: `${passFail(consecutivePassed)} (${daysCount}/${leaveDefinition.maxConsecutiveDays})`,
+  })
+
+  const createdDateOnly = new Date(
+    Date.UTC(createdAt.getUTCFullYear(), createdAt.getUTCMonth(), createdAt.getUTCDate())
+  )
+  const priorEntryPassed = leaveDefinition.priorEntryAllowed || startDate >= createdDateOnly
+  checks.push({
+    key: "priorEntryAllowed",
+    label: "Prior leave entry",
+    passed: priorEntryPassed,
+    detail: `${passFail(priorEntryPassed)} (${leaveDefinition.priorEntryAllowed ? "allowed" : "not allowed"})`,
+  })
+
+  const minStartByNotice = addDays(createdDateOnly, leaveDefinition.noticeDays)
+  const noticePassed = startDate >= minStartByNotice
+  checks.push({
+    key: "noticeDays",
+    label: "Notice days",
+    passed: noticePassed,
+    detail: `${passFail(noticePassed)} (${leaveDefinition.noticeDays} day(s) required)`,
+  })
+
+  const edgeDates = [addDays(startDate, -1), addDays(endDate, 1)]
+  const [beforeDate, afterDate] = edgeDates
+  const [beforeSchedule, afterSchedule, holidayOverrides] = await Promise.all([
+    getScheduleForDate(tx, staffProfileId, beforeDate),
+    getScheduleForDate(tx, staffProfileId, afterDate),
+    tx.appSettingOverride.findMany({
+      where: {
+        date: { in: edgeDates },
+        isOpen: false,
+      },
+      select: { date: true },
+    }),
+  ])
+
+  const weekOffBefore = isWeekOffForSchedule(beforeDate, beforeSchedule)
+  const weekOffAfter = isWeekOffForSchedule(afterDate, afterSchedule)
+  const weekOffPassed = !(
+    (weekOffBefore && weekOffAfter && !leaveDefinition.weekOffBothSideAllowed) ||
+    ((weekOffBefore || weekOffAfter) &&
+      !(weekOffBefore && weekOffAfter) &&
+      !leaveDefinition.weekOffSingleSideAllowed)
+  )
+  checks.push({
+    key: "weekOffRules",
+    label: "Week off side rules",
+    passed: weekOffPassed,
+    detail: `${passFail(weekOffPassed)} (single:${leaveDefinition.weekOffSingleSideAllowed ? "Y" : "N"}, both:${leaveDefinition.weekOffBothSideAllowed ? "Y" : "N"})`,
+  })
+
+  const holidaySet = new Set(holidayOverrides.map((item) => toIsoDate(item.date)))
+  const holidayBefore = holidaySet.has(toIsoDate(beforeDate))
+  const holidayAfter = holidaySet.has(toIsoDate(afterDate))
+  const holidayPassed = !(
+    (holidayBefore && holidayAfter && !leaveDefinition.holidayBothSideAllowed) ||
+    ((holidayBefore || holidayAfter) &&
+      !(holidayBefore && holidayAfter) &&
+      !leaveDefinition.holidaySingleSideAllowed)
+  )
+  checks.push({
+    key: "holidayRules",
+    label: "Holiday side rules",
+    passed: holidayPassed,
+    detail: `${passFail(holidayPassed)} (single:${leaveDefinition.holidaySingleSideAllowed ? "Y" : "N"}, both:${leaveDefinition.holidayBothSideAllowed ? "Y" : "N"})`,
+  })
+
+  return checks
+}
+
+type BuildLeaveRequestTimelineInput = {
+  createdAt: Date
+  staffName: string | null
+  staffEmail: string
+  reviewedAt: Date | null
+  reviewedByName: string | null
+  reviewedByEmail: string | null
+  reviewerComment: string | null
+  canceledAt: Date | null
+  cancelReason: string | null
+}
+
+export const buildLeaveRequestTimeline = ({
+  createdAt,
+  staffName,
+  staffEmail,
+  reviewedAt,
+  reviewedByName,
+  reviewedByEmail,
+  reviewerComment,
+  canceledAt,
+  cancelReason,
+}: BuildLeaveRequestTimelineInput): LeaveRequestTimelineEvent[] => {
+  const timeline: LeaveRequestTimelineEvent[] = [
+    {
+      key: "submitted",
+      title: "Submitted",
+      at: createdAt.toISOString(),
+      byName: staffName,
+      byEmail: staffEmail,
+      comment: null,
+    },
+  ]
+
+  if (reviewedAt) {
+    timeline.push({
+      key: "reviewed",
+      title: "Reviewed",
+      at: reviewedAt.toISOString(),
+      byName: reviewedByName,
+      byEmail: reviewedByEmail,
+      comment: reviewerComment,
+    })
+  }
+
+  if (canceledAt) {
+    timeline.push({
+      key: "canceled",
+      title: "Canceled",
+      at: canceledAt.toISOString(),
+      byName: null,
+      byEmail: null,
+      comment: cancelReason,
+    })
+  }
+
+  return timeline
+}

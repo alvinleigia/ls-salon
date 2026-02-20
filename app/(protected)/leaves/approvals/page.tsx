@@ -3,6 +3,7 @@
 import * as React from "react"
 import {
   ColumnDef,
+  RowSelectionState,
   SortingState,
   VisibilityState,
   getCoreRowModel,
@@ -14,6 +15,7 @@ import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
+import { LeaveRequestDetailsDialog } from "../request-details-dialog"
 import { DataTable, DataTablePagination, DataTableToolbar } from "@/components/data-table"
 import { FormField } from "@/components/form-field"
 import { Button } from "@/components/ui/button"
@@ -86,7 +88,10 @@ export default function LeaveApprovalsPage() {
   const [processing, setProcessing] = React.useState(false)
   const [rejectOpen, setRejectOpen] = React.useState(false)
   const [rejectComment, setRejectComment] = React.useState("")
-  const [rejectTarget, setRejectTarget] = React.useState<LeaveRequestRow | null>(null)
+  const [rejectTargets, setRejectTargets] = React.useState<LeaveRequestRow[]>([])
+  const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({})
+  const [detailOpen, setDetailOpen] = React.useState(false)
+  const [detailRequestId, setDetailRequestId] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (role && !canManage) {
@@ -119,6 +124,7 @@ export default function LeaveApprovalsPage() {
     const data = (await response.json()) as ListResponse<LeaveRequestRow>
     setRows(data.items)
     setTotalRows(data.total)
+    setRowSelection({})
     setLoading(false)
   }, [pagination.pageIndex, pagination.pageSize, search, sorting, statusFilter])
 
@@ -153,26 +159,94 @@ export default function LeaveApprovalsPage() {
     [loadRows]
   )
 
+  const reviewBulkRequests = React.useCallback(
+    async (items: LeaveRequestRow[], status: "APPROVED" | "REJECTED", reviewerComment = "") => {
+      if (!items.length) return
+      setProcessing(true)
+      const response = await fetch("/api/leaves/requests/review-bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestIds: items.map((item) => item.id),
+          status,
+          reviewerComment,
+        }),
+      })
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string }
+        toast.error(data.error ?? "Unable to bulk review leave requests.")
+        setProcessing(false)
+        return
+      }
+      const data = (await response.json()) as { updatedCount?: number; skippedCount?: number }
+      const updatedCount = data.updatedCount ?? 0
+      const skippedCount = data.skippedCount ?? 0
+      toast.success(
+        `${updatedCount} request(s) ${status === "APPROVED" ? "approved" : "rejected"}${skippedCount ? `, ${skippedCount} skipped` : ""}.`
+      )
+      setProcessing(false)
+      await loadRows()
+    },
+    [loadRows]
+  )
+
+  const openDetails = React.useCallback((item: LeaveRequestRow) => {
+    setDetailRequestId(item.id)
+    setDetailOpen(true)
+  }, [])
+
   const openReject = React.useCallback((item: LeaveRequestRow) => {
-    setRejectTarget(item)
+    setRejectTargets([item])
+    setRejectComment("")
+    setRejectOpen(true)
+  }, [])
+
+  const openBulkReject = React.useCallback((items: LeaveRequestRow[]) => {
+    if (!items.length) return
+    setRejectTargets(items)
     setRejectComment("")
     setRejectOpen(true)
   }, [])
 
   const confirmReject = React.useCallback(async () => {
-    if (!rejectTarget) return
+    if (!rejectTargets.length) return
     if (!rejectComment.trim()) {
       toast.error("Comment is required to reject a leave request.")
       return
     }
-    await reviewRequest(rejectTarget, "REJECTED", rejectComment)
+    if (rejectTargets.length === 1) {
+      await reviewRequest(rejectTargets[0], "REJECTED", rejectComment)
+    } else {
+      await reviewBulkRequests(rejectTargets, "REJECTED", rejectComment)
+    }
     setRejectOpen(false)
-    setRejectTarget(null)
+    setRejectTargets([])
     setRejectComment("")
-  }, [rejectComment, rejectTarget, reviewRequest])
+  }, [rejectComment, rejectTargets, reviewBulkRequests, reviewRequest])
 
   const columns = React.useMemo<ColumnDef<LeaveRequestRow>[]>(
     () => [
+      {
+        id: "select",
+        enableHiding: false,
+        header: ({ table }) => (
+          <input
+            type="checkbox"
+            checked={table.getIsAllPageRowsSelected()}
+            onChange={(event) => table.toggleAllPageRowsSelected(event.target.checked)}
+            aria-label="Select all"
+          />
+        ),
+        cell: ({ row }) => (
+          <input
+            type="checkbox"
+            checked={row.getIsSelected()}
+            disabled={!row.getCanSelect()}
+            onChange={(event) => row.toggleSelected(event.target.checked)}
+            aria-label="Select row"
+          />
+        ),
+      },
       {
         id: "staff",
         meta: { label: "Staff" },
@@ -248,6 +322,11 @@ export default function LeaveApprovalsPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem
+                  onSelect={() => openDetails(row.original)}
+                >
+                  View details
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   disabled={!canReview || processing}
                   onSelect={() => void reviewRequest(row.original, "APPROVED")}
                 >
@@ -266,7 +345,7 @@ export default function LeaveApprovalsPage() {
         },
       },
     ],
-    [openReject, processing, reviewRequest]
+    [openDetails, openReject, processing, reviewRequest]
   )
 
   const totalPages = Math.max(1, Math.ceil(totalRows / pagination.pageSize))
@@ -274,17 +353,23 @@ export default function LeaveApprovalsPage() {
   const table = useReactTable({
     data: rows,
     columns,
-    state: { sorting, columnVisibility, globalFilter: search, pagination },
+    state: { sorting, columnVisibility, globalFilter: search, pagination, rowSelection },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
     onGlobalFilterChange: setSearch,
     onPaginationChange: setPagination,
+    onRowSelectionChange: setRowSelection,
     manualPagination: true,
     manualSorting: true,
     manualFiltering: true,
+    enableRowSelection: (row) => row.original.status === "PENDING",
     pageCount: totalPages,
     getCoreRowModel: getCoreRowModel(),
   })
+  const selectedPendingRows = table
+    .getSelectedRowModel()
+    .rows.map((row) => row.original)
+    .filter((row) => row.status === "PENDING")
 
   if (!canManage) {
     return null
@@ -305,6 +390,21 @@ export default function LeaveApprovalsPage() {
       </div>
 
       <DataTableToolbar table={table} searchPlaceholder="Search by staff, leave or reason">
+        <Button
+          variant="outline"
+          disabled={!selectedPendingRows.length || processing}
+          onClick={() => void reviewBulkRequests(selectedPendingRows, "APPROVED")}
+        >
+          Approve selected
+        </Button>
+        <Button
+          variant="outline"
+          className="text-destructive"
+          disabled={!selectedPendingRows.length || processing}
+          onClick={() => openBulkReject(selectedPendingRows)}
+        >
+          Reject selected
+        </Button>
         <select
           className="h-9 rounded-md border border-input bg-background px-3 text-sm"
           value={statusFilter}
@@ -326,15 +426,19 @@ export default function LeaveApprovalsPage() {
         onOpenChange={(open) => {
           setRejectOpen(open)
           if (!open) {
-            setRejectTarget(null)
+            setRejectTargets([])
             setRejectComment("")
           }
         }}
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Reject leave request</DialogTitle>
-            <DialogDescription>Add a reason for rejecting this request.</DialogDescription>
+            <DialogTitle>
+              {rejectTargets.length > 1 ? "Reject selected leave requests" : "Reject leave request"}
+            </DialogTitle>
+            <DialogDescription>
+              Add a reason for rejection. This comment will be shared with staff.
+            </DialogDescription>
           </DialogHeader>
           <FormField id="reject-comment" label="Comment">
             <Input
@@ -354,6 +458,15 @@ export default function LeaveApprovalsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <LeaveRequestDetailsDialog
+        requestId={detailRequestId}
+        open={detailOpen}
+        onOpenChange={(open) => {
+          setDetailOpen(open)
+          if (!open) setDetailRequestId(null)
+        }}
+      />
     </div>
   )
 }
