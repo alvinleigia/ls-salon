@@ -451,6 +451,8 @@ const seedTaxes = async () => {
 const seedUsers = async () => {
   const passwordHash = await bcrypt.hash("password123", 10)
   let touched = 0
+  const managerIds: string[] = []
+  const staffUserIds: string[] = []
   for (const user of seededUsers) {
     const row = await prisma.user.upsert({
       where: { email: user.email },
@@ -469,13 +471,18 @@ const seedUsers = async () => {
       },
     })
     touched += 1
-    if (row.role === Role.STAFF) {
-      await prisma.staffProfile.upsert({
-        where: { userId: row.id },
-        update: {},
-        create: { userId: row.id },
-      })
-    }
+    if (row.role === Role.MANAGER) managerIds.push(row.id)
+    if (row.role === Role.STAFF) staffUserIds.push(row.id)
+  }
+
+  for (const [index, staffUserId] of staffUserIds.entries()) {
+    const managerUserId =
+      managerIds.length > 0 ? managerIds[index % managerIds.length] : null
+    await prisma.staffProfile.upsert({
+      where: { userId: staffUserId },
+      update: { managerUserId },
+      create: { userId: staffUserId, managerUserId },
+    })
   }
   return { count: touched }
 }
