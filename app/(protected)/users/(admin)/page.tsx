@@ -362,6 +362,13 @@ export default function UsersPage() {
               >
                 View details
               </DropdownMenuItem>
+              {row.original.role === "STAFF" ? (
+                <DropdownMenuItem
+                  onSelect={() => window.location.assign(`/users/${row.original.id}/staff`)}
+                >
+                  Staff profile
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         ),

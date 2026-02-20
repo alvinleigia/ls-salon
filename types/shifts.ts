@@ -114,5 +114,9 @@ export type AvailabilityEvent = {
   templateEnd?: string
   templateBreaks?: string[]
   isUnavailable?: boolean
+  isLeave?: boolean
+  leaveCode?: string
+  leaveName?: string
+  leaveReason?: string | null
   CategoryColor?: string
 }

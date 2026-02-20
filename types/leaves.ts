@@ -159,3 +159,15 @@ export type LeaveRequestDetail = {
   ruleChecks: LeaveRequestRuleCheck[]
   timeline: LeaveRequestTimelineEvent[]
 }
+
+export type LeaveRosterItem = {
+  id: string
+  staffId: string
+  staffName: string | null
+  staffEmail: string
+  leaveDefinitionCode: string
+  leaveDefinitionName: string
+  startDate: string
+  endDate: string
+  reason: string | null
+}

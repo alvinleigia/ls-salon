@@ -32,6 +32,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { TimePicker } from "@/components/ui/time-picker"
+import type { LeaveRosterItem } from "@/types/leaves"
 import type { AppSettingsPayload } from "@/types/scheduling"
 import type {
   AppointmentConflict,
@@ -43,6 +44,7 @@ import type {
   StaffScheduleAssignment,
 } from "@/types/shifts"
 import {
+  APPROVED_LEAVE_COLOR,
   RESOURCE_COLORS,
   UNAVAILABLE_COLOR,
   buildScheduleMap,
@@ -71,6 +73,7 @@ export default function RosterPage() {
   >({})
   const [defaultSchedule, setDefaultSchedule] = React.useState<ShiftSchedule | null>(null)
   const [overrides, setOverrides] = React.useState<ShiftOverride[]>([])
+  const [approvedLeaves, setApprovedLeaves] = React.useState<LeaveRosterItem[]>([])
   const [overrideOpen, setOverrideOpen] = React.useState(false)
   const [overrideStaffId, setOverrideStaffId] = React.useState<string>("")
   const [overrideStartDate, setOverrideStartDate] = React.useState<string>("")
@@ -267,6 +270,34 @@ export default function RosterPage() {
     void loadOverrides()
   }, [loadOverrides])
 
+  const loadApprovedLeaves = React.useCallback(async () => {
+    if (!viewDates.length || !staff.length) return
+    const start = toISODate(viewDates[0])
+    const end = toISODate(viewDates[viewDates.length - 1])
+    const staffIds =
+      staffFilter === "all" ? staff.map((member) => member.id) : [staffFilter]
+    if (!staffIds.length) return
+    try {
+      const response = await fetch(
+        `/api/leaves/approved?startDate=${start}&endDate=${end}&staffIds=${staffIds.join(",")}`,
+        { cache: "no-store" }
+      )
+      if (!response.ok) {
+        throw new Error("Failed to load approved leaves.")
+      }
+      const data = (await response.json()) as { items?: LeaveRosterItem[] }
+      setApprovedLeaves(data.items ?? [])
+    } catch (error) {
+      console.error(error)
+      toast.error("Unable to load approved leaves.")
+      setApprovedLeaves([])
+    }
+  }, [staff, staffFilter, viewDates])
+
+  React.useEffect(() => {
+    void loadApprovedLeaves()
+  }, [loadApprovedLeaves])
+
   const templateMap = React.useMemo(() => buildTemplateMap(templates), [templates])
 
   const templateColorMap = React.useMemo(
@@ -364,6 +395,30 @@ export default function RosterPage() {
   const calendarEvents = React.useMemo(() => {
     const list: AvailabilityEvent[] = []
 
+    for (const leave of approvedLeaves) {
+      const leaveStart = parseISODate(leave.startDate)
+      const leaveEnd = parseISODate(leave.endDate)
+      if (!leaveStart || !leaveEnd) continue
+      const eventStart = new Date(leaveStart)
+      eventStart.setHours(0, 0, 0, 0)
+      const eventEnd = new Date(leaveEnd)
+      eventEnd.setDate(eventEnd.getDate() + 1)
+      eventEnd.setHours(0, 0, 0, 0)
+      list.push({
+        Id: `leave-${leave.id}`,
+        Subject: `${leave.leaveDefinitionCode} - ${leave.leaveDefinitionName}`,
+        StartTime: eventStart,
+        EndTime: eventEnd,
+        IsAllDay: true,
+        staffId: leave.staffId,
+        isLeave: true,
+        leaveCode: leave.leaveDefinitionCode,
+        leaveName: leave.leaveDefinitionName,
+        leaveReason: leave.reason,
+        CategoryColor: APPROVED_LEAVE_COLOR,
+      })
+    }
+
     for (const day of availabilityDates) {
       for (const member of filteredStaff) {
         const dateKey = formatDateKey(day)
@@ -419,6 +474,7 @@ export default function RosterPage() {
 
     return list
   }, [
+    approvedLeaves,
     availabilityDates,
     filteredStaff,
     formatDateKey,
@@ -464,7 +520,13 @@ export default function RosterPage() {
             Unavailable
           </div>
         ) : null}
-        {data.staffId ? (
+        {data.isLeave ? (
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <div>Approved leave</div>
+            {data.leaveReason ? <div>Reason: {data.leaveReason}</div> : null}
+          </div>
+        ) : null}
+        {data.staffId && !data.isLeave ? (
           <Button
             type="button"
             variant="secondary"
@@ -622,6 +684,7 @@ export default function RosterPage() {
   const handleEventClick = React.useCallback(
     (args: { event?: Record<string, unknown>; data?: Record<string, unknown> }) => {
       const eventData = (args?.event ?? args?.data) as AvailabilityEvent | undefined
+      if (eventData?.isLeave) return
       if (!eventData?.StartTime || !eventData.staffId) return
       openOverrideEditor(eventData.staffId, eventData.StartTime)
     },
@@ -637,6 +700,9 @@ export default function RosterPage() {
     }) => {
       if (args.type !== "QuickInfo") return
       const data = args.data as Record<string, unknown> | undefined
+      if ((data?.isLeave as boolean | undefined) === true) {
+        return
+      }
       const startTime =
         (data?.StartTime as Date | undefined) ||
         (data?.startTime as Date | undefined)

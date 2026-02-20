@@ -21,6 +21,7 @@ export const TEMPLATE_COLORS = [
 ]
 
 export const UNAVAILABLE_COLOR = "#ef4444"
+export const APPROVED_LEAVE_COLOR = "#f59e0b"
 
 export const formatDateKey = (value: Date) => toISODate(value)
 
@@ -164,4 +165,3 @@ export const buildScheduleMap = (
 
   return map
 }
-
