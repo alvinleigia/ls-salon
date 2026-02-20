@@ -5,6 +5,11 @@ import {
   AppointmentStatus,
   InventoryCategoryStatus,
   InventoryProductStatus,
+  LeaveDefinitionAllowedUsers,
+  LeaveDefinitionStatus,
+  LeaveDefinitionType,
+  LeaveGroupAssignmentMode,
+  LeaveGroupStatus,
   PurchaseOrderStatus,
   Role,
   ServiceType,
@@ -27,6 +32,7 @@ const seedGroupValues = [
   "serviceCatalog",
   "inventoryCatalog",
   "purchases",
+  "leaves",
   "shifts",
   "appointments",
   "coupons",
@@ -254,6 +260,158 @@ const shiftTemplateSeeds = [
     breaks: [{ startTime: "16:00", endTime: "16:30", sortOrder: 0 }],
   },
 ]
+
+const leaveDefinitionSeeds = [
+  {
+    code: "PAID",
+    name: "Paid Leave",
+    leaveType: LeaveDefinitionType.PAID,
+    allowedUsers: LeaveDefinitionAllowedUsers.ALL,
+    minDaysPerRequest: 1,
+    maxDaysPerRequest: 15,
+    allowWithOtherLeaves: true,
+    priorEntryAllowed: true,
+    noticeDays: 1,
+    allowCarryForward: true,
+    weekOffSingleSideAllowed: true,
+    weekOffBothSideAllowed: true,
+    holidaySingleSideAllowed: true,
+    holidayBothSideAllowed: true,
+    maxConsecutiveDays: 10,
+    maxPendingRequests: 2,
+    status: LeaveDefinitionStatus.ACTIVE,
+    sortOrder: 1,
+    blockedCodes: ["LAYOFF"],
+  },
+  {
+    code: "LAYOFF",
+    name: "Lay Off",
+    leaveType: LeaveDefinitionType.LAY_OFF,
+    allowedUsers: LeaveDefinitionAllowedUsers.ALL,
+    minDaysPerRequest: 1,
+    maxDaysPerRequest: 30,
+    allowWithOtherLeaves: false,
+    priorEntryAllowed: false,
+    noticeDays: 0,
+    allowCarryForward: false,
+    weekOffSingleSideAllowed: true,
+    weekOffBothSideAllowed: false,
+    holidaySingleSideAllowed: true,
+    holidayBothSideAllowed: false,
+    maxConsecutiveDays: 20,
+    maxPendingRequests: 1,
+    status: LeaveDefinitionStatus.ACTIVE,
+    sortOrder: 2,
+    blockedCodes: ["PAID", "COMP"],
+  },
+  {
+    code: "UNPAID",
+    name: "Unpaid Leave",
+    leaveType: LeaveDefinitionType.UNPAID,
+    allowedUsers: LeaveDefinitionAllowedUsers.ALL,
+    minDaysPerRequest: 1,
+    maxDaysPerRequest: 30,
+    allowWithOtherLeaves: true,
+    priorEntryAllowed: true,
+    noticeDays: 0,
+    allowCarryForward: false,
+    weekOffSingleSideAllowed: true,
+    weekOffBothSideAllowed: true,
+    holidaySingleSideAllowed: true,
+    holidayBothSideAllowed: true,
+    maxConsecutiveDays: 30,
+    maxPendingRequests: 3,
+    status: LeaveDefinitionStatus.ACTIVE,
+    sortOrder: 3,
+    blockedCodes: [],
+  },
+  {
+    code: "RESTRICTED",
+    name: "Restricted Holiday",
+    leaveType: LeaveDefinitionType.RESTRICTED,
+    allowedUsers: LeaveDefinitionAllowedUsers.ALL,
+    minDaysPerRequest: 1,
+    maxDaysPerRequest: 2,
+    allowWithOtherLeaves: true,
+    priorEntryAllowed: false,
+    noticeDays: 3,
+    allowCarryForward: false,
+    weekOffSingleSideAllowed: false,
+    weekOffBothSideAllowed: false,
+    holidaySingleSideAllowed: false,
+    holidayBothSideAllowed: false,
+    maxConsecutiveDays: 2,
+    maxPendingRequests: 2,
+    status: LeaveDefinitionStatus.ACTIVE,
+    sortOrder: 4,
+    blockedCodes: [],
+  },
+  {
+    code: "COMP",
+    name: "Compensatory Off",
+    leaveType: LeaveDefinitionType.COMPENSATORY,
+    allowedUsers: LeaveDefinitionAllowedUsers.ALL,
+    minDaysPerRequest: 1,
+    maxDaysPerRequest: 3,
+    allowWithOtherLeaves: false,
+    priorEntryAllowed: true,
+    noticeDays: 0,
+    allowCarryForward: false,
+    weekOffSingleSideAllowed: false,
+    weekOffBothSideAllowed: false,
+    holidaySingleSideAllowed: false,
+    holidayBothSideAllowed: false,
+    maxConsecutiveDays: 3,
+    maxPendingRequests: 2,
+    status: LeaveDefinitionStatus.ACTIVE,
+    sortOrder: 5,
+    blockedCodes: ["LAYOFF"],
+  },
+  {
+    code: "TOD",
+    name: "Tour / On Duty",
+    leaveType: LeaveDefinitionType.TOUR_ON_DUTY,
+    allowedUsers: LeaveDefinitionAllowedUsers.ALL,
+    minDaysPerRequest: 1,
+    maxDaysPerRequest: 20,
+    allowWithOtherLeaves: false,
+    priorEntryAllowed: true,
+    noticeDays: 2,
+    allowCarryForward: false,
+    weekOffSingleSideAllowed: true,
+    weekOffBothSideAllowed: false,
+    holidaySingleSideAllowed: true,
+    holidayBothSideAllowed: false,
+    maxConsecutiveDays: 15,
+    maxPendingRequests: 2,
+    status: LeaveDefinitionStatus.ACTIVE,
+    sortOrder: 6,
+    blockedCodes: [],
+  },
+] as const
+
+const leaveGroupSeeds = [
+  {
+    code: "DEFAULT_ALL",
+    name: "Default Staff Leave Group",
+    description: "Baseline leave policy for all active staff.",
+    assignmentMode: LeaveGroupAssignmentMode.ALL_STAFF,
+    status: LeaveGroupStatus.ACTIVE,
+    sortOrder: 1,
+    leaveCodes: ["PAID", "UNPAID", "RESTRICTED", "COMP", "TOD"],
+    staffCount: 0,
+  },
+  {
+    code: "FIELD_TEAM",
+    name: "Field Team Leave Group",
+    description: "Leave policy for selected field staff members.",
+    assignmentMode: LeaveGroupAssignmentMode.SELECTED_STAFF,
+    status: LeaveGroupStatus.ACTIVE,
+    sortOrder: 2,
+    leaveCodes: ["LAYOFF", "UNPAID", "TOD"],
+    staffCount: 2,
+  },
+] as const
 
 const ensureAuthorized = async () => {
   const session = await auth()
@@ -1019,6 +1177,145 @@ const seedShifts = async () => {
   return { count: shiftTemplateSeeds.length + 2 }
 }
 
+const seedLeaves = async () => {
+  const definitionIdByCode = new Map<string, string>()
+  for (const item of leaveDefinitionSeeds) {
+    const row = await prisma.leaveDefinition.upsert({
+      where: { code: item.code },
+      update: {
+        name: item.name,
+        leaveType: item.leaveType,
+        allowedUsers: item.allowedUsers,
+        minDaysPerRequest: item.minDaysPerRequest,
+        maxDaysPerRequest: item.maxDaysPerRequest,
+        allowWithOtherLeaves: item.allowWithOtherLeaves,
+        priorEntryAllowed: item.priorEntryAllowed,
+        noticeDays: item.noticeDays,
+        allowCarryForward: item.allowCarryForward,
+        weekOffSingleSideAllowed: item.weekOffSingleSideAllowed,
+        weekOffBothSideAllowed: item.weekOffBothSideAllowed,
+        holidaySingleSideAllowed: item.holidaySingleSideAllowed,
+        holidayBothSideAllowed: item.holidayBothSideAllowed,
+        maxConsecutiveDays: item.maxConsecutiveDays,
+        maxPendingRequests: item.maxPendingRequests,
+        status: item.status,
+        sortOrder: item.sortOrder,
+      },
+      create: {
+        code: item.code,
+        name: item.name,
+        leaveType: item.leaveType,
+        allowedUsers: item.allowedUsers,
+        minDaysPerRequest: item.minDaysPerRequest,
+        maxDaysPerRequest: item.maxDaysPerRequest,
+        allowWithOtherLeaves: item.allowWithOtherLeaves,
+        priorEntryAllowed: item.priorEntryAllowed,
+        noticeDays: item.noticeDays,
+        allowCarryForward: item.allowCarryForward,
+        weekOffSingleSideAllowed: item.weekOffSingleSideAllowed,
+        weekOffBothSideAllowed: item.weekOffBothSideAllowed,
+        holidaySingleSideAllowed: item.holidaySingleSideAllowed,
+        holidayBothSideAllowed: item.holidayBothSideAllowed,
+        maxConsecutiveDays: item.maxConsecutiveDays,
+        maxPendingRequests: item.maxPendingRequests,
+        status: item.status,
+        sortOrder: item.sortOrder,
+      },
+    })
+    definitionIdByCode.set(item.code, row.id)
+  }
+
+  const definitionIds = Array.from(definitionIdByCode.values())
+  if (definitionIds.length > 0) {
+    await prisma.leaveDefinitionNonClubbable.deleteMany({
+      where: { leaveDefinitionId: { in: definitionIds } },
+    })
+    const nonClubbables = leaveDefinitionSeeds.flatMap((item) =>
+      item.blockedCodes
+        .map((code) => {
+          const leaveDefinitionId = definitionIdByCode.get(item.code)
+          const blockedLeaveId = definitionIdByCode.get(code)
+          if (!leaveDefinitionId || !blockedLeaveId) return null
+          return { leaveDefinitionId, blockedLeaveId }
+        })
+        .filter(
+          (entry): entry is { leaveDefinitionId: string; blockedLeaveId: string } =>
+            Boolean(entry)
+        )
+    )
+    if (nonClubbables.length > 0) {
+      await prisma.leaveDefinitionNonClubbable.createMany({
+        data: nonClubbables,
+        skipDuplicates: true,
+      })
+    }
+  }
+
+  const staffProfiles = await prisma.staffProfile.findMany({
+    where: {
+      user: {
+        role: Role.STAFF,
+        email: { in: seededUsers.filter((user) => user.role === Role.STAFF).map((user) => user.email) },
+      },
+    },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+  })
+
+  for (const group of leaveGroupSeeds) {
+    const leaveDefinitionIds = group.leaveCodes
+      .map((code) => definitionIdByCode.get(code))
+      .filter((id): id is string => Boolean(id))
+    const staffProfileIds =
+      group.assignmentMode === LeaveGroupAssignmentMode.SELECTED_STAFF
+        ? staffProfiles.slice(0, group.staffCount).map((item) => item.id)
+        : []
+
+    await prisma.leaveGroup.upsert({
+      where: { code: group.code },
+      update: {
+        name: group.name,
+        description: group.description,
+        assignmentMode: group.assignmentMode,
+        status: group.status,
+        sortOrder: group.sortOrder,
+        leaves: {
+          deleteMany: {},
+          create: leaveDefinitionIds.map((leaveDefinitionId) => ({
+            leaveDefinitionId,
+          })),
+        },
+        staffAssignments: {
+          deleteMany: {},
+          create: staffProfileIds.map((staffProfileId) => ({
+            staffProfileId,
+          })),
+        },
+      },
+      create: {
+        code: group.code,
+        name: group.name,
+        description: group.description,
+        assignmentMode: group.assignmentMode,
+        status: group.status,
+        sortOrder: group.sortOrder,
+        leaves: {
+          create: leaveDefinitionIds.map((leaveDefinitionId) => ({
+            leaveDefinitionId,
+          })),
+        },
+        staffAssignments: {
+          create: staffProfileIds.map((staffProfileId) => ({
+            staffProfileId,
+          })),
+        },
+      },
+    })
+  }
+
+  return { count: leaveDefinitionSeeds.length + leaveGroupSeeds.length }
+}
+
 const clearData = async () => {
   const adminUsers = await prisma.user.findMany({
     where: { role: Role.ADMIN },
@@ -1527,6 +1824,7 @@ export async function POST(request: Request) {
     serviceCatalog: ["taxes", "users"],
     inventoryCatalog: ["taxes"],
     purchases: ["inventoryCatalog"],
+    leaves: ["users"],
     shifts: ["users"],
     appointments: ["users", "serviceCatalog", "shifts"],
     coupons: [],
@@ -1553,6 +1851,8 @@ export async function POST(request: Request) {
       summary.inventoryCatalog = (await seedInventoryCatalog()).count
     } else if (group === "purchases") {
       summary.purchases = (await seedPurchases()).count
+    } else if (group === "leaves") {
+      summary.leaves = (await seedLeaves()).count
     } else if (group === "shifts") {
       summary.shifts = (await seedShifts()).count
     } else if (group === "appointments") {

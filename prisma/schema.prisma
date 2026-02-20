@@ -5,7 +5,8 @@
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client-js"
+  engineType = "client"
 }
 
 datasource db {
@@ -158,6 +159,36 @@ enum PurchaseOrderStatus {
   CANCELED
 }
 
+enum LeaveDefinitionType {
+  PAID
+  LAY_OFF
+  UNPAID
+  RESTRICTED
+  COMPENSATORY
+  TOUR_ON_DUTY
+}
+
+enum LeaveDefinitionAllowedUsers {
+  MALE
+  FEMALE
+  ALL
+}
+
+enum LeaveDefinitionStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum LeaveGroupAssignmentMode {
+  ALL_STAFF
+  SELECTED_STAFF
+}
+
+enum LeaveGroupStatus {
+  ACTIVE
+  INACTIVE
+}
+
 enum StockMovementType {
   PURCHASE_RECEIPT
   ADJUSTMENT_ADD
@@ -210,6 +241,96 @@ model ServiceCategory {
 
   @@index([status])
   @@index([sortOrder])
+}
+
+model LeaveDefinition {
+  id                 String                     @id @default(cuid())
+  code               String                     @unique
+  name               String
+  leaveType          LeaveDefinitionType
+  allowedUsers       LeaveDefinitionAllowedUsers @default(ALL)
+  minDaysPerRequest  Int                        @default(1)
+  maxDaysPerRequest  Int                        @default(30)
+  allowWithOtherLeaves Boolean                  @default(true)
+  priorEntryAllowed  Boolean                    @default(false)
+  noticeDays         Int                        @default(0)
+  allowCarryForward  Boolean                    @default(false)
+  weekOffSingleSideAllowed Boolean              @default(true)
+  weekOffBothSideAllowed Boolean                @default(true)
+  holidaySingleSideAllowed Boolean              @default(true)
+  holidayBothSideAllowed Boolean                @default(true)
+  maxConsecutiveDays Int                        @default(30)
+  maxPendingRequests Int                        @default(3)
+  status             LeaveDefinitionStatus      @default(ACTIVE)
+  sortOrder          Int                        @default(0)
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  nonClubbableWithFrom LeaveDefinitionNonClubbable[] @relation("LeaveDefinitionNonClubbableFrom")
+  nonClubbableWithTo LeaveDefinitionNonClubbable[] @relation("LeaveDefinitionNonClubbableTo")
+  leaveGroups        LeaveGroupLeave[]
+
+  @@unique([name])
+  @@index([status])
+  @@index([leaveType])
+  @@index([sortOrder])
+}
+
+model LeaveGroup {
+  id             String                   @id @default(cuid())
+  code           String                   @unique
+  name           String
+  description    String?
+  assignmentMode LeaveGroupAssignmentMode @default(ALL_STAFF)
+  status         LeaveGroupStatus         @default(ACTIVE)
+  sortOrder      Int                      @default(0)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  leaves         LeaveGroupLeave[]
+  staffAssignments LeaveGroupStaffAssignment[]
+
+  @@unique([name])
+  @@index([status])
+  @@index([assignmentMode])
+  @@index([sortOrder])
+}
+
+model LeaveGroupLeave {
+  id                String          @id @default(cuid())
+  leaveGroupId      String
+  leaveDefinitionId String
+  createdAt         DateTime        @default(now())
+  leaveGroup        LeaveGroup      @relation(fields: [leaveGroupId], references: [id], onDelete: Cascade)
+  leaveDefinition   LeaveDefinition @relation(fields: [leaveDefinitionId], references: [id], onDelete: Restrict)
+
+  @@unique([leaveGroupId, leaveDefinitionId])
+  @@index([leaveGroupId])
+  @@index([leaveDefinitionId])
+}
+
+model LeaveGroupStaffAssignment {
+  id             String      @id @default(cuid())
+  leaveGroupId   String
+  staffProfileId String
+  createdAt      DateTime    @default(now())
+  leaveGroup     LeaveGroup  @relation(fields: [leaveGroupId], references: [id], onDelete: Cascade)
+  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([leaveGroupId, staffProfileId])
+  @@index([leaveGroupId])
+  @@index([staffProfileId])
+}
+
+model LeaveDefinitionNonClubbable {
+  id                String          @id @default(cuid())
+  leaveDefinitionId String
+  blockedLeaveId    String
+  leaveDefinition   LeaveDefinition @relation("LeaveDefinitionNonClubbableFrom", fields: [leaveDefinitionId], references: [id], onDelete: Cascade)
+  blockedLeave      LeaveDefinition @relation("LeaveDefinitionNonClubbableTo", fields: [blockedLeaveId], references: [id], onDelete: Cascade)
+  createdAt         DateTime        @default(now())
+
+  @@unique([leaveDefinitionId, blockedLeaveId], map: "leave_def_nonclubbable_pair_key")
+  @@index([leaveDefinitionId])
+  @@index([blockedLeaveId])
 }
 
 model Service {
@@ -530,6 +651,7 @@ model StaffProfile {
   documents          StaffDocument[]
   scheduleAssignments StaffScheduleAssignment[]
   shiftOverrides     StaffShiftOverride[]
+  leaveGroupAssignments LeaveGroupStaffAssignment[]
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

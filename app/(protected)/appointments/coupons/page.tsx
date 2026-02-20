@@ -7,7 +7,7 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, PlusIcon } from "lucide-react"
+import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { DataTable, DataTablePagination, DataTableToolbar } from "@/components/data-table"
@@ -15,6 +15,12 @@ import { FormField } from "@/components/form-field"
 import { SearchableMultiSelect } from "@/components/searchable-multi-select"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import { formatCurrencyFromCents } from "@/lib/formatting"
@@ -220,7 +226,7 @@ export default function AppointmentCouponsPage() {
     setFormOpen(true)
   }
 
-  const openEdit = (coupon: CouponRow) => {
+  const openEdit = React.useCallback((coupon: CouponRow) => {
     setEditing(coupon)
     setFormValues({
       code: coupon.code,
@@ -241,7 +247,7 @@ export default function AppointmentCouponsPage() {
     })
     clearErrors()
     setFormOpen(true)
-  }
+  }, [clearErrors])
 
   const save = async () => {
     setSaving(true)
@@ -279,7 +285,7 @@ export default function AppointmentCouponsPage() {
     await loadCoupons()
   }
 
-  const removeCoupon = async (coupon: CouponRow) => {
+  const removeCoupon = React.useCallback(async (coupon: CouponRow) => {
     const response = await fetch(`/api/appointments/coupons/${coupon.id}`, { method: "DELETE" })
     if (!response.ok) {
       toast.error("Unable to delete coupon.")
@@ -287,7 +293,7 @@ export default function AppointmentCouponsPage() {
     }
     toast.success("Coupon deleted.")
     await loadCoupons()
-  }
+  }, [loadCoupons])
 
   const columns = React.useMemo<ColumnDef<CouponRow>[]>(
     () => [
@@ -365,18 +371,26 @@ export default function AppointmentCouponsPage() {
         meta: { label: "Actions" },
         header: "",
         cell: ({ row }) => (
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={() => openEdit(row.original)}>
-              Edit
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => void removeCoupon(row.original)}>
-              Delete
-            </Button>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="ghost">
+                <MoreHorizontalIcon className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => openEdit(row.original)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive"
+                onSelect={() => void removeCoupon(row.original)}
+              >
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ),
       },
     ],
-    [formatMoney]
+    [formatMoney, openEdit, removeCoupon]
   )
 
   const table = useReactTable({

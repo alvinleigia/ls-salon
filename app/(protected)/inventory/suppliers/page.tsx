@@ -7,13 +7,19 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, PlusIcon } from "lucide-react"
+import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { DataTable, DataTablePagination, DataTableToolbar } from "@/components/data-table"
 import { FormField } from "@/components/form-field"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { COUNTRY_OPTIONS, getStateOptionsByCountry } from "@/lib/constants/countries"
 import { useFormErrors } from "@/hooks/use-form-errors"
@@ -142,6 +148,27 @@ export default function InventorySuppliersPage() {
     await loadItems()
   }, [loadItems])
 
+  const openEdit = React.useCallback((item: SupplierRow) => {
+    setEditing(item)
+    setFormValues({
+      name: item.name,
+      contactPerson: item.contactPerson ?? "",
+      email: item.email ?? "",
+      phone: item.phone ?? "",
+      isTaxRegistered: item.isTaxRegistered ?? false,
+      taxRegistrationType: item.taxRegistrationType ?? "",
+      taxRegistrationNumber: item.taxRegistrationNumber ?? "",
+      leadTimeDays: item.leadTimeDays,
+      city: item.city ?? "",
+      state: item.state ?? "",
+      country: item.country ?? "",
+      notes: "",
+      status: item.status,
+    })
+    clearErrors()
+    setFormOpen(true)
+  }, [clearErrors])
+
   const columns = React.useMemo<ColumnDef<SupplierRow>[]>(
     () => [
       {
@@ -180,41 +207,26 @@ export default function InventorySuppliersPage() {
         meta: { label: "Actions" },
         header: "",
         cell: ({ row }) => (
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setEditing(row.original)
-                setFormValues({
-                  name: row.original.name,
-                  contactPerson: row.original.contactPerson ?? "",
-                  email: row.original.email ?? "",
-                  phone: row.original.phone ?? "",
-                  isTaxRegistered: row.original.isTaxRegistered ?? false,
-                  taxRegistrationType: row.original.taxRegistrationType ?? "",
-                  taxRegistrationNumber: row.original.taxRegistrationNumber ?? "",
-                  leadTimeDays: row.original.leadTimeDays,
-                  city: row.original.city ?? "",
-                  state: row.original.state ?? "",
-                  country: row.original.country ?? "",
-                  notes: "",
-                  status: row.original.status,
-                })
-                clearErrors()
-                setFormOpen(true)
-              }}
-            >
-              Edit
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => void removeItem(row.original)}>
-              Delete
-            </Button>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="ghost">
+                <MoreHorizontalIcon className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => openEdit(row.original)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive"
+                onSelect={() => void removeItem(row.original)}
+              >
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ),
       },
     ],
-    [clearErrors, removeItem]
+    [openEdit, removeItem]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library

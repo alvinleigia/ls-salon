@@ -102,6 +102,50 @@ export function AppSidebar() {
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
+                    data-active={pathname.startsWith("/leaves")}
+                  >
+                    <Link href="/leaves" className="flex w-full items-center">
+                      <CalendarClockIcon className="h-4 w-4" />
+                      <span>Leaves</span>
+                      <span
+                        className={`ml-auto h-2 w-2 rounded-full ${
+                          pathname.startsWith("/leaves")
+                            ? "bg-sidebar-primary"
+                            : "bg-transparent"
+                        }`}
+                      />
+                    </Link>
+                  </SidebarMenuButton>
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/leaves"}
+                      >
+                        <Link href="/leaves">
+                          <CalendarClockIcon className="h-4 w-4" />
+                          <span>Definitions</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname.startsWith("/leaves/groups")}
+                      >
+                        <Link href="/leaves/groups">
+                          <UsersIcon className="h-4 w-4" />
+                          <span>Groups</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  </SidebarMenuSub>
+                </SidebarMenuItem>
+              ) : null}
+              {canManageUsers(role ?? null) ? (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
                     data-active={pathname.startsWith("/reports")}
                   >
                     <Link href="/reports/coupon-usage" className="flex w-full items-center">

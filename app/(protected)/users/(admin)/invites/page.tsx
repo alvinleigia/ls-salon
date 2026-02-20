@@ -8,7 +8,7 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from "lucide-react"
+import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, MoreHorizontalIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -20,6 +20,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   DataTable,
   DataTablePagination,
@@ -145,14 +151,14 @@ export default function InvitesPage() {
     await loadInvites()
   }
 
-  const copyInviteLink = async (invite: InviteRow) => {
+  const copyInviteLink = React.useCallback(async (invite: InviteRow) => {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
     const link = `${appUrl}/auth/invite?token=${invite.token}`
     await navigator.clipboard.writeText(link)
     toast.success("Invite link copied.")
-  }
+  }, [])
 
-  const revokeInvite = async (inviteId: string) => {
+  const revokeInvite = React.useCallback(async (inviteId: string) => {
     const response = await fetch(`/api/invites/${inviteId}`, { method: "DELETE" })
     if (!response.ok) {
       toast.error("Unable to revoke invite.")
@@ -160,7 +166,7 @@ export default function InvitesPage() {
     }
     toast.success("Invite revoked.")
     setInvites((prev) => prev.filter((invite) => invite.id !== inviteId))
-  }
+  }, [])
 
   const columns = React.useMemo<ColumnDef<InviteRow>[]>(
     () => [
@@ -239,24 +245,24 @@ export default function InvitesPage() {
         header: "",
         enableHiding: false,
         cell: ({ row }) => (
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => copyInviteLink(row.original)}
-              disabled={Boolean(row.original.acceptedAt)}
-            >
-              Copy link
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => revokeInvite(row.original.id)}
-              disabled={Boolean(row.original.acceptedAt)}
-            >
-              Revoke
-            </Button>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="ghost" disabled={Boolean(row.original.acceptedAt)}>
+                <MoreHorizontalIcon className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => void copyInviteLink(row.original)}>
+                Copy invite link
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive"
+                onSelect={() => void revokeInvite(row.original.id)}
+              >
+                Revoke invite
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ),
       },
     ],

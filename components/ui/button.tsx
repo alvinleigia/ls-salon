@@ -123,6 +123,21 @@ function Button({
   const plainText = derivePlainTextChildren(children)
   const AutoIcon = autoIcon && plainText ? iconForLabel(plainText) : null
 
+  if (asChild) {
+    return (
+      <Comp
+        data-slot="button"
+        data-variant={variant}
+        data-size={size}
+        aria-busy={loading || undefined}
+        className={cn(buttonVariants({ variant, size, className }))}
+        {...props}
+      >
+        {children}
+      </Comp>
+    )
+  }
+
   return (
     <Comp
       data-slot="button"
@@ -133,11 +148,12 @@ function Button({
       disabled={loading || disabled}
       {...props}
     >
-      {loading && !asChild ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-      {!loading && !asChild && AutoIcon ? <AutoIcon className="h-4 w-4" /> : null}
+      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+      {!loading && AutoIcon ? <AutoIcon className="h-4 w-4" /> : null}
       {loading && loadingText ? loadingText : children}
     </Comp>
   )
 }
 
 export { Button, buttonVariants }
+

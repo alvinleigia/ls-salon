@@ -7,13 +7,19 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, PlusIcon } from "lucide-react"
+import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { DataTable, DataTablePagination, DataTableToolbar } from "@/components/data-table"
 import { FormField } from "@/components/form-field"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import type { ListResponse } from "@/types/api"
@@ -88,7 +94,7 @@ export default function SettingsTaxesPage() {
     setFormOpen(true)
   }
 
-  const openEdit = (tax: TaxRow) => {
+  const openEdit = React.useCallback((tax: TaxRow) => {
     setEditing(tax)
     setFormValues({
       name: tax.name,
@@ -98,7 +104,7 @@ export default function SettingsTaxesPage() {
     })
     clearErrors()
     setFormOpen(true)
-  }
+  }, [clearErrors])
 
   const save = async () => {
     setSaving(true)
@@ -129,7 +135,7 @@ export default function SettingsTaxesPage() {
     await loadTaxes()
   }
 
-  const removeTax = async (tax: TaxRow) => {
+  const removeTax = React.useCallback(async (tax: TaxRow) => {
     const response = await fetch(`/api/settings/taxes/${tax.id}`, { method: "DELETE" })
     if (!response.ok) {
       const data = (await response.json().catch(() => ({}))) as { error?: string }
@@ -138,7 +144,7 @@ export default function SettingsTaxesPage() {
     }
     toast.success("Tax deleted.")
     await loadTaxes()
-  }
+  }, [loadTaxes])
 
   const columns = React.useMemo<ColumnDef<TaxRow>[]>(
     () => [
@@ -174,18 +180,26 @@ export default function SettingsTaxesPage() {
         meta: { label: "Actions" },
         header: "",
         cell: ({ row }) => (
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={() => openEdit(row.original)}>
-              Edit
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => void removeTax(row.original)}>
-              Delete
-            </Button>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="ghost">
+                <MoreHorizontalIcon className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => openEdit(row.original)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive"
+                onSelect={() => void removeTax(row.original)}
+              >
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ),
       },
     ],
-    []
+    [openEdit, removeTax]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library

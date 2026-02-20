@@ -1,0 +1,3 @@
+-- No-op migration.
+-- This migration was an intermediate rename artifact.
+-- The leave definition schema is established in 20260220090000_leave_definitions_phase1.

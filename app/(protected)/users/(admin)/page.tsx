@@ -352,15 +352,15 @@ export default function UsersPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem
-                onSelect={() => window.location.assign(`/users/${row.original.id}`)}
-              >
-                View
-              </DropdownMenuItem>
-              <DropdownMenuItem
                 onSelect={() => startEdit(row.original)}
                 disabled={!canEditUser(row.original)}
               >
                 Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => window.location.assign(`/users/${row.original.id}`)}
+              >
+                View details
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

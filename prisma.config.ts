@@ -9,6 +9,7 @@ export default defineConfig({
   migrations: {
     path: "prisma/migrations",
   },
+  seed: "npm run bootstrap:admin",
   engine: "classic",
   datasource: {
     url: env("DATABASE_URL"),

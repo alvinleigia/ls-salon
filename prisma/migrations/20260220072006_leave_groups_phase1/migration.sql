@@ -1,0 +1,2 @@
+-- No-op migration.
+-- This migration was generated from transient index-name drift during local development.

@@ -1,0 +1,3 @@
+-- No-op migration.
+-- This migration was previously generated as a transient index-rename artifact.
+-- Leave definition tables are created in 20260220090000_leave_definitions_phase1.

@@ -7,13 +7,19 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, PlusIcon } from "lucide-react"
+import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { DataTable, DataTablePagination, DataTableToolbar } from "@/components/data-table"
 import { FormField } from "@/components/form-field"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import type { ListResponse } from "@/types/api"
@@ -122,6 +128,18 @@ export default function InventoryCategoriesPage() {
     await loadItems()
   }, [loadItems])
 
+  const openEdit = React.useCallback((item: InventoryCategoryRow) => {
+    setEditing(item)
+    setFormValues({
+      name: item.name,
+      description: item.description ?? "",
+      status: item.status,
+      sortOrder: item.sortOrder,
+    })
+    clearErrors()
+    setFormOpen(true)
+  }, [clearErrors])
+
   const columns = React.useMemo<ColumnDef<InventoryCategoryRow>[]>(
     () => [
       {
@@ -158,32 +176,26 @@ export default function InventoryCategoriesPage() {
         meta: { label: "Actions" },
         header: "",
         cell: ({ row }) => (
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setEditing(row.original)
-                setFormValues({
-                  name: row.original.name,
-                  description: row.original.description ?? "",
-                  status: row.original.status,
-                  sortOrder: row.original.sortOrder,
-                })
-                clearErrors()
-                setFormOpen(true)
-              }}
-            >
-              Edit
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => void removeItem(row.original)}>
-              Delete
-            </Button>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="ghost">
+                <MoreHorizontalIcon className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => openEdit(row.original)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive"
+                onSelect={() => void removeItem(row.original)}
+              >
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ),
       },
     ],
-    [clearErrors, removeItem]
+    [openEdit, removeItem]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library

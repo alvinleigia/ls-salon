@@ -17,6 +17,18 @@ export const serviceTypeSchema = z.enum(["STANDARD", "PACKAGE"])
 export const taxModeSchema = z.enum(["EXCLUSIVE", "INCLUSIVE"])
 export const inventoryCategoryStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
 export const supplierStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
+export const leaveDefinitionTypeSchema = z.enum([
+  "PAID",
+  "LAY_OFF",
+  "UNPAID",
+  "RESTRICTED",
+  "COMPENSATORY",
+  "TOUR_ON_DUTY",
+])
+export const leaveDefinitionAllowedUsersSchema = z.enum(["MALE", "FEMALE", "ALL"])
+export const leaveDefinitionStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
+export const leaveGroupAssignmentModeSchema = z.enum(["ALL_STAFF", "SELECTED_STAFF"])
+export const leaveGroupStatusSchema = z.enum(["ACTIVE", "INACTIVE"])
 export const taxRegistrationTypeSchema = z.enum([
   "VAT",
   "GST",
@@ -838,3 +850,157 @@ export const appointmentResolveSchema = z
   })
 
 export type AppointmentResolveInput = z.infer<typeof appointmentResolveSchema>
+
+const leaveDefinitionBaseSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(1)
+    .max(20)
+    .regex(/^[A-Za-z0-9_-]+$/),
+  name: z.string().trim().min(2).max(120),
+  leaveType: leaveDefinitionTypeSchema,
+  allowedUsers: leaveDefinitionAllowedUsersSchema.default("ALL"),
+  minDaysPerRequest: z.coerce.number().int().min(0).max(365),
+  maxDaysPerRequest: z.coerce.number().int().min(1).max(365),
+  allowWithOtherLeaves: z.boolean().default(true),
+  priorEntryAllowed: z.boolean().default(false),
+  noticeDays: z.coerce.number().int().min(0).max(365).default(0),
+  allowCarryForward: z.boolean().default(false),
+  weekOffSingleSideAllowed: z.boolean().default(true),
+  weekOffBothSideAllowed: z.boolean().default(true),
+  holidaySingleSideAllowed: z.boolean().default(true),
+  holidayBothSideAllowed: z.boolean().default(true),
+  maxConsecutiveDays: z.coerce.number().int().min(1).max(365),
+  maxPendingRequests: z.coerce.number().int().min(1).max(50),
+  status: leaveDefinitionStatusSchema.default("ACTIVE"),
+  sortOrder: z.coerce.number().int().min(0).max(9999).default(0),
+  nonClubbableWithIds: z.array(z.string().trim().min(1)).optional().default([]),
+})
+
+export const createLeaveDefinitionSchema = leaveDefinitionBaseSchema.superRefine(
+  (value, ctx) => {
+    if (value.minDaysPerRequest > value.maxDaysPerRequest) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Minimum days must be less than or equal to maximum days.",
+        path: ["minDaysPerRequest"],
+      })
+    }
+    if (value.maxConsecutiveDays > value.maxDaysPerRequest) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Max consecutive days cannot be more than max days per request.",
+        path: ["maxConsecutiveDays"],
+      })
+    }
+    if (
+      value.nonClubbableWithIds.length !==
+      new Set(value.nonClubbableWithIds).size
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Duplicate non-clubbable leave ids are not allowed.",
+        path: ["nonClubbableWithIds"],
+      })
+    }
+  }
+)
+
+export const updateLeaveDefinitionSchema = leaveDefinitionBaseSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required.",
+  })
+  .superRefine((value, ctx) => {
+    if (
+      typeof value.minDaysPerRequest === "number" &&
+      typeof value.maxDaysPerRequest === "number" &&
+      value.minDaysPerRequest > value.maxDaysPerRequest
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Minimum days must be less than or equal to maximum days.",
+        path: ["minDaysPerRequest"],
+      })
+    }
+    if (
+      Array.isArray(value.nonClubbableWithIds) &&
+      value.nonClubbableWithIds.length !==
+        new Set(value.nonClubbableWithIds).size
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Duplicate non-clubbable leave ids are not allowed.",
+        path: ["nonClubbableWithIds"],
+      })
+    }
+  })
+
+export type CreateLeaveDefinitionInput = z.infer<typeof createLeaveDefinitionSchema>
+export type UpdateLeaveDefinitionInput = z.infer<typeof updateLeaveDefinitionSchema>
+
+const leaveGroupBaseSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(1)
+    .max(20)
+    .regex(/^[A-Za-z0-9_-]+$/),
+  name: z.string().trim().min(2).max(120),
+  description: z.string().trim().max(500).optional().or(z.literal("")),
+  assignmentMode: leaveGroupAssignmentModeSchema.default("ALL_STAFF"),
+  status: leaveGroupStatusSchema.default("ACTIVE"),
+  sortOrder: z.coerce.number().int().min(0).max(9999).default(0),
+  leaveDefinitionIds: z.array(z.string().trim().min(1)).min(1),
+  staffIds: z.array(z.string().trim().min(1)).optional().default([]),
+})
+
+export const createLeaveGroupSchema = leaveGroupBaseSchema.superRefine((value, ctx) => {
+  if (value.assignmentMode === "SELECTED_STAFF" && value.staffIds.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Select at least one employee for selective assignment.",
+      path: ["staffIds"],
+    })
+  }
+  if (value.leaveDefinitionIds.length !== new Set(value.leaveDefinitionIds).size) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Duplicate leave definitions are not allowed.",
+      path: ["leaveDefinitionIds"],
+    })
+  }
+})
+
+export const updateLeaveGroupSchema = leaveGroupBaseSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required.",
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.assignmentMode === "SELECTED_STAFF" &&
+      Array.isArray(value.staffIds) &&
+      value.staffIds.length === 0
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Select at least one employee for selective assignment.",
+        path: ["staffIds"],
+      })
+    }
+    if (
+      Array.isArray(value.leaveDefinitionIds) &&
+      value.leaveDefinitionIds.length !== new Set(value.leaveDefinitionIds).size
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Duplicate leave definitions are not allowed.",
+        path: ["leaveDefinitionIds"],
+      })
+    }
+  })
+
+export type CreateLeaveGroupInput = z.infer<typeof createLeaveGroupSchema>
+export type UpdateLeaveGroupInput = z.infer<typeof updateLeaveGroupSchema>

@@ -1,0 +1,3 @@
+-- No-op migration.
+-- The non-clubbable unique index now uses explicit map name `leave_def_nonclubbable_pair_key`.
+-- This avoids Postgres identifier truncation and shadow database rename drift.

@@ -1,0 +1,149 @@
+import { NextResponse } from "next/server"
+import { Prisma } from "@prisma/client"
+import { z } from "zod"
+
+import { auth } from "@/auth"
+import { canManageUsers, type Role } from "@/lib/permissions"
+import { prisma } from "@/lib/prisma"
+import {
+  createLeaveGroupSchema,
+  leaveGroupAssignmentModeSchema,
+  leaveGroupStatusSchema,
+} from "@/lib/validation"
+import type { ListResponse } from "@/types/api"
+import type { LeaveGroupRow } from "@/types/leaves"
+import {
+  leaveGroupSelect,
+  replaceGroupLeaves,
+  replaceGroupStaffAssignments,
+  serializeLeaveGroup,
+} from "../_groups"
+
+const leaveGroupListSchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  q: z.string().trim().max(120).optional(),
+  status: leaveGroupStatusSchema.optional(),
+  assignmentMode: leaveGroupAssignmentModeSchema.optional(),
+  sort: z
+    .enum(["code", "name", "assignmentMode", "status", "sortOrder", "updatedAt", "createdAt"])
+    .default("sortOrder"),
+  order: z.enum(["asc", "desc"]).default("asc"),
+})
+
+export async function GET(request: Request) {
+  const session = await auth()
+  const role = (session?.user as { role?: string })?.role
+  if (!session?.user || !canManageUsers(role as Role)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const parsed = leaveGroupListSchema.safeParse(
+    Object.fromEntries(new URL(request.url).searchParams.entries())
+  )
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid query parameters.", details: parsed.error.flatten() },
+      { status: 400 }
+    )
+  }
+
+  const { page, pageSize, q, status, assignmentMode, sort, order } = parsed.data
+  const where: Prisma.LeaveGroupWhereInput = {
+    ...(status ? { status } : {}),
+    ...(assignmentMode ? { assignmentMode } : {}),
+    ...(q
+      ? {
+          OR: [
+            { code: { contains: q, mode: "insensitive" } },
+            { name: { contains: q, mode: "insensitive" } },
+            { description: { contains: q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  }
+
+  const [total, items] = await prisma.$transaction([
+    prisma.leaveGroup.count({ where }),
+    prisma.leaveGroup.findMany({
+      where,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      orderBy: { [sort]: order },
+      select: leaveGroupSelect,
+    }),
+  ])
+
+  const response: ListResponse<LeaveGroupRow> = {
+    items: items.map(serializeLeaveGroup),
+    page,
+    pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  }
+  return NextResponse.json(response)
+}
+
+export async function POST(request: Request) {
+  const session = await auth()
+  const role = (session?.user as { role?: string })?.role
+  if (!session?.user || !canManageUsers(role as Role)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const payload = await request.json().catch(() => ({}))
+  const parsed = createLeaveGroupSchema.safeParse(payload)
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid input.", details: parsed.error.flatten() },
+      { status: 400 }
+    )
+  }
+
+  const code = parsed.data.code.trim().toUpperCase()
+  const name = parsed.data.name.trim()
+  const description = parsed.data.description?.trim() || null
+  const existing = await prisma.leaveGroup.findFirst({
+    where: { OR: [{ code }, { name }] },
+    select: { id: true, code: true },
+  })
+  if (existing) {
+    return NextResponse.json(
+      { error: existing.code === code ? "Leave group code already exists." : "Leave group name already exists." },
+      { status: 409 }
+    )
+  }
+
+  try {
+    const item = await prisma.$transaction(async (tx) => {
+      const group = await tx.leaveGroup.create({
+        data: {
+          code,
+          name,
+          description,
+          assignmentMode: parsed.data.assignmentMode,
+          status: parsed.data.status,
+          sortOrder: parsed.data.sortOrder,
+        },
+      })
+      await replaceGroupLeaves(tx, group.id, parsed.data.leaveDefinitionIds)
+      await replaceGroupStaffAssignments(
+        tx,
+        group.id,
+        parsed.data.assignmentMode,
+        parsed.data.staffIds
+      )
+      return tx.leaveGroup.findUniqueOrThrow({
+        where: { id: group.id },
+        select: leaveGroupSelect,
+      })
+    })
+
+    return NextResponse.json({ item: serializeLeaveGroup(item) }, { status: 201 })
+  } catch (error) {
+    if (error instanceof Error) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
+    return NextResponse.json({ error: "Unable to create leave group." }, { status: 500 })
+  }
+}
