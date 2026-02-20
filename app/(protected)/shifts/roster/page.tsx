@@ -735,6 +735,9 @@ export default function RosterPage() {
     const handleClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null
       if (!target) return
+      if (target.closest(".e-more-indicator")) return
+      if (target.closest(".e-more-popup-wrapper")) return
+      if (target.closest(".e-quick-popup-wrapper")) return
       if (target.closest(".e-appointment")) return
       const cell = target.closest(".e-work-cells") as HTMLElement | null
       if (!cell) return
