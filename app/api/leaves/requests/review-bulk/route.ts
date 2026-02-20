@@ -55,6 +55,7 @@ export async function POST(request: Request) {
       status: true,
       staffProfile: {
         select: {
+          managerUserId: true,
           user: {
             select: { role: true },
           },
@@ -64,7 +65,11 @@ export async function POST(request: Request) {
   })
   const pendingIds = currentItems
     .filter((item) => item.status === "PENDING")
-    .filter((item) => (role === "MANAGER" ? item.staffProfile.user.role === "STAFF" : true))
+    .filter((item) =>
+      role === "MANAGER"
+        ? item.staffProfile.user.role === "STAFF" && item.staffProfile.managerUserId === reviewer.id
+        : true
+    )
     .map((item) => item.id)
   const skippedIds = requestIds.filter((id) => !pendingIds.includes(id))
 

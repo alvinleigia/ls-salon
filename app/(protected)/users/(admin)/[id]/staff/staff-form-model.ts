@@ -2,6 +2,7 @@ import { toISODate } from "@/lib/date"
 import type { StaffProfileForm, StaffUser } from "@/types/users"
 
 export const emptyStaffProfileForm: StaffProfileForm = {
+  managerUserId: "",
   certifications: [],
   documents: [],
 }
@@ -22,6 +23,7 @@ export const createEmptyStaffCertification = (): StaffProfileForm["certification
 })
 
 export const toStaffProfileForm = (user: StaffUser | null): StaffProfileForm => ({
+  managerUserId: user?.staffProfile?.managerUserId ?? "",
   certifications:
     user?.staffProfile?.certifications?.map((cert) => ({
       id: cert.id,
@@ -40,4 +42,3 @@ export const toStaffProfileForm = (user: StaffUser | null): StaffProfileForm => 
       validTo: doc.validTo ? toISODate(doc.validTo) : "",
     })) ?? [],
 })
-

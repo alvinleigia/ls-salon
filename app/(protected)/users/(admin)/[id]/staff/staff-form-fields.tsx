@@ -3,6 +3,8 @@
 import * as React from "react"
 import { Trash2Icon } from "lucide-react"
 
+import { FormField } from "@/components/form-field"
+import { SearchableSelect } from "@/components/searchable-select"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -19,6 +21,7 @@ type StaffFormFieldsProps = {
   serviceOptions: ServiceOption[]
   selectedIds: string[]
   setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>
+  managerOptions: Array<{ value: string; label: string }>
   query: string
   setQuery: React.Dispatch<React.SetStateAction<string>>
 }
@@ -29,6 +32,7 @@ export function StaffFormFields({
   serviceOptions,
   selectedIds,
   setSelectedIds,
+  managerOptions,
   query,
   setQuery,
 }: StaffFormFieldsProps) {
@@ -70,6 +74,29 @@ export function StaffFormFields({
 
   return (
     <>
+      <div className="rounded-xl border bg-card p-6">
+        <div className="space-y-2">
+          <div className="text-sm font-medium">Reporting manager</div>
+          <p className="text-xs text-muted-foreground">
+            Manager used for leave approvals and reporting hierarchy.
+          </p>
+        </div>
+        <div className="mt-4">
+          <FormField id="manager-user-id" label="Manager">
+            <SearchableSelect
+              id="manager-user-id"
+              value={profile.managerUserId}
+              onChange={(value) =>
+                setProfile((prev) => ({ ...prev, managerUserId: value }))
+              }
+              options={managerOptions}
+              placeholder="Select manager"
+              searchPlaceholder="Search manager..."
+            />
+          </FormField>
+        </div>
+      </div>
+
       <div className="rounded-xl border bg-card p-6">
         <div className="space-y-2">
           <div className="text-sm font-medium">Eligible services</div>

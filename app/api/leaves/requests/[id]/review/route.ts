@@ -61,6 +61,7 @@ export async function PATCH(
       status: true,
       staffProfile: {
         select: {
+          managerUserId: true,
           user: {
             select: { role: true },
           },
@@ -74,6 +75,12 @@ export async function PATCH(
   if (role === "MANAGER" && current.staffProfile.user.role !== "STAFF") {
     return NextResponse.json(
       { error: "Managers can only review staff leave requests." },
+      { status: 403 }
+    )
+  }
+  if (role === "MANAGER" && current.staffProfile.managerUserId !== reviewer.id) {
+    return NextResponse.json(
+      { error: "You can only review requests for your assigned staff." },
       { status: 403 }
     )
   }

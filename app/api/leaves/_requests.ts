@@ -40,10 +40,12 @@ type LeaveRequestWithRelations = {
   }
   staffProfile: {
     id: string
+    managerUserId: string | null
     user: {
       id: string
       name: string | null
       email: string
+      role: "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
     }
   }
   reviewedByUser: {
@@ -420,11 +422,13 @@ export const leaveRequestSelect = {
   staffProfile: {
     select: {
       id: true,
+      managerUserId: true,
       user: {
         select: {
           id: true,
           name: true,
           email: true,
+          role: true,
         },
       },
     },

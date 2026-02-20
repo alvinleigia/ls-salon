@@ -21,9 +21,12 @@ export async function GET() {
     where: { userId: sessionUserId },
     select: { id: true },
   })
-  if (!staffProfile) {
-    return NextResponse.json({ items: [] })
-  }
+  const resolvedStaffProfile =
+    staffProfile ??
+    (await prisma.staffProfile.create({
+      data: { userId: sessionUserId },
+      select: { id: true },
+    }))
 
   const items = await prisma.leaveDefinition.findMany({
     where: {
@@ -38,7 +41,7 @@ export async function GET() {
                 assignmentMode: "SELECTED_STAFF",
                 staffAssignments: {
                   some: {
-                    staffProfileId: staffProfile.id,
+                    staffProfileId: resolvedStaffProfile.id,
                   },
                 },
               },

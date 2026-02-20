@@ -23,6 +23,7 @@ export default function StaffProfilePage() {
   const [saving, setSaving] = React.useState(false)
   const [user, setUser] = React.useState<StaffUser | null>(null)
   const [serviceOptions, setServiceOptions] = React.useState<ServiceOption[]>([])
+  const [managerOptions, setManagerOptions] = React.useState<Array<{ value: string; label: string }>>([])
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [query, setQuery] = React.useState("")
   const [profile, setProfile] = React.useState<StaffProfileForm>(emptyStaffProfileForm)
@@ -32,9 +33,12 @@ export default function StaffProfilePage() {
 
     const load = async () => {
       setLoading(true)
-      const [userRes, servicesRes] = await Promise.all([
+      const [userRes, servicesRes, managersRes] = await Promise.all([
         fetch(`/api/users/${params.id}`, { cache: "no-store" }),
         fetch("/api/services?page=1&pageSize=100&sort=name&order=asc&status=ACTIVE", {
+          cache: "no-store",
+        }),
+        fetch("/api/users?page=1&pageSize=100&sort=name&order=asc&role=MANAGER&status=ACTIVE", {
           cache: "no-store",
         }),
       ])
@@ -60,6 +64,21 @@ export default function StaffProfilePage() {
         setServiceOptions([])
       }
 
+      if (managersRes.ok) {
+        const data = (await managersRes.json()) as {
+          items?: { id: string; name: string | null; email: string }[]
+        }
+        setManagerOptions([
+          { value: "", label: "No manager assigned" },
+          ...(data.items ?? []).map((manager) => ({
+            value: manager.id,
+            label: manager.name?.trim() || manager.email,
+          })),
+        ])
+      } else {
+        setManagerOptions([{ value: "", label: "No manager assigned" }])
+      }
+
       setLoading(false)
     }
 
@@ -76,6 +95,7 @@ export default function StaffProfilePage() {
       body: JSON.stringify({
         eligibleServiceIds: selectedIds,
         staffProfile: {
+          managerUserId: profile.managerUserId,
           documents: profile.documents.map((doc) => ({
             id: doc.id,
             type: doc.type,
@@ -160,6 +180,7 @@ export default function StaffProfilePage() {
         serviceOptions={serviceOptions}
         selectedIds={selectedIds}
         setSelectedIds={setSelectedIds}
+        managerOptions={managerOptions}
         query={query}
         setQuery={setQuery}
       />

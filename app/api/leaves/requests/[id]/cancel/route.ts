@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
-import { canManageUsers, type Role } from "@/lib/permissions"
+import type { Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import { cancelLeaveRequestSchema } from "@/lib/validation"
 import { notifyLeaveCanceled } from "../../../_notifications"
@@ -18,9 +18,10 @@ export async function PATCH(
   const session = await auth()
   const role = (session?.user as { role?: string })?.role as Role | undefined
   const sessionUserId = (session?.user as { id?: string })?.id
-  const isManager = canManageUsers(role ?? null)
+  const isAdmin = role === "ADMIN"
+  const isManager = role === "MANAGER"
   const isStaff = role === "STAFF"
-  if (!session?.user || (!isManager && !isStaff)) {
+  if (!session?.user || (!isAdmin && !isManager && !isStaff)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
   if (!sessionUserId) {
@@ -44,6 +45,12 @@ export async function PATCH(
       status: true,
       staffProfile: {
         select: {
+          managerUserId: true,
+          user: {
+            select: {
+              role: true,
+            },
+          },
           userId: true,
         },
       },
@@ -54,7 +61,12 @@ export async function PATCH(
   }
 
   const isOwner = current.staffProfile.userId === sessionUserId
-  if (!isManager && !isOwner) {
+  const canAdminCancel = isAdmin
+  const isAssignedManager =
+    isManager &&
+    current.staffProfile.user.role === "STAFF" &&
+    current.staffProfile.managerUserId === sessionUserId
+  if (!isOwner && !canAdminCancel && !isAssignedManager) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 

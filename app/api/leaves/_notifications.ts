@@ -33,16 +33,35 @@ const sendEmail = async (to: string, template: { subject: string; text: string; 
 
 export const notifyLeaveSubmitted = async (
   tx: DbClient,
-  payload: LeaveRequestNotificationPayload
+  payload: LeaveRequestNotificationPayload & { staffUserId: string }
 ) => {
   if (!canSendEmail()) return
-  const reviewers = await tx.user.findMany({
-    where: {
-      status: "ACTIVE",
-      role: { in: [Role.ADMIN, Role.MANAGER] },
+  const staffUser = await tx.user.findUnique({
+    where: { id: payload.staffUserId },
+    select: {
+      role: true,
+      staffProfile: { select: { managerUserId: true } },
     },
+  })
+  if (!staffUser) return
+
+  const recipients = new Set<string>()
+  const admins = await tx.user.findMany({
+    where: { status: "ACTIVE", role: Role.ADMIN },
     select: { email: true },
   })
+  admins.forEach((admin) => recipients.add(admin.email))
+
+  if (staffUser.role === Role.STAFF && staffUser.staffProfile?.managerUserId) {
+    const manager = await tx.user.findUnique({
+      where: { id: staffUser.staffProfile.managerUserId },
+      select: { email: true, status: true, role: true },
+    })
+    if (manager && manager.status === "ACTIVE" && manager.role === Role.MANAGER) {
+      recipients.add(manager.email)
+    }
+  }
+
   const template = leaveRequestSubmittedEmail({
     leaveCode: payload.leaveCode,
     leaveName: payload.leaveName,
@@ -50,7 +69,7 @@ export const notifyLeaveSubmitted = async (
     endDate: payload.endDateIso,
     daysCount: payload.daysCount,
   })
-  await Promise.allSettled(reviewers.map((reviewer) => sendEmail(reviewer.email, template)))
+  await Promise.allSettled(Array.from(recipients).map((email) => sendEmail(email, template)))
 }
 
 export const notifyLeaveReviewed = async (

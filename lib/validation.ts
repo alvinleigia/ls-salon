@@ -184,6 +184,7 @@ export const updateUserSchema = addCountryStateValidation(z.object({
           })
         )
         .optional(),
+      managerUserId: z.string().trim().min(1).optional().or(z.literal("")),
     })
     .optional(),
 }))

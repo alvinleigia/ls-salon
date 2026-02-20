@@ -105,8 +105,9 @@ export async function PATCH(
       ? Array.from(new Set(eligibleServiceIds))
       : null
 
-  const user = await prisma.$transaction(async (tx) => {
-    const updated = await tx.user.update({
+  try {
+    const user = await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
       where: { id },
       data,
       select: {
@@ -131,6 +132,14 @@ export async function PATCH(
         eligibleServices: { select: { serviceId: true } },
         staffProfile: {
           select: {
+            managerUserId: true,
+            manager: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
             documents: {
               select: {
                 id: true,
@@ -169,10 +178,21 @@ export async function PATCH(
       }
 
       if (targetRole === "STAFF" && staffProfileInput) {
+        const managerUserId = staffProfileInput.managerUserId?.trim() || null
+        if (managerUserId) {
+          const managerUser = await tx.user.findUnique({
+            where: { id: managerUserId },
+            select: { id: true, role: true, status: true },
+          })
+          if (!managerUser || managerUser.role !== "MANAGER" || managerUser.status !== "ACTIVE") {
+            throw new Error("Selected manager is invalid or inactive.")
+          }
+        }
+
         const profile = await tx.staffProfile.upsert({
           where: { userId: id },
-          update: {},
-          create: { userId: id },
+          update: { managerUserId },
+          create: { userId: id, managerUserId },
         })
 
         if (staffProfileInput.documents) {
@@ -220,15 +240,21 @@ export async function PATCH(
       }
     }
 
-    return updated
-  })
+      return updated
+    })
 
-  return NextResponse.json({
-    user: {
-      ...user,
-      eligibleServiceIds: user.eligibleServices.map((item) => item.serviceId),
-    },
-  })
+    return NextResponse.json({
+      user: {
+        ...user,
+        eligibleServiceIds: user.eligibleServices.map((item) => item.serviceId),
+      },
+    })
+  } catch (error) {
+    if (error instanceof Error) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
+    return NextResponse.json({ error: "Unable to update user." }, { status: 500 })
+  }
 }
 
 export async function GET(
@@ -287,6 +313,14 @@ export async function GET(
       eligibleServices: { select: { serviceId: true } },
       staffProfile: {
         select: {
+          managerUserId: true,
+          manager: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
           documents: {
             select: {
               id: true,

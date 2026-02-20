@@ -42,6 +42,14 @@ export function UserProfileSections({ user, formatDate }: UserProfileSectionsPro
                 {user.gender ? user.gender.replaceAll("_", " ") : "-"}
               </div>
             </div>
+            {user.role === "STAFF" ? (
+              <div>
+                <div className="text-xs text-muted-foreground">Reporting manager</div>
+                <div className="font-medium">
+                  {user.staffProfile?.manager?.name || user.staffProfile?.manager?.email || "-"}
+                </div>
+              </div>
+            ) : null}
             {user.role !== "STAFF" ? (
               <div>
                 <div className="text-xs text-muted-foreground">Marketing opt-in</div>
@@ -101,4 +109,3 @@ export function UserProfileSections({ user, formatDate }: UserProfileSectionsPro
     </div>
   )
 }
-

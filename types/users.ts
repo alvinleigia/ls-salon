@@ -37,6 +37,14 @@ export type UserProfile = UserCore & {
   marketingOptIn: boolean
   createdAt: string
   updatedAt: string
+  staffProfile?: {
+    managerUserId?: string | null
+    manager?: {
+      id: string
+      name: string | null
+      email: string
+    } | null
+  } | null
 }
 
 export type UserFormValues = {
@@ -95,12 +103,19 @@ export type StaffUser = UserCore & {
   role: Role
   eligibleServiceIds?: string[]
   staffProfile?: {
+    managerUserId?: string | null
+    manager?: {
+      id: string
+      name: string | null
+      email: string
+    } | null
     certifications?: StaffCertification[]
     documents?: StaffDocument[]
   } | null
 }
 
 export type StaffProfileForm = {
+  managerUserId: string
   certifications: {
     id?: string
     title: string

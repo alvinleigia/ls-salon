@@ -58,10 +58,16 @@ export async function GET(request: Request) {
     )
   }
 
-  const actorStaffProfile = await prisma.staffProfile.findUnique({
+  let actorStaffProfile = await prisma.staffProfile.findUnique({
     where: { userId: sessionUserId },
     select: { id: true },
   })
+  if ((isStaff || isManager) && !actorStaffProfile) {
+    actorStaffProfile = await prisma.staffProfile.create({
+      data: { userId: sessionUserId },
+      select: { id: true },
+    })
+  }
 
   const { page, pageSize, q, status, leaveDefinitionId, mineOnly, staffUserId, sort, order } =
     parsed.data
@@ -90,7 +96,12 @@ export async function GET(request: Request) {
 
   const where: Prisma.LeaveRequestWhereInput = {
     ...(isManager && !mineOnly
-      ? { staffProfile: { user: { role: "STAFF" } } }
+      ? {
+          staffProfile: {
+            managerUserId: sessionUserId,
+            user: { role: "STAFF" },
+          },
+        }
       : {}),
     ...(status ? { status } : {}),
     ...(leaveDefinitionId ? { leaveDefinitionId } : {}),
@@ -146,7 +157,13 @@ export async function POST(request: Request) {
     where: { userId: sessionUserId },
     select: { id: true },
   })
-  if (!staffProfile) {
+  const resolvedStaffProfile =
+    staffProfile ??
+    (await prisma.staffProfile.create({
+      data: { userId: sessionUserId },
+      select: { id: true },
+    }))
+  if (!resolvedStaffProfile) {
     return NextResponse.json({ error: "Staff profile not found." }, { status: 400 })
   }
 
@@ -163,7 +180,7 @@ export async function POST(request: Request) {
     const item = await prisma.$transaction(async (tx) => {
       const validated = await validateCreateLeaveRequestRules({
         tx,
-        staffProfileId: staffProfile.id,
+        staffProfileId: resolvedStaffProfile.id,
         leaveDefinitionId: parsed.data.leaveDefinitionId,
         startDate: parsed.data.startDate,
         endDate: parsed.data.endDate,
@@ -171,7 +188,7 @@ export async function POST(request: Request) {
 
       const created = await tx.leaveRequest.create({
         data: {
-          staffProfileId: staffProfile.id,
+          staffProfileId: resolvedStaffProfile.id,
           leaveDefinitionId: parsed.data.leaveDefinitionId,
           startDate: validated.startDate,
           endDate: validated.endDate,
@@ -189,6 +206,7 @@ export async function POST(request: Request) {
 
     const serialized = serializeLeaveRequest(item)
     void notifyLeaveSubmitted(prisma, {
+      staffUserId: serialized.staff.userId,
       leaveCode: serialized.leaveDefinition.code,
       leaveName: serialized.leaveDefinition.name,
       startDateIso: serialized.startDate.slice(0, 10),

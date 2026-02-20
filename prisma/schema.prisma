@@ -233,6 +233,7 @@ model User {
   appointments  Appointment[] @relation("CustomerAppointments")
   appointmentOrders AppointmentOrder[]
   reviewedLeaveRequests LeaveRequest[] @relation("LeaveRequestReviewedBy")
+  managedStaffProfiles StaffProfile[] @relation("StaffProfileManager")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -682,7 +683,9 @@ model StaffServiceEligibility {
 model StaffProfile {
   id                 String   @id @default(cuid())
   userId             String   @unique
+  managerUserId      String?
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  manager            User?    @relation("StaffProfileManager", fields: [managerUserId], references: [id], onDelete: SetNull)
   appointments       Appointment[]
   appointmentOrderLines AppointmentOrderLine[]
   certifications     StaffCertification[]
@@ -693,6 +696,8 @@ model StaffProfile {
   leaveRequests      LeaveRequest[]
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+
+  @@index([managerUserId])
 }
 
 model StaffCertification {
