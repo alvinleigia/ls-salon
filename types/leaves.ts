@@ -10,6 +10,7 @@ export type LeaveDefinitionAllowedUsers = "MALE" | "FEMALE" | "ALL"
 export type LeaveDefinitionStatus = "ACTIVE" | "INACTIVE"
 export type LeaveGroupAssignmentMode = "ALL_STAFF" | "SELECTED_STAFF"
 export type LeaveGroupStatus = "ACTIVE" | "INACTIVE"
+export type LeaveRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELED"
 
 export type LeaveDefinitionRow = {
   id: string
@@ -94,4 +95,45 @@ export type LeaveGroupFormValues = {
   sortOrder: number
   leaveDefinitionIds: string[]
   staffIds: string[]
+}
+
+export type LeaveRequestRow = {
+  id: string
+  staffProfileId: string
+  leaveDefinitionId: string
+  startDate: string
+  endDate: string
+  daysCount: number
+  reason: string | null
+  status: LeaveRequestStatus
+  reviewedByUserId: string | null
+  reviewedAt: string | null
+  reviewerComment: string | null
+  canceledAt: string | null
+  cancelReason: string | null
+  createdAt: string
+  updatedAt: string
+  leaveDefinition: {
+    id: string
+    code: string
+    name: string
+  }
+  staff: {
+    id: string
+    userId: string
+    name: string | null
+    email: string
+  }
+  reviewedBy: {
+    id: string
+    name: string | null
+    email: string
+  } | null
+}
+
+export type LeaveRequestFormValues = {
+  leaveDefinitionId: string
+  startDate: string
+  endDate: string
+  reason: string
 }

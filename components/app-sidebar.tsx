@@ -98,13 +98,13 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
-              {canManageUsers(role ?? null) ? (
+              {canManageUsers(role ?? null) || role === "STAFF" ? (
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
                     data-active={pathname.startsWith("/leaves")}
                   >
-                    <Link href="/leaves" className="flex w-full items-center">
+                    <Link href={canManageUsers(role ?? null) ? "/leaves" : "/leaves/requests"} className="flex w-full items-center">
                       <CalendarClockIcon className="h-4 w-4" />
                       <span>Leaves</span>
                       <span
@@ -120,6 +120,31 @@ export function AppSidebar() {
                     <SidebarMenuSubItem>
                       <SidebarMenuSubButton
                         asChild
+                        isActive={pathname.startsWith("/leaves/requests")}
+                      >
+                        <Link href="/leaves/requests">
+                          <CalendarClockIcon className="h-4 w-4" />
+                          <span>Requests</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    {canManageUsers(role ?? null) ? (
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          isActive={pathname.startsWith("/leaves/approvals")}
+                        >
+                          <Link href="/leaves/approvals">
+                            <UsersIcon className="h-4 w-4" />
+                            <span>Approvals</span>
+                          </Link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    ) : null}
+                    {canManageUsers(role ?? null) ? (
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
                         isActive={pathname === "/leaves"}
                       >
                         <Link href="/leaves">
@@ -128,6 +153,8 @@ export function AppSidebar() {
                         </Link>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
+                    ) : null}
+                    {canManageUsers(role ?? null) ? (
                     <SidebarMenuSubItem>
                       <SidebarMenuSubButton
                         asChild
@@ -139,6 +166,7 @@ export function AppSidebar() {
                         </Link>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
+                    ) : null}
                   </SidebarMenuSub>
                 </SidebarMenuItem>
               ) : null}

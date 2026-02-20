@@ -1004,3 +1004,45 @@ export const updateLeaveGroupSchema = leaveGroupBaseSchema
 
 export type CreateLeaveGroupInput = z.infer<typeof createLeaveGroupSchema>
 export type UpdateLeaveGroupInput = z.infer<typeof updateLeaveGroupSchema>
+
+const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+
+export const createLeaveRequestSchema = z
+  .object({
+    leaveDefinitionId: z.string().trim().min(1),
+    startDate: isoDateSchema,
+    endDate: isoDateSchema,
+    reason: z.string().trim().max(500).optional().or(z.literal("")),
+  })
+  .superRefine((value, ctx) => {
+    if (value.startDate > value.endDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Start date cannot be after end date.",
+        path: ["startDate"],
+      })
+    }
+  })
+
+export const reviewLeaveRequestSchema = z
+  .object({
+    status: z.enum(["APPROVED", "REJECTED"]),
+    reviewerComment: z.string().trim().max(500).optional().or(z.literal("")),
+  })
+  .superRefine((value, ctx) => {
+    if (value.status === "REJECTED" && !value.reviewerComment?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Comment is required when rejecting a leave request.",
+        path: ["reviewerComment"],
+      })
+    }
+  })
+
+export const cancelLeaveRequestSchema = z.object({
+  cancelReason: z.string().trim().max(500).optional().or(z.literal("")),
+})
+
+export type CreateLeaveRequestInput = z.infer<typeof createLeaveRequestSchema>
+export type ReviewLeaveRequestInput = z.infer<typeof reviewLeaveRequestSchema>
+export type CancelLeaveRequestInput = z.infer<typeof cancelLeaveRequestSchema>

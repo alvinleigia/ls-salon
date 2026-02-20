@@ -189,6 +189,13 @@ enum LeaveGroupStatus {
   INACTIVE
 }
 
+enum LeaveRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELED
+}
+
 enum StockMovementType {
   PURCHASE_RECEIPT
   ADJUSTMENT_ADD
@@ -225,6 +232,7 @@ model User {
   staffProfile  StaffProfile?
   appointments  Appointment[] @relation("CustomerAppointments")
   appointmentOrders AppointmentOrder[]
+  reviewedLeaveRequests LeaveRequest[] @relation("LeaveRequestReviewedBy")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -268,6 +276,7 @@ model LeaveDefinition {
   nonClubbableWithFrom LeaveDefinitionNonClubbable[] @relation("LeaveDefinitionNonClubbableFrom")
   nonClubbableWithTo LeaveDefinitionNonClubbable[] @relation("LeaveDefinitionNonClubbableTo")
   leaveGroups        LeaveGroupLeave[]
+  leaveRequests      LeaveRequest[]
 
   @@unique([name])
   @@index([status])
@@ -331,6 +340,35 @@ model LeaveDefinitionNonClubbable {
   @@unique([leaveDefinitionId, blockedLeaveId], map: "leave_def_nonclubbable_pair_key")
   @@index([leaveDefinitionId])
   @@index([blockedLeaveId])
+}
+
+model LeaveRequest {
+  id               String             @id @default(cuid())
+  staffProfileId   String
+  leaveDefinitionId String
+  startDate        DateTime           @db.Date
+  endDate          DateTime           @db.Date
+  daysCount        Float
+  reason           String?
+  status           LeaveRequestStatus @default(PENDING)
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  reviewerComment  String?
+  canceledAt       DateTime?
+  cancelReason     String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  staffProfile     StaffProfile       @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  leaveDefinition  LeaveDefinition    @relation(fields: [leaveDefinitionId], references: [id], onDelete: Restrict)
+  reviewedByUser   User?              @relation("LeaveRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([staffProfileId])
+  @@index([leaveDefinitionId])
+  @@index([status])
+  @@index([startDate])
+  @@index([endDate])
+  @@index([reviewedByUserId])
+  @@index([createdAt])
 }
 
 model Service {
@@ -652,6 +690,7 @@ model StaffProfile {
   scheduleAssignments StaffScheduleAssignment[]
   shiftOverrides     StaffShiftOverride[]
   leaveGroupAssignments LeaveGroupStaffAssignment[]
+  leaveRequests      LeaveRequest[]
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }

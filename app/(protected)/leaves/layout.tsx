@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation"
 
 import { auth } from "@/auth"
-import { canManageUsers, type Role } from "@/lib/permissions"
 
 export default async function LeavesLayout({
   children,
@@ -14,7 +13,7 @@ export default async function LeavesLayout({
   if (!session?.user) {
     redirect("/auth/signin")
   }
-  if (!canManageUsers(role as Role)) {
+  if (role !== "ADMIN" && role !== "MANAGER" && role !== "STAFF") {
     redirect("/dashboard")
   }
 
