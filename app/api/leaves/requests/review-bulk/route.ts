@@ -11,11 +11,30 @@ export async function POST(request: Request) {
   const session = await auth()
   const role = (session?.user as { role?: string })?.role as Role | undefined
   const sessionUserId = (session?.user as { id?: string })?.id
+  const sessionUserEmail = (session?.user as { email?: string })?.email?.trim().toLowerCase()
   if (!session?.user || !canManageUsers(role ?? null)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
   if (!sessionUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+  const reviewerById = await prisma.user.findUnique({
+    where: { id: sessionUserId },
+    select: { id: true },
+  })
+  const reviewer =
+    reviewerById ??
+    (sessionUserEmail
+      ? await prisma.user.findUnique({
+          where: { email: sessionUserEmail },
+          select: { id: true },
+        })
+      : null)
+  if (!reviewer) {
+    return NextResponse.json(
+      { error: "Session user not found. Please sign in again." },
+      { status: 401 }
+    )
   }
 
   const payload = await request.json().catch(() => ({}))
@@ -31,9 +50,22 @@ export async function POST(request: Request) {
   const now = new Date()
   const currentItems = await prisma.leaveRequest.findMany({
     where: { id: { in: requestIds } },
-    select: { id: true, status: true },
+    select: {
+      id: true,
+      status: true,
+      staffProfile: {
+        select: {
+          user: {
+            select: { role: true },
+          },
+        },
+      },
+    },
   })
-  const pendingIds = currentItems.filter((item) => item.status === "PENDING").map((item) => item.id)
+  const pendingIds = currentItems
+    .filter((item) => item.status === "PENDING")
+    .filter((item) => (role === "MANAGER" ? item.staffProfile.user.role === "STAFF" : true))
+    .map((item) => item.id)
   const skippedIds = requestIds.filter((id) => !pendingIds.includes(id))
 
   if (pendingIds.length === 0) {
@@ -49,7 +81,7 @@ export async function POST(request: Request) {
     where: { id: { in: pendingIds }, status: "PENDING" },
     data: {
       status,
-      reviewedByUserId: sessionUserId,
+      reviewedByUserId: reviewer.id,
       reviewedAt: now,
       reviewerComment: reviewerComment?.trim() || null,
     },

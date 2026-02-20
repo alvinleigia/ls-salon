@@ -9,6 +9,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table"
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, MoreHorizontalIcon } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import Link from "next/link"
 import { toast } from "sonner"
@@ -79,8 +80,15 @@ const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
 
 export default function LeaveRequestsPage() {
   const { data: session } = useSession()
+  const router = useRouter()
   const role = (session?.user as { role?: string })?.role
-  const canManage = role === "ADMIN" || role === "MANAGER"
+  const canManage = role === "MANAGER"
+
+  React.useEffect(() => {
+    if (role === "ADMIN") {
+      router.replace("/leaves/approvals")
+    }
+  }, [role, router])
 
   const [loading, setLoading] = React.useState(true)
   const [rows, setRows] = React.useState<LeaveRequestRow[]>([])

@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
-import { canManageUsers, type Role } from "@/lib/permissions"
+import type { Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 
 export async function GET() {
   const session = await auth()
   const role = (session?.user as { role?: string })?.role as Role | undefined
   const sessionUserId = (session?.user as { id?: string })?.id
-  const isManager = canManageUsers(role ?? null)
+  const isManager = role === "MANAGER"
   const isStaff = role === "STAFF"
   if (!session?.user || (!isManager && !isStaff)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

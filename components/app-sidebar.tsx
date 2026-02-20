@@ -104,7 +104,10 @@ export function AppSidebar() {
                     asChild
                     data-active={pathname.startsWith("/leaves")}
                   >
-                    <Link href={canManageUsers(role ?? null) ? "/leaves" : "/leaves/requests"} className="flex w-full items-center">
+                    <Link
+                      href={role === "ADMIN" ? "/leaves/approvals" : "/leaves/requests"}
+                      className="flex w-full items-center"
+                    >
                       <CalendarClockIcon className="h-4 w-4" />
                       <span>Leaves</span>
                       <span
@@ -117,17 +120,19 @@ export function AppSidebar() {
                     </Link>
                   </SidebarMenuButton>
                   <SidebarMenuSub>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname.startsWith("/leaves/requests")}
-                      >
-                        <Link href="/leaves/requests">
-                          <CalendarClockIcon className="h-4 w-4" />
-                          <span>Requests</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
+                    {role === "STAFF" || role === "MANAGER" ? (
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          isActive={pathname.startsWith("/leaves/requests")}
+                        >
+                          <Link href="/leaves/requests">
+                            <CalendarClockIcon className="h-4 w-4" />
+                            <span>Requests</span>
+                          </Link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    ) : null}
                     {canManageUsers(role ?? null) ? (
                       <SidebarMenuSubItem>
                         <SidebarMenuSubButton

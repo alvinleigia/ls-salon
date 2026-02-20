@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
 import { auth } from "@/auth"
-import { canManageUsers, type Role } from "@/lib/permissions"
+import type { Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import { createLeaveRequestSchema } from "@/lib/validation"
 import type { ListResponse } from "@/types/api"
@@ -38,9 +38,10 @@ export async function GET(request: Request) {
   const session = await auth()
   const role = (session?.user as { role?: string })?.role as Role | undefined
   const sessionUserId = (session?.user as { id?: string })?.id
-  const isManager = canManageUsers(role ?? null)
+  const isAdmin = role === "ADMIN"
+  const isManager = role === "MANAGER"
   const isStaff = role === "STAFF"
-  if (!session?.user || (!isManager && !isStaff)) {
+  if (!session?.user || (!isAdmin && !isManager && !isStaff)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
   if (!sessionUserId) {
@@ -88,6 +89,9 @@ export async function GET(request: Request) {
   }
 
   const where: Prisma.LeaveRequestWhereInput = {
+    ...(isManager && !mineOnly
+      ? { staffProfile: { user: { role: "STAFF" } } }
+      : {}),
     ...(status ? { status } : {}),
     ...(leaveDefinitionId ? { leaveDefinitionId } : {}),
     ...(staffProfileFilterId ? { staffProfileId: staffProfileFilterId } : {}),
@@ -129,7 +133,7 @@ export async function POST(request: Request) {
   const session = await auth()
   const role = (session?.user as { role?: string })?.role as Role | undefined
   const sessionUserId = (session?.user as { id?: string })?.id
-  const isManager = canManageUsers(role ?? null)
+  const isManager = role === "MANAGER"
   const isStaff = role === "STAFF"
   if (!session?.user || (!isManager && !isStaff)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

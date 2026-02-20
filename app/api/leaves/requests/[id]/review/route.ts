@@ -18,11 +18,30 @@ export async function PATCH(
   const session = await auth()
   const role = (session?.user as { role?: string })?.role as Role | undefined
   const sessionUserId = (session?.user as { id?: string })?.id
+  const sessionUserEmail = (session?.user as { email?: string })?.email?.trim().toLowerCase()
   if (!session?.user || !canManageUsers(role ?? null)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
   if (!sessionUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+  const reviewerById = await prisma.user.findUnique({
+    where: { id: sessionUserId },
+    select: { id: true },
+  })
+  const reviewer =
+    reviewerById ??
+    (sessionUserEmail
+      ? await prisma.user.findUnique({
+          where: { email: sessionUserEmail },
+          select: { id: true },
+        })
+      : null)
+  if (!reviewer) {
+    return NextResponse.json(
+      { error: "Session user not found. Please sign in again." },
+      { status: 401 }
+    )
   }
 
   const payload = await request.json().catch(() => ({}))
@@ -37,10 +56,26 @@ export async function PATCH(
   const { id } = await params
   const current = await prisma.leaveRequest.findUnique({
     where: { id },
-    select: { id: true, status: true },
+    select: {
+      id: true,
+      status: true,
+      staffProfile: {
+        select: {
+          user: {
+            select: { role: true },
+          },
+        },
+      },
+    },
   })
   if (!current) {
     return NextResponse.json({ error: "Leave request not found." }, { status: 404 })
+  }
+  if (role === "MANAGER" && current.staffProfile.user.role !== "STAFF") {
+    return NextResponse.json(
+      { error: "Managers can only review staff leave requests." },
+      { status: 403 }
+    )
   }
 
   try {
@@ -50,7 +85,7 @@ export async function PATCH(
       where: { id },
       data: {
         status: parsed.data.status,
-        reviewedByUserId: sessionUserId,
+        reviewedByUserId: reviewer.id,
         reviewedAt: new Date(),
         reviewerComment: parsed.data.reviewerComment?.trim() || null,
       },

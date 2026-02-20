@@ -182,8 +182,11 @@ export const validateCreateLeaveRequestRules = async ({
       },
     },
   })
-  if (!staff || staff.user.role !== "STAFF" || staff.user.status !== "ACTIVE") {
-    throw new Error("Only active staff can request leave.")
+  if (!staff || staff.user.status !== "ACTIVE") {
+    throw new Error("Only active staff or managers can request leave.")
+  }
+  if (staff.user.role !== "STAFF" && staff.user.role !== "MANAGER") {
+    throw new Error("Only active staff or managers can request leave.")
   }
 
   const eligibleGroup = await tx.leaveGroup.findFirst({
