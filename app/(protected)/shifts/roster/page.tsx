@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation"
 import {
   Inject,
   Month,
+  Week,
   ResourceDirective,
   ResourcesDirective,
   ScheduleComponent,
@@ -62,6 +63,7 @@ export default function RosterPage() {
   const [viewDates, setViewDates] = React.useState<Date[]>([])
   const [staff, setStaff] = React.useState<StaffOption[]>([])
   const [staffFilter, setStaffFilter] = React.useState<string>("all")
+  const [rosterMode, setRosterMode] = React.useState<"grid" | "calendar">("grid")
   const [settings, setSettings] = React.useState<AppSettingsPayload>({
     workingHours: [],
     overrides: [],
@@ -210,6 +212,17 @@ export default function RosterPage() {
   }, [loadDefaultSchedule])
 
   const availabilityDates = React.useMemo(() => {
+    if (rosterMode === "grid") {
+      const start = new Date(date)
+      const offset = (start.getDay() - firstDayOfWeek + 7) % 7
+      start.setDate(start.getDate() - offset)
+      start.setHours(0, 0, 0, 0)
+      return Array.from({ length: 7 }, (_, index) => {
+        const next = new Date(start)
+        next.setDate(start.getDate() + index)
+        return next
+      })
+    }
     if (viewDates.length) {
       return viewDates
     }
@@ -222,7 +235,7 @@ export default function RosterPage() {
       next.setDate(start.getDate() + index)
       return next
     })
-  }, [date, viewDates])
+  }, [date, firstDayOfWeek, rosterMode, viewDates])
 
   React.useEffect(() => {
     if (!staff.length || !availabilityDates.length) return
@@ -345,6 +358,25 @@ export default function RosterPage() {
     }
     return map
   }, [overrides])
+
+  const leaveMap = React.useMemo(() => {
+    const map: Record<string, Record<string, LeaveRosterItem>> = {}
+    for (const leave of approvedLeaves) {
+      const start = parseISODate(leave.startDate)
+      const end = parseISODate(leave.endDate)
+      if (!start || !end) continue
+      const cursor = new Date(start)
+      while (cursor <= end) {
+        const dateKey = toISODate(cursor)
+        if (!map[leave.staffId]) {
+          map[leave.staffId] = {}
+        }
+        map[leave.staffId][dateKey] = leave
+        cursor.setDate(cursor.getDate() + 1)
+      }
+    }
+    return map
+  }, [approvedLeaves])
 
   const getStaffTemplateForDate = React.useCallback(
     (value: Date, staffId?: string) => {
@@ -938,13 +970,111 @@ export default function RosterPage() {
           />
           </div>
         </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant={rosterMode === "grid" ? "default" : "outline"}
+            onClick={() => setRosterMode("grid")}
+          >
+            Grid
+          </Button>
+          <Button
+            variant={rosterMode === "calendar" ? "default" : "outline"}
+            onClick={() => setRosterMode("calendar")}
+          >
+            Calendar
+          </Button>
+        </div>
       </div>
 
-      <div className="rounded-xl border bg-card p-3 shadow-sm">
-        <div className="min-h-[540px]">
-          <ScheduleComponent
+      {rosterMode === "grid" ? (
+        <div className="rounded-xl border bg-card p-3 shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-collapse text-sm">
+              <thead>
+                <tr>
+                  <th className="w-44 border p-2 text-left font-medium">Staff</th>
+                  {availabilityDates.map((day) => (
+                    <th key={toISODate(day)} className="min-w-36 border p-2 text-left font-medium">
+                      <div>{day.toLocaleDateString(undefined, { weekday: "short" })}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {formatDateForDisplay(day, settings.dateFormat)}
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredStaff.map((member) => (
+                  <tr key={member.id}>
+                    <td className="border p-2 align-top">
+                      <div className="font-medium">{member.name?.trim() || member.email}</div>
+                    </td>
+                    {availabilityDates.map((day) => {
+                      const dateKey = toISODate(day)
+                      const leave = leaveMap[member.id]?.[dateKey]
+                      const overrideValue = overrideMap[member.id]?.[dateKey]
+                      const template = getStaffTemplateForDate(day, member.id)
+                      const periods = getStaffPeriodsForDate(day, member.id)
+
+                      if (leave) {
+                        return (
+                          <td key={`${member.id}-${dateKey}`} className="border p-2 align-top">
+                            <div className="rounded bg-amber-500 px-2 py-1 text-xs font-medium text-white">
+                              {leave.leaveDefinitionCode} - {leave.leaveDefinitionName}
+                            </div>
+                            {leave.reason ? (
+                              <div className="mt-1 text-xs text-muted-foreground">{leave.reason}</div>
+                            ) : null}
+                          </td>
+                        )
+                      }
+
+                      if (overrideValue === null) {
+                        return (
+                          <td
+                            key={`${member.id}-${dateKey}`}
+                            className="border bg-red-50 p-2 align-top text-xs text-red-700"
+                          >
+                            Unavailable
+                          </td>
+                        )
+                      }
+
+                      if (!periods.length || !template) {
+                        return (
+                          <td
+                            key={`${member.id}-${dateKey}`}
+                            className="border bg-muted/30 p-2 align-top text-xs text-muted-foreground"
+                          >
+                            Off
+                          </td>
+                        )
+                      }
+
+                      return (
+                        <td key={`${member.id}-${dateKey}`} className="border p-2 align-top">
+                          <div className="rounded bg-sky-600 px-2 py-1 text-xs font-medium text-white">
+                            {template.name}
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {formatTimeFrom24h(template.startTime, settings)} -{" "}
+                            {formatTimeFrom24h(template.endTime, settings)}
+                          </div>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border bg-card p-3 shadow-sm">
+          <div className="min-h-[540px]">
+            <ScheduleComponent
             ref={scheduleRef}
-            currentView="Month"
+            currentView="Week"
             firstDayOfWeek={firstDayOfWeek}
             showQuickInfo
             eventSettings={{
@@ -978,6 +1108,7 @@ export default function RosterPage() {
             height="auto"
           >
             <ViewsDirective>
+              <ViewDirective option="Week" />
               <ViewDirective option="Month" />
             </ViewsDirective>
             <ResourcesDirective>
@@ -991,10 +1122,11 @@ export default function RosterPage() {
                 colorField="color"
               />
             </ResourcesDirective>
-            <Inject services={[Month]} />
+            <Inject services={[Week, Month]} />
           </ScheduleComponent>
         </div>
       </div>
+      )}
       <Dialog open={overrideOpen} onOpenChange={setOverrideOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
