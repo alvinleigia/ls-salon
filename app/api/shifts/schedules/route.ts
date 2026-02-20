@@ -3,6 +3,8 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
+import { toISODate } from "@/lib/date"
+import { captureRosterHistoryUpToYesterday } from "@/lib/roster-history"
 import { shiftScheduleSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import type { ListResponse } from "@/types/api"
@@ -134,6 +136,19 @@ export async function POST(request: Request) {
 
   if (data.isDefault) {
     try {
+      const [existingDefault, allStaffProfiles] = await Promise.all([
+        prisma.shiftSchedule.findFirst({
+          where: { isDefault: true },
+          select: { id: true, startDate: true },
+        }),
+        prisma.staffProfile.findMany({ select: { id: true } }),
+      ])
+      if (existingDefault && allStaffProfiles.length) {
+        await captureRosterHistoryUpToYesterday(prisma, {
+          staffProfileIds: allStaffProfiles.map((item) => item.id),
+          startDate: toISODate(existingDefault.startDate),
+        })
+      }
       await prisma.shiftSchedule.updateMany({ data: { isDefault: false } })
       const schedule = await prisma.shiftSchedule.create({
         data: {

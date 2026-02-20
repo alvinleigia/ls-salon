@@ -3,6 +3,10 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import type { Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import {
+  normalizeHistoryRangeToPast,
+  syncRosterHistoryRange,
+} from "@/lib/roster-history"
 import { cancelLeaveRequestSchema } from "@/lib/validation"
 import { notifyLeaveCanceled } from "../../../_notifications"
 import {
@@ -84,6 +88,18 @@ export async function PATCH(
     })
 
     const serialized = serializeLeaveRequest(item)
+    const normalizedPastRange = normalizeHistoryRangeToPast(
+      serialized.startDate.slice(0, 10),
+      serialized.endDate.slice(0, 10)
+    )
+    if (normalizedPastRange) {
+      await syncRosterHistoryRange(prisma, {
+        staffProfileIds: [serialized.staffProfileId],
+        startDate: normalizedPastRange.startDate,
+        endDate: normalizedPastRange.endDate,
+        mode: "replace",
+      })
+    }
     const actor = await prisma.user.findUnique({
       where: { id: sessionUserId },
       select: { name: true },

@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import { toISODate } from "@/lib/date"
 import { prisma } from "@/lib/prisma"
+import { captureRosterHistoryUpToYesterday } from "@/lib/roster-history"
 import { shiftScheduleSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
 
@@ -45,6 +47,43 @@ export async function PATCH(
       ? [1, 2, 3, 4, 5]
       : data.weekOff2Weeks ?? []
   let schedule = null as Awaited<ReturnType<typeof prisma.shiftSchedule.update>> | null
+  const currentSchedule = await prisma.shiftSchedule.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      isDefault: true,
+      startDate: true,
+      assignments: {
+        select: {
+          staffProfileId: true,
+          startDate: true,
+        },
+      },
+    },
+  })
+
+  if (currentSchedule) {
+    if (currentSchedule.isDefault) {
+      const allStaffProfiles = await prisma.staffProfile.findMany({ select: { id: true } })
+      if (allStaffProfiles.length) {
+        await captureRosterHistoryUpToYesterday(prisma, {
+          staffProfileIds: allStaffProfiles.map((item) => item.id),
+          startDate: toISODate(currentSchedule.startDate),
+        })
+      }
+    } else if (currentSchedule.assignments.length) {
+      const staffProfileIds = Array.from(
+        new Set(currentSchedule.assignments.map((assignment) => assignment.staffProfileId))
+      )
+      const earliest = currentSchedule.assignments
+        .map((assignment) => toISODate(assignment.startDate))
+        .sort()[0]
+      await captureRosterHistoryUpToYesterday(prisma, {
+        staffProfileIds,
+        startDate: earliest,
+      })
+    }
+  }
 
   if (data.isDefault) {
     await prisma.shiftSchedule.updateMany({ data: { isDefault: false } })
@@ -209,6 +248,44 @@ export async function DELETE(
 
   if (!session?.user || !canManageUsers(role as Role)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const currentSchedule = await prisma.shiftSchedule.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      isDefault: true,
+      startDate: true,
+      assignments: {
+        select: {
+          staffProfileId: true,
+          startDate: true,
+        },
+      },
+    },
+  })
+
+  if (currentSchedule) {
+    if (currentSchedule.isDefault) {
+      const allStaffProfiles = await prisma.staffProfile.findMany({ select: { id: true } })
+      if (allStaffProfiles.length) {
+        await captureRosterHistoryUpToYesterday(prisma, {
+          staffProfileIds: allStaffProfiles.map((item) => item.id),
+          startDate: toISODate(currentSchedule.startDate),
+        })
+      }
+    } else if (currentSchedule.assignments.length) {
+      const staffProfileIds = Array.from(
+        new Set(currentSchedule.assignments.map((assignment) => assignment.staffProfileId))
+      )
+      const earliest = currentSchedule.assignments
+        .map((assignment) => toISODate(assignment.startDate))
+        .sort()[0]
+      await captureRosterHistoryUpToYesterday(prisma, {
+        staffProfileIds,
+        startDate: earliest,
+      })
+    }
   }
 
   await prisma.shiftSchedule.delete({ where: { id } })

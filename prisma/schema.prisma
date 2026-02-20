@@ -196,6 +196,14 @@ enum LeaveRequestStatus {
   CANCELED
 }
 
+enum StaffRosterDaySource {
+  SCHEDULE
+  OVERRIDE
+  LEAVE
+  UNAVAILABLE
+  OFF
+}
+
 enum StockMovementType {
   PURCHASE_RECEIPT
   ADJUSTMENT_ADD
@@ -362,6 +370,7 @@ model LeaveRequest {
   staffProfile     StaffProfile       @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
   leaveDefinition  LeaveDefinition    @relation(fields: [leaveDefinitionId], references: [id], onDelete: Restrict)
   reviewedByUser   User?              @relation("LeaveRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  rosterHistoryDays StaffRosterHistoryDay[]
 
   @@index([staffProfileId])
   @@index([leaveDefinitionId])
@@ -694,10 +703,37 @@ model StaffProfile {
   shiftOverrides     StaffShiftOverride[]
   leaveGroupAssignments LeaveGroupStaffAssignment[]
   leaveRequests      LeaveRequest[]
+  rosterHistoryDays  StaffRosterHistoryDay[]
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   @@index([managerUserId])
+}
+
+model StaffRosterHistoryDay {
+  id                  String               @id @default(cuid())
+  staffProfileId      String
+  date                DateTime             @db.Date
+  source              StaffRosterDaySource
+  templateId          String?
+  templateName        String?
+  startTime           String?
+  endTime             String?
+  paidMinutes         Int                  @default(0)
+  leaveRequestId      String?
+  leaveDefinitionCode String?
+  leaveDefinitionName String?
+  leaveReason         String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  staffProfile        StaffProfile         @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  template            ShiftTemplate?       @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  leaveRequest        LeaveRequest?        @relation(fields: [leaveRequestId], references: [id], onDelete: SetNull)
+
+  @@unique([staffProfileId, date])
+  @@index([date])
+  @@index([staffProfileId])
+  @@index([source])
 }
 
 model StaffCertification {
@@ -738,6 +774,7 @@ model ShiftTemplate {
   breaks      ShiftTemplateBreak[]
   schedules   ShiftScheduleBlock[]
   overrides   StaffShiftOverride[]
+  rosterHistoryDays StaffRosterHistoryDay[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

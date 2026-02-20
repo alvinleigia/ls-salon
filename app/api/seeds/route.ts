@@ -1053,7 +1053,10 @@ const seedShifts = async () => {
   }
 
   const today = new Date()
-  const startDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()))
+  today.setHours(0, 0, 0, 0)
+  const offsetToMonday = (today.getDay() + 6) % 7
+  const startDate = new Date(today)
+  startDate.setDate(today.getDate() - offsetToMonday)
   const morningTemplateId = templateByName.get("Morning Shift")
   const eveningTemplateId = templateByName.get("Evening Shift")
   if (!morningTemplateId || !eveningTemplateId) {
@@ -1343,6 +1346,7 @@ const clearData = async () => {
     counts.suppliers = (await tx.supplier.deleteMany({})).count
     counts.inventoryCategories = (await tx.inventoryCategory.deleteMany({})).count
 
+    counts.staffRosterHistoryDays = (await tx.staffRosterHistoryDay.deleteMany({})).count
     counts.staffShiftOverrides = (await tx.staffShiftOverride.deleteMany({})).count
     counts.staffScheduleAssignments = (await tx.staffScheduleAssignment.deleteMany({})).count
     counts.shiftScheduleBlocks = (await tx.shiftScheduleBlock.deleteMany({})).count
@@ -1406,6 +1410,7 @@ const previewClearData = async () => {
     inventoryProducts,
     suppliers,
     inventoryCategories,
+    staffRosterHistoryDays,
     staffShiftOverrides,
     staffScheduleAssignments,
     shiftScheduleBlocks,
@@ -1438,6 +1443,7 @@ const previewClearData = async () => {
     prisma.inventoryProduct.count(),
     prisma.supplier.count(),
     prisma.inventoryCategory.count(),
+    prisma.staffRosterHistoryDay.count(),
     prisma.staffShiftOverride.count(),
     prisma.staffScheduleAssignment.count(),
     prisma.shiftScheduleBlock.count(),
@@ -1481,6 +1487,7 @@ const previewClearData = async () => {
       inventoryProducts,
       suppliers,
       inventoryCategories,
+      staffRosterHistoryDays,
       staffShiftOverrides,
       staffScheduleAssignments,
       shiftScheduleBlocks,
@@ -1596,6 +1603,7 @@ const countModuleData = async (modules: Set<ClearModule>) => {
     counts.inventoryCategories = await prisma.inventoryCategory.count()
   }
   if (modules.has("shifts")) {
+    counts.staffRosterHistoryDays = await prisma.staffRosterHistoryDay.count()
     counts.staffShiftOverrides = await prisma.staffShiftOverride.count()
     counts.staffScheduleAssignments = await prisma.staffScheduleAssignment.count()
     counts.shiftScheduleBlocks = await prisma.shiftScheduleBlock.count()
@@ -1674,6 +1682,7 @@ const clearModulesData = async (modules: Set<ClearModule>) => {
         counts.suppliers = (await tx.supplier.deleteMany({})).count
         counts.inventoryCategories = (await tx.inventoryCategory.deleteMany({})).count
       } else if (moduleKey === "shifts") {
+        counts.staffRosterHistoryDays = (await tx.staffRosterHistoryDay.deleteMany({})).count
         counts.staffShiftOverrides = (await tx.staffShiftOverride.deleteMany({})).count
         counts.staffScheduleAssignments = (await tx.staffScheduleAssignment.deleteMany({})).count
         counts.shiftScheduleBlocks = (await tx.shiftScheduleBlock.deleteMany({})).count

@@ -3,6 +3,10 @@ import { NextResponse } from "next/server"
 import { AppointmentStatus } from "@prisma/client"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import {
+  normalizeHistoryRangeToPast,
+  syncRosterHistoryRange,
+} from "@/lib/roster-history"
 import { shiftOverrideSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
 
@@ -359,6 +363,16 @@ export async function POST(request: Request) {
     )
   )
 
+  const normalizedPastRange = normalizeHistoryRangeToPast(data.startDate, data.endDate)
+  if (normalizedPastRange) {
+    await syncRosterHistoryRange(prisma, {
+      staffProfileIds: [staffProfile.id],
+      startDate: normalizedPastRange.startDate,
+      endDate: normalizedPastRange.endDate,
+      mode: "replace",
+    })
+  }
+
   return NextResponse.json({ createdCount: results.length })
 }
 
@@ -411,6 +425,16 @@ export async function DELETE(request: Request) {
       },
     },
   })
+
+  const normalizedPastRange = normalizeHistoryRangeToPast(startDate, endDate)
+  if (normalizedPastRange) {
+    await syncRosterHistoryRange(prisma, {
+      staffProfileIds: [staffProfile.id],
+      startDate: normalizedPastRange.startDate,
+      endDate: normalizedPastRange.endDate,
+      mode: "replace",
+    })
+  }
 
   return NextResponse.json({ deletedCount: result.count })
 }

@@ -89,8 +89,8 @@ export async function GET(request: Request) {
     staffEmail: item.staffProfile.user.email,
     leaveDefinitionCode: item.leaveDefinition.code,
     leaveDefinitionName: item.leaveDefinition.name,
-    startDate: item.startDate.toISOString(),
-    endDate: item.endDate.toISOString(),
+    startDate: item.startDate.toISOString().slice(0, 10),
+    endDate: item.endDate.toISOString().slice(0, 10),
     reason: item.reason,
   }))
 

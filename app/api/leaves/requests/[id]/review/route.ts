@@ -3,6 +3,10 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import {
+  normalizeHistoryRangeToPast,
+  syncRosterHistoryRange,
+} from "@/lib/roster-history"
 import { reviewLeaveRequestSchema } from "@/lib/validation"
 import { notifyLeaveReviewed } from "../../../_notifications"
 import {
@@ -100,6 +104,18 @@ export async function PATCH(
     })
 
     const serialized = serializeLeaveRequest(item)
+    const normalizedPastRange = normalizeHistoryRangeToPast(
+      serialized.startDate.slice(0, 10),
+      serialized.endDate.slice(0, 10)
+    )
+    if (normalizedPastRange) {
+      await syncRosterHistoryRange(prisma, {
+        staffProfileIds: [serialized.staffProfileId],
+        startDate: normalizedPastRange.startDate,
+        endDate: normalizedPastRange.endDate,
+        mode: "replace",
+      })
+    }
     void notifyLeaveReviewed(prisma, {
       staffUserId: serialized.staff.userId,
       status: parsed.data.status,

@@ -103,6 +103,20 @@ export type ShiftOverride = {
   templateId: string | null
 }
 
+export type RosterHistoryDay = {
+  staffId: string
+  date: string
+  source: "SCHEDULE" | "OVERRIDE" | "LEAVE" | "UNAVAILABLE" | "OFF"
+  templateId: string | null
+  templateName: string | null
+  startTime: string | null
+  endTime: string | null
+  paidMinutes: number
+  leaveDefinitionCode: string | null
+  leaveDefinitionName: string | null
+  leaveReason: string | null
+}
+
 export type AvailabilityEvent = {
   Id: string
   Subject: string
