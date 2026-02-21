@@ -15,7 +15,6 @@ datasource db {
 }
 
 enum Role {
-  OWNER
   ADMIN
   MANAGER
   STAFF

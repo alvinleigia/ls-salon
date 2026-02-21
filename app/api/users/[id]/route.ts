@@ -68,7 +68,7 @@ export async function PATCH(
   const data: {
     name?: string
     email?: string
-    role?: "OWNER" | "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
+    role?: "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
     passwordHash?: string
     phone?: string
     image?: string
@@ -86,7 +86,7 @@ export async function PATCH(
   const eligibleServiceIds = bodyData.eligibleServiceIds
   const staffProfileInput = bodyData.staffProfile
 
-  if (role === "OWNER" || role === "ADMIN") {
+  if (role === "ADMIN") {
     if (bodyData.name?.trim()) data.name = bodyData.name.trim()
     if (bodyData.email?.trim()) data.email = bodyData.email.trim().toLowerCase()
     if (bodyData.role) data.role = bodyData.role
@@ -186,7 +186,7 @@ export async function PATCH(
       },
     })
 
-    if (role === "OWNER" || role === "ADMIN") {
+    if (role === "ADMIN") {
       if (normalizedEligibleServiceIds !== null) {
         await tx.staffServiceEligibility.deleteMany({ where: { userId: id } })
         if (normalizedEligibleServiceIds.length) {

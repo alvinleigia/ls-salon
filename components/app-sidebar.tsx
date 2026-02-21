@@ -60,6 +60,21 @@ export function AppSidebar() {
   const pathname = usePathname()
   const user = session?.user
   const role = (user as { role?: Role })?.role
+  const platformTenantSlug =
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "default"
+  const tenantSlug = React.useMemo(() => {
+    if (typeof window === "undefined") return null
+    const hostname = window.location.hostname.toLowerCase()
+    if (hostname === "localhost") return "default"
+    if (hostname.endsWith(".localhost")) {
+      const slug = hostname.slice(0, -".localhost".length)
+      return slug || null
+    }
+    return null
+  }, [pathname])
+  const isPlatformSuperAdmin =
+    role === "ADMIN" &&
+    tenantSlug === platformTenantSlug
   const name = user?.name?.trim() || user?.email?.trim() || "Guest"
   const initials = name
     .split(" ")
@@ -99,14 +114,14 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
-              {canManageUsers(role ?? null) || role === "STAFF" ? (
+              {!isPlatformSuperAdmin && (canManageUsers(role ?? null) || role === "STAFF") ? (
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
                     data-active={pathname.startsWith("/leaves")}
                   >
                     <Link
-                      href={role === "OWNER" || role === "ADMIN" ? "/leaves/approvals" : "/leaves/requests"}
+                      href={role === "ADMIN" ? "/leaves/approvals" : "/leaves/requests"}
                       className="flex w-full items-center"
                     >
                       <CalendarClockIcon className="h-4 w-4" />
@@ -176,7 +191,7 @@ export function AppSidebar() {
                   </SidebarMenuSub>
                 </SidebarMenuItem>
               ) : null}
-              {canManageUsers(role ?? null) ? (
+              {!isPlatformSuperAdmin && canManageUsers(role ?? null) ? (
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
@@ -220,7 +235,7 @@ export function AppSidebar() {
                   </SidebarMenuSub>
                 </SidebarMenuItem>
               ) : null}
-              {canManageUsers(role ?? null) ? (
+              {!isPlatformSuperAdmin && canManageUsers(role ?? null) ? (
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
@@ -286,7 +301,7 @@ export function AppSidebar() {
                   </SidebarMenuSub>
                 </SidebarMenuItem>
               ) : null}
-              {canManageUsers(role ?? null) ? (
+              {!isPlatformSuperAdmin && canManageUsers(role ?? null) ? (
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
@@ -330,7 +345,7 @@ export function AppSidebar() {
                   </SidebarMenuSub>
                 </SidebarMenuItem>
               ) : null}
-              {canManageUsers(role ?? null) ? (
+              {!isPlatformSuperAdmin && canManageUsers(role ?? null) ? (
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
@@ -374,7 +389,7 @@ export function AppSidebar() {
                   </SidebarMenuSub>
                 </SidebarMenuItem>
               ) : null}
-              {canManageUsers(role ?? null) ? (
+              {!isPlatformSuperAdmin && canManageUsers(role ?? null) ? (
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
@@ -420,7 +435,7 @@ export function AppSidebar() {
                   </SidebarMenuSub>
                 </SidebarMenuItem>
               ) : null}
-              {canManageUsers(role ?? null) ? (
+              {!isPlatformSuperAdmin && canManageUsers(role ?? null) ? (
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
@@ -481,7 +496,7 @@ export function AppSidebar() {
                     asChild
                     data-active={pathname.startsWith("/settings")}
                   >
-                    <Link href="/settings" className="flex w-full items-center">
+                    <Link href={isPlatformSuperAdmin ? "/settings/tenants" : "/settings"} className="flex w-full items-center">
                       <SettingsIcon className="h-4 w-4" />
                       <span>Settings</span>
                       <span
@@ -494,39 +509,45 @@ export function AppSidebar() {
                     </Link>
                   </SidebarMenuButton>
                   <SidebarMenuSub>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/settings"}
-                      >
-                        <Link href="/settings">
-                          <SettingsIcon className="h-4 w-4" />
-                          <span>General</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/settings/taxes"}
-                      >
-                        <Link href="/settings/taxes">
-                          <TagIcon className="h-4 w-4" />
-                          <span>Taxes</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/settings/seeds"}
-                      >
-                        <Link href="/settings/seeds">
-                          <PackageIcon className="h-4 w-4" />
-                          <span>Seeds</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
+                    {!isPlatformSuperAdmin ? (
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          isActive={pathname === "/settings"}
+                        >
+                          <Link href="/settings">
+                            <SettingsIcon className="h-4 w-4" />
+                            <span>General</span>
+                          </Link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    ) : null}
+                    {!isPlatformSuperAdmin ? (
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          isActive={pathname === "/settings/taxes"}
+                        >
+                          <Link href="/settings/taxes">
+                            <TagIcon className="h-4 w-4" />
+                            <span>Taxes</span>
+                          </Link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    ) : null}
+                    {!isPlatformSuperAdmin ? (
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          isActive={pathname === "/settings/seeds"}
+                        >
+                          <Link href="/settings/seeds">
+                            <PackageIcon className="h-4 w-4" />
+                            <span>Seeds</span>
+                          </Link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    ) : null}
                     {canManageTenants(role ?? null) ? (
                       <SidebarMenuSubItem>
                         <SidebarMenuSubButton

@@ -164,11 +164,11 @@ export async function POST(request: Request) {
   try {
     const data = parsed.data
     const normalizedSlug = data.slug.trim().toLowerCase()
-    const normalizedOwnerEmail = data.ownerEmail.trim().toLowerCase()
+    const normalizedAdminEmail = data.adminEmail.trim().toLowerCase()
 
     const [existingTenant, existingUser] = await Promise.all([
       prisma.tenant.findUnique({ where: { slug: normalizedSlug }, select: { id: true } }),
-      prisma.user.findFirst({ where: { email: normalizedOwnerEmail }, select: { id: true } }),
+      prisma.user.findFirst({ where: { email: normalizedAdminEmail }, select: { id: true } }),
     ])
     if (existingTenant) {
       const response = NextResponse.json({ error: "Tenant slug already exists." }, { status: 409 })
@@ -176,12 +176,12 @@ export async function POST(request: Request) {
       return withRequestId(response, logContext.requestId)
     }
     if (existingUser) {
-      const response = NextResponse.json({ error: "Owner email already exists." }, { status: 409 })
-      logApiRequestSuccess(logContext, 409, { reason: "duplicate_owner_email" })
+      const response = NextResponse.json({ error: "Admin email already exists." }, { status: 409 })
+      logApiRequestSuccess(logContext, 409, { reason: "duplicate_admin_email" })
       return withRequestId(response, logContext.requestId)
     }
 
-    const ownerPasswordHash = await bcrypt.hash(data.ownerPassword, 10)
+    const adminPasswordHash = await bcrypt.hash(data.adminPassword, 10)
 
     const created = await prisma.$transaction(async (tx) => {
       const tenant = await tx.tenant.create({
@@ -192,14 +192,14 @@ export async function POST(request: Request) {
         },
         select: { id: true, name: true, slug: true, status: true, createdAt: true },
       })
-      const owner = await tx.user.create({
+      const admin = await tx.user.create({
         data: {
           tenantId: tenant.id,
-          name: data.ownerName.trim(),
-          email: normalizedOwnerEmail,
-          role: "OWNER",
+          name: data.adminName.trim(),
+          email: normalizedAdminEmail,
+          role: "ADMIN",
           status: "ACTIVE",
-          passwordHash: ownerPasswordHash,
+          passwordHash: adminPasswordHash,
         },
         select: { id: true, name: true, email: true, role: true, createdAt: true },
       })
@@ -209,7 +209,7 @@ export async function POST(request: Request) {
         data: { tenantId: tenant.id },
       })
 
-      return { tenant, owner }
+      return { tenant, admin }
     })
     await recordDomainAuditEventSafe(prisma, {
       tenantId: actorTenantId,
@@ -221,8 +221,9 @@ export async function POST(request: Request) {
       requestId: logContext.requestId,
       metadata: {
         tenantSlug: created.tenant.slug,
-        ownerUserId: created.owner.id,
-        ownerEmail: created.owner.email,
+        adminUserId: created.admin.id,
+        adminEmail: created.admin.email,
+        adminRole: created.admin.role,
       },
       after: {
         name: created.tenant.name,
@@ -240,21 +241,21 @@ export async function POST(request: Request) {
           status: created.tenant.status,
           createdAt: created.tenant.createdAt.toISOString(),
         },
-        owner: {
-          id: created.owner.id,
-          name: created.owner.name,
-          email: created.owner.email,
-          role: created.owner.role,
-          createdAt: created.owner.createdAt.toISOString(),
+        admin: {
+          id: created.admin.id,
+          name: created.admin.name,
+          email: created.admin.email,
+          role: created.admin.role,
+          createdAt: created.admin.createdAt.toISOString(),
         },
       },
       { status: 201 }
     )
-    logApiRequestSuccess(logContext, 201, { tenantSlug: created.tenant.slug, ownerId: created.owner.id })
+    logApiRequestSuccess(logContext, 201, { tenantSlug: created.tenant.slug, adminId: created.admin.id })
     return withRequestId(response, logContext.requestId)
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      const response = NextResponse.json({ error: "Duplicate tenant or owner data." }, { status: 409 })
+      const response = NextResponse.json({ error: "Duplicate tenant or admin data." }, { status: 409 })
       logApiRequestSuccess(logContext, 409, { reason: "p2002_conflict" })
       return withRequestId(response, logContext.requestId)
     }

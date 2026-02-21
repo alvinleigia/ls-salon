@@ -49,7 +49,7 @@ type LeaveRequestWithRelations = {
       id: string
       name: string | null
       email: string
-      role: "OWNER" | "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
+      role: "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
     }
   }
   reviewedByUser: {

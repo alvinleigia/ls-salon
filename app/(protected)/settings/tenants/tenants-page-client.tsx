@@ -38,17 +38,17 @@ type TenantRow = {
 type TenantCreateFormValues = {
   name: string
   slug: string
-  ownerName: string
-  ownerEmail: string
-  ownerPassword: string
+  adminName: string
+  adminEmail: string
+  adminPassword: string
 }
 
 const defaultFormValues: TenantCreateFormValues = {
   name: "",
   slug: "",
-  ownerName: "",
-  ownerEmail: "",
-  ownerPassword: "",
+  adminName: "",
+  adminEmail: "",
+  adminPassword: "",
 }
 
 const formatDateTime = (value: string) => {
@@ -67,7 +67,7 @@ export default function TenantsPageClient() {
   const [pagination, setPagination] = React.useState<PaginationState>({ pageIndex: 0, pageSize: 10 })
   const [createOpen, setCreateOpen] = React.useState(false)
   const [lifecycleUpdatingId, setLifecycleUpdatingId] = React.useState<string | null>(null)
-  const [ownerResettingId, setOwnerResettingId] = React.useState<string | null>(null)
+  const [adminResettingId, setAdminResettingId] = React.useState<string | null>(null)
   const [pendingStatusChange, setPendingStatusChange] = React.useState<{
     tenant: TenantRow
     status: TenantStatus
@@ -152,9 +152,9 @@ export default function TenantsPageClient() {
     await loadTenants()
   }
 
-  const sendOwnerReset = async (tenant: TenantRow) => {
-    setOwnerResettingId(tenant.id)
-    const response = await fetch(`/api/tenants/${tenant.id}/owner-reset`, {
+  const sendAdminReset = async (tenant: TenantRow) => {
+    setAdminResettingId(tenant.id)
+    const response = await fetch(`/api/tenants/${tenant.id}/admin-reset`, {
       method: "POST",
     })
     const data = (await response.json().catch(() => ({}))) as {
@@ -163,8 +163,8 @@ export default function TenantsPageClient() {
       resetUrl?: string
     }
     if (!response.ok) {
-      toast.error(data.error ?? "Unable to send owner reset.")
-      setOwnerResettingId(null)
+      toast.error(data.error ?? "Unable to send admin reset.")
+      setAdminResettingId(null)
       return
     }
 
@@ -176,9 +176,9 @@ export default function TenantsPageClient() {
         toast.success("Email not configured. Reset link returned by API.")
       }
     } else {
-      toast.success("Owner reset link sent.")
+      toast.success("Admin reset link sent.")
     }
-    setOwnerResettingId(null)
+    setAdminResettingId(null)
   }
 
   const columns = React.useMemo<ColumnDef<TenantRow>[]>(
@@ -219,7 +219,7 @@ export default function TenantsPageClient() {
         header: "",
         cell: ({ row }) => {
           const tenant = row.original
-          const canMutate = lifecycleUpdatingId !== tenant.id && ownerResettingId !== tenant.id
+          const canMutate = lifecycleUpdatingId !== tenant.id && adminResettingId !== tenant.id
           return (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -250,8 +250,8 @@ export default function TenantsPageClient() {
                     Archive
                   </DropdownMenuItem>
                 ) : null}
-                <DropdownMenuItem onSelect={() => void sendOwnerReset(tenant)}>
-                  Send owner reset
+                <DropdownMenuItem onSelect={() => void sendAdminReset(tenant)}>
+                  Send admin reset
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -259,7 +259,7 @@ export default function TenantsPageClient() {
         },
       },
     ],
-    [lifecycleUpdatingId, ownerResettingId]
+    [lifecycleUpdatingId, adminResettingId]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -285,7 +285,7 @@ export default function TenantsPageClient() {
         <div>
           <h1 className="text-2xl font-semibold">Tenants</h1>
           <p className="text-sm text-muted-foreground">
-            Provision tenant accounts and assign an owner user.
+            Provision tenant accounts and assign an initial admin user.
           </p>
         </div>
         <Button
@@ -357,36 +357,36 @@ export default function TenantsPageClient() {
                 placeholder="example-tenant"
               />
             </FormField>
-            <FormField id="owner-name" label="Owner name" error={errors.ownerName}>
+            <FormField id="admin-name" label="Admin name" error={errors.adminName}>
               <Input
-                id="owner-name"
-                value={formValues.ownerName}
+                id="admin-name"
+                value={formValues.adminName}
                 onChange={(event) =>
-                  setFormValues((prev) => ({ ...prev, ownerName: event.target.value }))
+                  setFormValues((prev) => ({ ...prev, adminName: event.target.value }))
                 }
               />
             </FormField>
-            <FormField id="owner-email" label="Owner email" error={errors.ownerEmail}>
+            <FormField id="admin-email" label="Admin email" error={errors.adminEmail}>
               <Input
-                id="owner-email"
+                id="admin-email"
                 type="email"
-                value={formValues.ownerEmail}
+                value={formValues.adminEmail}
                 onChange={(event) =>
-                  setFormValues((prev) => ({ ...prev, ownerEmail: event.target.value }))
+                  setFormValues((prev) => ({ ...prev, adminEmail: event.target.value }))
                 }
               />
             </FormField>
             <FormField
-              id="owner-password"
+              id="admin-password"
               label="Temporary password"
-              error={errors.ownerPassword}
+              error={errors.adminPassword}
             >
               <Input
-                id="owner-password"
+                id="admin-password"
                 type="password"
-                value={formValues.ownerPassword}
+                value={formValues.adminPassword}
                 onChange={(event) =>
-                  setFormValues((prev) => ({ ...prev, ownerPassword: event.target.value }))
+                  setFormValues((prev) => ({ ...prev, adminPassword: event.target.value }))
                 }
               />
             </FormField>

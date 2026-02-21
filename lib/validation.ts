@@ -2,7 +2,7 @@ import { z } from "zod"
 import { INVENTORY_UNIT_OPTIONS } from "@/lib/constants/inventory"
 import { getStateOptionsByCountry } from "@/lib/constants/countries"
 
-export const roleSchema = z.enum(["OWNER", "ADMIN", "MANAGER", "STAFF", "CUSTOMER"])
+export const roleSchema = z.enum(["ADMIN", "MANAGER", "STAFF", "CUSTOMER"])
 export const genderSchema = z.enum([
   "MALE",
   "FEMALE",
@@ -1090,9 +1090,9 @@ export const createTenantSchema = z.object({
     .min(2)
     .max(63)
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  ownerName: z.string().trim().min(1).max(100),
-  ownerEmail: z.string().trim().email(),
-  ownerPassword: z.string().trim().min(8).max(100),
+  adminName: z.string().trim().min(1).max(100),
+  adminEmail: z.string().trim().email(),
+  adminPassword: z.string().trim().min(8).max(100),
 })
 
 export const updateTenantStatusSchema = z.object({

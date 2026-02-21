@@ -20,7 +20,7 @@ const paginationSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().trim().optional(),
   q: z.string().trim().optional(),
-  role: z.enum(["OWNER", "ADMIN", "MANAGER", "STAFF", "CUSTOMER"]).optional(),
+  role: z.enum(["ADMIN", "MANAGER", "STAFF", "CUSTOMER"]).optional(),
   status: z.enum(["ACTIVE", "SUSPENDED", "INVITED", "ARCHIVED"]).optional(),
   sortBy: z
     .enum(["createdAt", "name", "email", "phone", "role", "status", "lastLoginAt"])
