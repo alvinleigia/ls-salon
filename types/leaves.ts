@@ -10,7 +10,7 @@ export type LeaveDefinitionAllowedUsers = "MALE" | "FEMALE" | "ALL"
 export type LeaveDefinitionStatus = "ACTIVE" | "INACTIVE"
 export type LeaveGroupAssignmentMode = "ALL_STAFF" | "SELECTED_STAFF"
 export type LeaveGroupStatus = "ACTIVE" | "INACTIVE"
-export type LeaveRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELED"
+export type LeaveRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELED" | "REVOKED"
 
 export type LeaveDefinitionRow = {
   id: string
@@ -111,6 +111,9 @@ export type LeaveRequestRow = {
   reviewerComment: string | null
   canceledAt: string | null
   cancelReason: string | null
+  revokedAt: string | null
+  revokedByUserId: string | null
+  revokeReason: string | null
   createdAt: string
   updatedAt: string
   leaveDefinition: {
@@ -125,6 +128,11 @@ export type LeaveRequestRow = {
     email: string
   }
   reviewedBy: {
+    id: string
+    name: string | null
+    email: string
+  } | null
+  revokedBy: {
     id: string
     name: string | null
     email: string
@@ -146,7 +154,7 @@ export type LeaveRequestRuleCheck = {
 }
 
 export type LeaveRequestTimelineEvent = {
-  key: "submitted" | "reviewed" | "canceled"
+  key: "submitted" | "reviewed" | "canceled" | "revoked"
   title: string
   at: string
   byName: string | null

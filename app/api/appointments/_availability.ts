@@ -201,6 +201,26 @@ export const checkStaffAppointmentAvailability = async (
     return { ok: false, reason: "Appointment cannot span multiple local dates." }
   }
 
+  const dateValue = new Date(`${dateKey}T00:00:00.000Z`)
+  const approvedLeave = await prisma.leaveRequest.findFirst({
+    where: {
+      staffProfileId,
+      status: "APPROVED",
+      startDate: { lte: dateValue },
+      endDate: { gte: dateValue },
+    },
+    select: {
+      leaveDefinition: { select: { code: true, name: true } },
+    },
+  })
+  if (approvedLeave) {
+    const leaveLabel = `${approvedLeave.leaveDefinition.code} - ${approvedLeave.leaveDefinition.name}`
+    return {
+      ok: false,
+      reason: `Staff member is on approved leave (${leaveLabel}) on this date.`,
+    }
+  }
+
   const { template, reason } = await resolveTemplateForDate(staffProfileId, dateKey)
   if (!template) {
     return { ok: false, reason }

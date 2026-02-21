@@ -903,32 +903,22 @@ const seedAppointments = async () => {
     throw new Error("User and service seeds are required before seeding appointments.")
   }
 
-  const scenarios = [
-    {
-      marker: "SEED_APPT_PAST_1",
-      daysFromToday: -4,
-      status: AppointmentOrderStatus.COMPLETED,
-      appointmentStatus: AppointmentStatus.COMPLETED,
-    },
-    {
-      marker: "SEED_APPT_PAST_2",
-      daysFromToday: -2,
-      status: AppointmentOrderStatus.COMPLETED,
-      appointmentStatus: AppointmentStatus.COMPLETED,
-    },
-    {
-      marker: "SEED_APPT_FUTURE_1",
-      daysFromToday: 2,
-      status: AppointmentOrderStatus.CONFIRMED,
-      appointmentStatus: AppointmentStatus.SCHEDULED,
-    },
-    {
-      marker: "SEED_APPT_FUTURE_2",
-      daysFromToday: 5,
-      status: AppointmentOrderStatus.CONFIRMED,
-      appointmentStatus: AppointmentStatus.SCHEDULED,
-    },
-  ]
+  const totalAppointments = 60
+  const pastAppointments = 12
+  const scenarios = Array.from({ length: totalAppointments }, (_, index) => {
+    const isPast = index < pastAppointments
+    const daysFromToday = isPast
+      ? -1 - (index % 7)
+      : 1 + Math.floor((index - pastAppointments) / 2)
+    return {
+      marker: `SEED_APPT_V2_${String(index + 1).padStart(3, "0")}`,
+      daysFromToday,
+      hour: 9 + (index % 8),
+      minute: (index % 2) * 30,
+      status: isPast ? AppointmentOrderStatus.COMPLETED : AppointmentOrderStatus.CONFIRMED,
+      appointmentStatus: isPast ? AppointmentStatus.COMPLETED : AppointmentStatus.SCHEDULED,
+    }
+  })
 
   let created = 0
   for (let index = 0; index < scenarios.length; index += 1) {
@@ -942,7 +932,7 @@ const seedAppointments = async () => {
     const customerId = customers[index % customers.length].id
     const staffProfileId = staffProfiles[index % staffProfiles.length].id
     const service = services[index % services.length]
-    const startAt = buildSeedDateTime(scenario.daysFromToday, 10 + (index % 3), 0)
+    const startAt = buildSeedDateTime(scenario.daysFromToday, scenario.hour, scenario.minute)
     const endAt = new Date(startAt.getTime() + service.durationMinutes * 60000)
     const appointmentDate = toDateOnlyUtc(startAt)
     const subtotalCents = service.priceCents

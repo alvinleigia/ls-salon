@@ -9,7 +9,11 @@ import {
 } from "@/lib/roster-history"
 import { bulkReviewLeaveRequestsSchema } from "@/lib/validation"
 import { notifyLeaveReviewed } from "../../_notifications"
-import { leaveRequestSelect, serializeLeaveRequest } from "../../_requests"
+import {
+  findLeaveApprovalConflicts,
+  leaveRequestSelect,
+  serializeLeaveRequest,
+} from "../../_requests"
 
 export async function POST(request: Request) {
   const session = await auth()
@@ -56,6 +60,9 @@ export async function POST(request: Request) {
     where: { id: { in: requestIds } },
     select: {
       id: true,
+      staffProfileId: true,
+      startDate: true,
+      endDate: true,
       status: true,
       staffProfile: {
         select: {
@@ -84,6 +91,30 @@ export async function POST(request: Request) {
       skippedCount: skippedIds.length,
       skippedIds,
     })
+  }
+
+  if (status === "APPROVED") {
+    const conflicts = await findLeaveApprovalConflicts(
+      prisma,
+      currentItems
+        .filter((item) => pendingIds.includes(item.id))
+        .map((item) => ({
+          id: item.id,
+          staffProfileId: item.staffProfileId,
+          startDate: item.startDate,
+          endDate: item.endDate,
+        }))
+    )
+    if (conflicts.length > 0) {
+      return NextResponse.json(
+        {
+          error: "Cannot approve selected leave requests because active appointments overlap.",
+          conflicts,
+          blockedRequestIds: conflicts.map((item) => item.requestId),
+        },
+        { status: 409 }
+      )
+    }
   }
 
   await prisma.leaveRequest.updateMany({

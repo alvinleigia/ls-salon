@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
-import { canManageUsers, type Role } from "@/lib/permissions"
+import type { Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import {
   normalizeHistoryRangeToPast,
   syncRosterHistoryRange,
 } from "@/lib/roster-history"
-import { reviewLeaveRequestSchema } from "@/lib/validation"
-import { notifyLeaveReviewed } from "../../../_notifications"
+import { revokeLeaveRequestSchema } from "@/lib/validation"
+import { notifyLeaveRevoked } from "../../../_notifications"
 import {
-  assertReviewTransitionAllowed,
-  findLeaveApprovalConflicts,
+  assertRevokeTransitionAllowed,
   leaveRequestSelect,
   serializeLeaveRequest,
 } from "../../../_requests"
@@ -23,34 +22,17 @@ export async function PATCH(
   const session = await auth()
   const role = (session?.user as { role?: string })?.role as Role | undefined
   const sessionUserId = (session?.user as { id?: string })?.id
-  const sessionUserEmail = (session?.user as { email?: string })?.email?.trim().toLowerCase()
-  if (!session?.user || !canManageUsers(role ?? null)) {
+  const isAdmin = role === "ADMIN"
+  const isManager = role === "MANAGER"
+  if (!session?.user || (!isAdmin && !isManager)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
   if (!sessionUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
-  const reviewerById = await prisma.user.findUnique({
-    where: { id: sessionUserId },
-    select: { id: true },
-  })
-  const reviewer =
-    reviewerById ??
-    (sessionUserEmail
-      ? await prisma.user.findUnique({
-          where: { email: sessionUserEmail },
-          select: { id: true },
-        })
-      : null)
-  if (!reviewer) {
-    return NextResponse.json(
-      { error: "Session user not found. Please sign in again." },
-      { status: 401 }
-    )
-  }
 
   const payload = await request.json().catch(() => ({}))
-  const parsed = reviewLeaveRequestSchema.safeParse(payload)
+  const parsed = revokeLeaveRequestSchema.safeParse(payload)
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Invalid input.", details: parsed.error.flatten() },
@@ -63,15 +45,14 @@ export async function PATCH(
     where: { id },
     select: {
       id: true,
-      staffProfileId: true,
-      startDate: true,
-      endDate: true,
       status: true,
       staffProfile: {
         select: {
           managerUserId: true,
           user: {
-            select: { role: true },
+            select: {
+              role: true,
+            },
           },
         },
       },
@@ -80,48 +61,27 @@ export async function PATCH(
   if (!current) {
     return NextResponse.json({ error: "Leave request not found." }, { status: 404 })
   }
-  if (role === "MANAGER" && current.staffProfile.user.role !== "STAFF") {
+  if (
+    isManager &&
+    (current.staffProfile.user.role !== "STAFF" ||
+      current.staffProfile.managerUserId !== sessionUserId)
+  ) {
     return NextResponse.json(
-      { error: "Managers can only review staff leave requests." },
-      { status: 403 }
-    )
-  }
-  if (role === "MANAGER" && current.staffProfile.managerUserId !== reviewer.id) {
-    return NextResponse.json(
-      { error: "You can only review requests for your assigned staff." },
+      { error: "You can only revoke approved requests for your assigned staff." },
       { status: 403 }
     )
   }
 
   try {
-    assertReviewTransitionAllowed(current.status)
-    if (parsed.data.status === "APPROVED") {
-      const conflicts = await findLeaveApprovalConflicts(prisma, [
-        {
-          id: current.id,
-          staffProfileId: current.staffProfileId,
-          startDate: current.startDate,
-          endDate: current.endDate,
-        },
-      ])
-      if (conflicts.length > 0) {
-        return NextResponse.json(
-          {
-            error: "Cannot approve leave request because active appointments overlap this date range.",
-            conflicts,
-          },
-          { status: 409 }
-        )
-      }
-    }
+    assertRevokeTransitionAllowed(current.status)
 
     const item = await prisma.leaveRequest.update({
       where: { id },
       data: {
-        status: parsed.data.status,
-        reviewedByUserId: reviewer.id,
-        reviewedAt: new Date(),
-        reviewerComment: parsed.data.reviewerComment?.trim() || null,
+        status: "REVOKED",
+        revokedAt: new Date(),
+        revokedByUserId: sessionUserId,
+        revokeReason: parsed.data.revokeReason.trim(),
       },
       select: leaveRequestSelect,
     })
@@ -139,11 +99,12 @@ export async function PATCH(
         mode: "replace",
       })
     }
-    void notifyLeaveReviewed(prisma, {
+
+    void notifyLeaveRevoked(prisma, {
       staffUserId: serialized.staff.userId,
-      status: parsed.data.status,
-      reviewerName: serialized.reviewedBy?.name ?? null,
-      reviewerComment: serialized.reviewerComment,
+      revokedByName:
+        (session.user as { name?: string | null })?.name ?? null,
+      revokeReason: serialized.revokeReason,
       leaveCode: serialized.leaveDefinition.code,
       leaveName: serialized.leaveDefinition.name,
       startDateIso: serialized.startDate.slice(0, 10),
@@ -156,6 +117,7 @@ export async function PATCH(
     if (error instanceof Error) {
       return NextResponse.json({ error: error.message }, { status: 400 })
     }
-    return NextResponse.json({ error: "Unable to review leave request." }, { status: 500 })
+    return NextResponse.json({ error: "Unable to revoke leave request." }, { status: 500 })
   }
 }
+

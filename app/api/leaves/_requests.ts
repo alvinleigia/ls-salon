@@ -31,6 +31,9 @@ type LeaveRequestWithRelations = {
   reviewerComment: string | null
   canceledAt: Date | null
   cancelReason: string | null
+  revokedAt: Date | null
+  revokedByUserId: string | null
+  revokeReason: string | null
   createdAt: Date
   updatedAt: Date
   leaveDefinition: {
@@ -53,9 +56,15 @@ type LeaveRequestWithRelations = {
     name: string | null
     email: string
   } | null
+  revokedByUser: {
+    id: string
+    name: string | null
+    email: string
+  } | null
 }
 
 const dayMs = 24 * 60 * 60 * 1000
+const ACTIVE_APPOINTMENT_STATUSES = ["SCHEDULED", "CONFIRMED", "IN_PROGRESS"] as const
 
 const parseDateOnly = (value: string) => {
   const [year, month, day] = value.split("-").map(Number)
@@ -73,6 +82,12 @@ const toIsoDate = (value: Date) => value.toISOString().slice(0, 10)
 
 const addDays = (value: Date, offset: number) =>
   new Date(value.getTime() + offset * dayMs)
+
+const addDaysUtc = (value: Date, offset: number) => {
+  const next = new Date(value)
+  next.setUTCDate(next.getUTCDate() + offset)
+  return next
+}
 
 const getTodayDateOnlyUtc = () => {
   const now = new Date()
@@ -381,7 +396,7 @@ export const validateCreateLeaveRequestRules = async ({
 }
 
 export const assertReviewTransitionAllowed = (
-  currentStatus: "PENDING" | "APPROVED" | "REJECTED" | "CANCELED"
+  currentStatus: "PENDING" | "APPROVED" | "REJECTED" | "CANCELED" | "REVOKED"
 ) => {
   if (currentStatus !== "PENDING") {
     throw new Error("Only pending leave requests can be reviewed.")
@@ -389,11 +404,89 @@ export const assertReviewTransitionAllowed = (
 }
 
 export const assertCancelTransitionAllowed = (
-  currentStatus: "PENDING" | "APPROVED" | "REJECTED" | "CANCELED"
+  currentStatus: "PENDING" | "APPROVED" | "REJECTED" | "CANCELED" | "REVOKED"
 ) => {
   if (currentStatus !== "PENDING" && currentStatus !== "APPROVED") {
     throw new Error("Only pending or approved leave requests can be canceled.")
   }
+}
+
+export const assertRevokeTransitionAllowed = (
+  currentStatus: "PENDING" | "APPROVED" | "REJECTED" | "CANCELED" | "REVOKED"
+) => {
+  if (currentStatus !== "APPROVED") {
+    throw new Error("Only approved leave requests can be revoked.")
+  }
+}
+
+type LeaveApprovalConflictInput = {
+  id: string
+  staffProfileId: string
+  startDate: Date
+  endDate: Date
+}
+
+type LeaveApprovalConflict = {
+  requestId: string
+  conflictCount: number
+  conflictingAppointments: Array<{
+    id: string
+    startAt: string
+    endAt: string
+    customerName: string | null
+    serviceName: string | null
+  }>
+}
+
+export const findLeaveApprovalConflicts = async (
+  tx: DbClient,
+  requests: LeaveApprovalConflictInput[]
+): Promise<LeaveApprovalConflict[]> => {
+  const conflicts: LeaveApprovalConflict[] = []
+  for (const request of requests) {
+    const rangeStart = request.startDate
+    const rangeEndExclusive = addDaysUtc(request.endDate, 1)
+    const [conflictCount, conflictingAppointments] = await Promise.all([
+      tx.appointment.count({
+        where: {
+          staffProfileId: request.staffProfileId,
+          status: { in: [...ACTIVE_APPOINTMENT_STATUSES] },
+          startAt: { lt: rangeEndExclusive },
+          endAt: { gt: rangeStart },
+        },
+      }),
+      tx.appointment.findMany({
+        where: {
+          staffProfileId: request.staffProfileId,
+          status: { in: [...ACTIVE_APPOINTMENT_STATUSES] },
+          startAt: { lt: rangeEndExclusive },
+          endAt: { gt: rangeStart },
+        },
+        select: {
+          id: true,
+          startAt: true,
+          endAt: true,
+          customer: { select: { name: true } },
+          service: { select: { name: true } },
+        },
+        orderBy: { startAt: "asc" },
+        take: 5,
+      }),
+    ])
+    if (conflictCount === 0) continue
+    conflicts.push({
+      requestId: request.id,
+      conflictCount,
+      conflictingAppointments: conflictingAppointments.map((item) => ({
+        id: item.id,
+        startAt: item.startAt.toISOString(),
+        endAt: item.endAt.toISOString(),
+        customerName: item.customer.name,
+        serviceName: item.service.name,
+      })),
+    })
+  }
+  return conflicts
 }
 
 export const leaveRequestSelect = {
@@ -410,6 +503,9 @@ export const leaveRequestSelect = {
   reviewerComment: true,
   canceledAt: true,
   cancelReason: true,
+  revokedAt: true,
+  revokedByUserId: true,
+  revokeReason: true,
   createdAt: true,
   updatedAt: true,
   leaveDefinition: {
@@ -440,6 +536,13 @@ export const leaveRequestSelect = {
       email: true,
     },
   },
+  revokedByUser: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+  },
 } satisfies Prisma.LeaveRequestSelect
 
 export const serializeLeaveRequest = (item: LeaveRequestWithRelations): LeaveRequestRow => ({
@@ -456,6 +559,9 @@ export const serializeLeaveRequest = (item: LeaveRequestWithRelations): LeaveReq
   reviewerComment: item.reviewerComment,
   canceledAt: item.canceledAt ? item.canceledAt.toISOString() : null,
   cancelReason: item.cancelReason,
+  revokedAt: item.revokedAt ? item.revokedAt.toISOString() : null,
+  revokedByUserId: item.revokedByUserId,
+  revokeReason: item.revokeReason,
   createdAt: item.createdAt.toISOString(),
   updatedAt: item.updatedAt.toISOString(),
   leaveDefinition: item.leaveDefinition,
@@ -470,6 +576,13 @@ export const serializeLeaveRequest = (item: LeaveRequestWithRelations): LeaveReq
         id: item.reviewedByUser.id,
         name: item.reviewedByUser.name,
         email: item.reviewedByUser.email,
+      }
+    : null,
+  revokedBy: item.revokedByUser
+    ? {
+        id: item.revokedByUser.id,
+        name: item.revokedByUser.name,
+        email: item.revokedByUser.email,
       }
     : null,
 })
@@ -616,6 +729,10 @@ type BuildLeaveRequestTimelineInput = {
   reviewerComment: string | null
   canceledAt: Date | null
   cancelReason: string | null
+  revokedAt: Date | null
+  revokedByName: string | null
+  revokedByEmail: string | null
+  revokeReason: string | null
 }
 
 export const buildLeaveRequestTimeline = ({
@@ -628,6 +745,10 @@ export const buildLeaveRequestTimeline = ({
   reviewerComment,
   canceledAt,
   cancelReason,
+  revokedAt,
+  revokedByName,
+  revokedByEmail,
+  revokeReason,
 }: BuildLeaveRequestTimelineInput): LeaveRequestTimelineEvent[] => {
   const timeline: LeaveRequestTimelineEvent[] = [
     {
@@ -659,6 +780,17 @@ export const buildLeaveRequestTimeline = ({
       byName: null,
       byEmail: null,
       comment: cancelReason,
+    })
+  }
+
+  if (revokedAt) {
+    timeline.push({
+      key: "revoked",
+      title: "Revoked",
+      at: revokedAt.toISOString(),
+      byName: revokedByName,
+      byEmail: revokedByEmail,
+      comment: revokeReason,
     })
   }
 

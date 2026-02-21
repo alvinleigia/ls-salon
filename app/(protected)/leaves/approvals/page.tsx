@@ -38,6 +38,38 @@ import type { ListResponse } from "@/types/api"
 import type { LeaveRequestRow, LeaveRequestStatus } from "@/types/leaves"
 
 type PaginationState = { pageIndex: number; pageSize: number }
+type LeaveApprovalConflict = {
+  requestId: string
+  conflictCount: number
+  conflictingAppointments: Array<{
+    id: string
+    startAt: string
+    endAt: string
+    customerName: string | null
+    serviceName: string | null
+  }>
+}
+
+type ConflictAppointmentPreview = {
+  id: string
+  startAt: string
+  endAt: string
+  customerName: string | null
+  serviceName: string | null
+}
+type ConflictResolutionContext =
+  | {
+      mode: "single"
+      item: LeaveRequestRow
+      reviewerComment: string
+      conflicts: LeaveApprovalConflict[]
+    }
+  | {
+      mode: "bulk"
+      items: LeaveRequestRow[]
+      reviewerComment: string
+      conflicts: LeaveApprovalConflict[]
+    }
 
 const sortFieldMap: Record<string, "startDate" | "endDate" | "status" | "daysCount" | "createdAt" | "updatedAt"> =
   {
@@ -55,6 +87,7 @@ const statusOptions: Array<LeaveRequestStatus | "all"> = [
   "APPROVED",
   "REJECTED",
   "CANCELED",
+  "REVOKED",
 ]
 
 const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
@@ -89,9 +122,83 @@ export default function LeaveApprovalsPage() {
   const [rejectOpen, setRejectOpen] = React.useState(false)
   const [rejectComment, setRejectComment] = React.useState("")
   const [rejectTargets, setRejectTargets] = React.useState<LeaveRequestRow[]>([])
+  const [revokeOpen, setRevokeOpen] = React.useState(false)
+  const [revokeReason, setRevokeReason] = React.useState("")
+  const [revokeTarget, setRevokeTarget] = React.useState<LeaveRequestRow | null>(null)
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({})
   const [detailOpen, setDetailOpen] = React.useState(false)
   const [detailRequestId, setDetailRequestId] = React.useState<string | null>(null)
+  const [conflictDialogOpen, setConflictDialogOpen] = React.useState(false)
+  const [conflictResolution, setConflictResolution] = React.useState<ConflictResolutionContext | null>(
+    null
+  )
+  const [rescheduleDate, setRescheduleDate] = React.useState("")
+  const [rescheduleTime, setRescheduleTime] = React.useState("")
+
+  const buildApprovalConflictMessage = React.useCallback((conflicts: LeaveApprovalConflict[]) => {
+    if (!conflicts.length) return "Active appointments overlap this leave date range."
+    const first = conflicts[0]
+    const countText =
+      first.conflictCount > 1
+        ? `${first.conflictCount} appointments`
+        : `${first.conflictCount} appointment`
+    const firstAppointment = first.conflictingAppointments?.[0]
+    if (!firstAppointment) {
+      return `Cannot approve due to ${countText} on this leave date range.`
+    }
+    const startsAt = new Date(firstAppointment.startAt).toLocaleString()
+    const service = firstAppointment.serviceName ?? "Service"
+    const customer = firstAppointment.customerName ?? "Customer"
+    return `Cannot approve due to ${countText}. Example: ${service} for ${customer} at ${startsAt}.`
+  }, [])
+
+  const collectConflictAppointmentIds = React.useCallback((conflicts: LeaveApprovalConflict[]) => {
+    return Array.from(
+      new Set(
+        conflicts.flatMap((item) => item.conflictingAppointments.map((appointment) => appointment.id))
+      )
+    )
+  }, [])
+
+  const conflictAppointments = React.useMemo<ConflictAppointmentPreview[]>(() => {
+    const map = new Map<string, ConflictAppointmentPreview>()
+    for (const conflict of conflictResolution?.conflicts ?? []) {
+      for (const appointment of conflict.conflictingAppointments) {
+        if (!map.has(appointment.id)) {
+          map.set(appointment.id, appointment)
+        }
+      }
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
+    )
+  }, [conflictResolution?.conflicts])
+
+  const reschedulePreview = React.useMemo(() => {
+    if (!rescheduleDate || !rescheduleTime || conflictAppointments.length === 0) return []
+    const nextStart = new Date(`${rescheduleDate}T${rescheduleTime}:00`)
+    if (Number.isNaN(nextStart.getTime())) return []
+
+    const firstStart = new Date(conflictAppointments[0].startAt).getTime()
+    return conflictAppointments.map((appointment) => {
+      const originalStart = new Date(appointment.startAt)
+      const originalEnd = new Date(appointment.endAt)
+      const durationMinutes = Math.max(
+        1,
+        Math.round((originalEnd.getTime() - originalStart.getTime()) / 60000)
+      )
+      const offsetMinutes = Math.round((originalStart.getTime() - firstStart) / 60000)
+      const proposedStart = new Date(nextStart)
+      proposedStart.setMinutes(proposedStart.getMinutes() + offsetMinutes)
+      const proposedEnd = new Date(proposedStart)
+      proposedEnd.setMinutes(proposedEnd.getMinutes() + durationMinutes)
+      return {
+        ...appointment,
+        proposedStart,
+        proposedEnd,
+      }
+    })
+  }, [conflictAppointments, rescheduleDate, rescheduleTime])
 
   React.useEffect(() => {
     if (role && !canManage) {
@@ -139,7 +246,12 @@ export default function LeaveApprovalsPage() {
   }, [search, sorting, statusFilter])
 
   const reviewRequest = React.useCallback(
-    async (item: LeaveRequestRow, status: "APPROVED" | "REJECTED", reviewerComment = "") => {
+    async (
+      item: LeaveRequestRow,
+      status: "APPROVED" | "REJECTED",
+      reviewerComment = "",
+      enableConflictDialog = true
+    ): Promise<boolean> => {
       setProcessing(true)
       const response = await fetch(`/api/leaves/requests/${item.id}/review`, {
         method: "PATCH",
@@ -147,21 +259,41 @@ export default function LeaveApprovalsPage() {
         body: JSON.stringify({ status, reviewerComment }),
       })
       if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string }
-        toast.error(data.error ?? "Unable to review leave request.")
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string
+          conflicts?: LeaveApprovalConflict[]
+        }
+        if (response.status === 409 && data.conflicts?.length && enableConflictDialog && status === "APPROVED") {
+          setConflictResolution({
+            mode: "single",
+            item,
+            reviewerComment,
+            conflicts: data.conflicts,
+          })
+          setConflictDialogOpen(true)
+          toast.error(buildApprovalConflictMessage(data.conflicts))
+        } else {
+          toast.error(data.error ?? "Unable to review leave request.")
+        }
         setProcessing(false)
-        return
+        return false
       }
       toast.success(status === "APPROVED" ? "Leave request approved." : "Leave request rejected.")
       setProcessing(false)
       await loadRows()
+      return true
     },
-    [loadRows]
+    [buildApprovalConflictMessage, loadRows]
   )
 
   const reviewBulkRequests = React.useCallback(
-    async (items: LeaveRequestRow[], status: "APPROVED" | "REJECTED", reviewerComment = "") => {
-      if (!items.length) return
+    async (
+      items: LeaveRequestRow[],
+      status: "APPROVED" | "REJECTED",
+      reviewerComment = "",
+      enableConflictDialog = true
+    ): Promise<boolean> => {
+      if (!items.length) return false
       setProcessing(true)
       const response = await fetch("/api/leaves/requests/review-bulk", {
         method: "POST",
@@ -173,10 +305,24 @@ export default function LeaveApprovalsPage() {
         }),
       })
       if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string }
-        toast.error(data.error ?? "Unable to bulk review leave requests.")
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string
+          conflicts?: LeaveApprovalConflict[]
+        }
+        if (response.status === 409 && data.conflicts?.length && enableConflictDialog && status === "APPROVED") {
+          setConflictResolution({
+            mode: "bulk",
+            items,
+            reviewerComment,
+            conflicts: data.conflicts,
+          })
+          setConflictDialogOpen(true)
+          toast.error(buildApprovalConflictMessage(data.conflicts))
+        } else {
+          toast.error(data.error ?? "Unable to bulk review leave requests.")
+        }
         setProcessing(false)
-        return
+        return false
       }
       const data = (await response.json()) as { updatedCount?: number; skippedCount?: number }
       const updatedCount = data.updatedCount ?? 0
@@ -186,8 +332,9 @@ export default function LeaveApprovalsPage() {
       )
       setProcessing(false)
       await loadRows()
+      return true
     },
-    [loadRows]
+    [buildApprovalConflictMessage, loadRows]
   )
 
   const openDetails = React.useCallback((item: LeaveRequestRow) => {
@@ -199,6 +346,12 @@ export default function LeaveApprovalsPage() {
     setRejectTargets([item])
     setRejectComment("")
     setRejectOpen(true)
+  }, [])
+
+  const openRevoke = React.useCallback((item: LeaveRequestRow) => {
+    setRevokeTarget(item)
+    setRevokeReason("")
+    setRevokeOpen(true)
   }, [])
 
   const openBulkReject = React.useCallback((items: LeaveRequestRow[]) => {
@@ -223,6 +376,102 @@ export default function LeaveApprovalsPage() {
     setRejectTargets([])
     setRejectComment("")
   }, [rejectComment, rejectTargets, reviewBulkRequests, reviewRequest])
+
+  const confirmRevoke = React.useCallback(async () => {
+    if (!revokeTarget) return
+    if (!revokeReason.trim()) {
+      toast.error("Reason is required to revoke an approved leave request.")
+      return
+    }
+    setProcessing(true)
+    const response = await fetch(`/api/leaves/requests/${revokeTarget.id}/revoke`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revokeReason }),
+    })
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: string }
+      toast.error(data.error ?? "Unable to revoke leave request.")
+      setProcessing(false)
+      return
+    }
+    toast.success("Approved leave revoked.")
+    setProcessing(false)
+    setRevokeOpen(false)
+    setRevokeReason("")
+    setRevokeTarget(null)
+    await loadRows()
+  }, [loadRows, revokeReason, revokeTarget])
+
+  const resolveConflictsAndApprove = React.useCallback(async (action: "cancel" | "reschedule") => {
+    if (!conflictResolution) return
+    const appointmentIds = collectConflictAppointmentIds(conflictResolution.conflicts)
+    if (!appointmentIds.length) {
+      toast.error("No conflicting appointments were found to cancel.")
+      return
+    }
+    if (action === "reschedule") {
+      if (!rescheduleDate || !rescheduleTime) {
+        toast.error("Select reschedule date and time.")
+        return
+      }
+    }
+    setProcessing(true)
+    const resolveResponse = await fetch("/api/appointments/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action,
+        appointmentIds,
+        ...(action === "reschedule"
+          ? { rescheduleDate, rescheduleTime }
+          : {}),
+      }),
+    })
+    if (!resolveResponse.ok) {
+      const data = (await resolveResponse.json().catch(() => ({}))) as { error?: string }
+      toast.error(
+        data.error ??
+          (action === "reschedule"
+            ? "Unable to reschedule conflicting appointments."
+            : "Unable to cancel conflicting appointments.")
+      )
+      setProcessing(false)
+      return
+    }
+
+    let approved = false
+    if (conflictResolution.mode === "single") {
+      approved = await reviewRequest(
+        conflictResolution.item,
+        "APPROVED",
+        conflictResolution.reviewerComment,
+        false
+      )
+    } else {
+      approved = await reviewBulkRequests(
+        conflictResolution.items,
+        "APPROVED",
+        conflictResolution.reviewerComment,
+        false
+      )
+    }
+
+    if (approved) {
+      setConflictDialogOpen(false)
+      setConflictResolution(null)
+      setRescheduleDate("")
+      setRescheduleTime("")
+    }
+    setProcessing(false)
+  }, [
+    collectConflictAppointmentIds,
+    conflictResolution,
+    rescheduleDate,
+    rescheduleTime,
+    reviewBulkRequests,
+    reviewRequest,
+  ])
 
   const columns = React.useMemo<ColumnDef<LeaveRequestRow>[]>(
     () => [
@@ -313,10 +562,15 @@ export default function LeaveApprovalsPage() {
         enableHiding: false,
         cell: ({ row }) => {
           const canReview = row.original.status === "PENDING"
+          const canRevoke = row.original.status === "APPROVED"
           return (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="icon" variant="ghost" disabled={!canReview || processing}>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  disabled={(!canReview && !canRevoke) || processing}
+                >
                   <MoreHorizontalIcon className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -339,13 +593,20 @@ export default function LeaveApprovalsPage() {
                 >
                   Reject
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-destructive"
+                  disabled={!canRevoke || processing}
+                  onSelect={() => openRevoke(row.original)}
+                >
+                  Revoke approval
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )
         },
       },
     ],
-    [openDetails, openReject, processing, reviewRequest]
+    [openDetails, openReject, openRevoke, processing, reviewRequest]
   )
 
   const totalPages = Math.max(1, Math.ceil(totalRows / pagination.pageSize))
@@ -459,6 +720,44 @@ export default function LeaveApprovalsPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={revokeOpen}
+        onOpenChange={(open) => {
+          setRevokeOpen(open)
+          if (!open) {
+            setRevokeReason("")
+            setRevokeTarget(null)
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Revoke approved leave</DialogTitle>
+            <DialogDescription>
+              {revokeTarget
+                ? `Revoke ${revokeTarget.leaveDefinition.code} from ${new Date(revokeTarget.startDate).toLocaleDateString()} to ${new Date(revokeTarget.endDate).toLocaleDateString()}?`
+                : "Revoke this approved leave request?"}
+            </DialogDescription>
+          </DialogHeader>
+          <FormField id="revoke-reason" label="Reason">
+            <Input
+              id="revoke-reason"
+              value={revokeReason}
+              onChange={(event) => setRevokeReason(event.target.value)}
+              placeholder="Reason for revocation"
+            />
+          </FormField>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevokeOpen(false)} disabled={processing}>
+              Back
+            </Button>
+            <Button variant="destructive" onClick={() => void confirmRevoke()} disabled={processing}>
+              {processing ? "Revoking..." : "Revoke"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <LeaveRequestDetailsDialog
         requestId={detailRequestId}
         open={detailOpen}
@@ -467,6 +766,103 @@ export default function LeaveApprovalsPage() {
           if (!open) setDetailRequestId(null)
         }}
       />
+
+      <Dialog
+        open={conflictDialogOpen}
+        onOpenChange={(open) => {
+          setConflictDialogOpen(open)
+          if (!open) {
+            setConflictResolution(null)
+            setRescheduleDate("")
+            setRescheduleTime("")
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Conflicting appointments found</DialogTitle>
+            <DialogDescription>
+              Leave approval overlaps active appointments. Cancel conflicts to proceed with approval.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
+            {(conflictResolution?.conflicts ?? []).map((conflict) => (
+              <div key={conflict.requestId} className="rounded-md border p-3">
+                <p className="text-sm font-medium">
+                  Request {conflict.requestId}: {conflict.conflictCount} conflicting appointment(s)
+                </p>
+                <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+                  {conflict.conflictingAppointments.map((appointment) => (
+                    <p key={appointment.id}>
+                      {new Date(appointment.startAt).toLocaleString()} -{" "}
+                      {new Date(appointment.endAt).toLocaleTimeString()} |{" "}
+                      {appointment.serviceName ?? "Service"} |{" "}
+                      {appointment.customerName ?? "Customer"}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FormField id="reschedule-date" label="Reschedule date">
+              <Input
+                id="reschedule-date"
+                type="date"
+                value={rescheduleDate}
+                onChange={(event) => setRescheduleDate(event.target.value)}
+              />
+            </FormField>
+            <FormField id="reschedule-time" label="Reschedule start time">
+              <Input
+                id="reschedule-time"
+                type="time"
+                value={rescheduleTime}
+                onChange={(event) => setRescheduleTime(event.target.value)}
+              />
+            </FormField>
+          </div>
+          {reschedulePreview.length > 0 ? (
+            <div className="rounded-md border p-3">
+              <p className="text-sm font-medium">Proposed reschedule preview</p>
+              <div className="mt-2 max-h-40 space-y-1 overflow-y-auto text-sm text-muted-foreground">
+                {reschedulePreview.map((appointment) => (
+                  <p key={appointment.id}>
+                    {appointment.serviceName ?? "Service"} | {appointment.customerName ?? "Customer"} |{" "}
+                    {appointment.proposedStart.toLocaleString()} -{" "}
+                    {appointment.proposedEnd.toLocaleTimeString()}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setConflictDialogOpen(false)
+                setConflictResolution(null)
+              }}
+              disabled={processing}
+            >
+              Close
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void resolveConflictsAndApprove("cancel")}
+              disabled={processing}
+            >
+              {processing ? "Processing..." : "Cancel conflicts and approve"}
+            </Button>
+            <Button
+              onClick={() => void resolveConflictsAndApprove("reschedule")}
+              disabled={processing}
+            >
+              {processing ? "Processing..." : "Reschedule conflicts and approve"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

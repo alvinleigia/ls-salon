@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
-import { mailer, mailFrom } from "@/lib/mailer"
+import { canSendConfiguredEmail, mailer, mailFrom } from "@/lib/mailer"
 import { buildAppointmentOrderInvoicePdf } from "@/lib/invoice"
 import { appointmentOrderInclude, serializeAppointmentOrder } from "../../_helpers"
 
@@ -29,6 +29,12 @@ export async function POST(
   }
   if (!order.customer?.email) {
     return NextResponse.json({ error: "Customer email not available." }, { status: 400 })
+  }
+  if (!(await canSendConfiguredEmail(prisma))) {
+    return NextResponse.json(
+      { error: "Email notifications are disabled or SMTP is not configured." },
+      { status: 400 }
+    )
   }
 
   const settings = await prisma.appSetting.findUnique({

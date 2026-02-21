@@ -3,10 +3,11 @@ import { Prisma, Role, type PrismaClient } from "@prisma/client"
 import {
   leaveRequestApprovedEmail,
   leaveRequestCanceledEmail,
+  leaveRequestRevokedEmail,
   leaveRequestRejectedEmail,
   leaveRequestSubmittedEmail,
 } from "@/lib/emails/leave-events"
-import { mailFrom, mailer } from "@/lib/mailer"
+import { canSendConfiguredEmail, mailFrom, mailer } from "@/lib/mailer"
 
 type DbClient = PrismaClient | Prisma.TransactionClient
 
@@ -18,12 +19,9 @@ type LeaveRequestNotificationPayload = {
   daysCount: number
 }
 
-const canSendEmail = () => Boolean(mailFrom && process.env.SMTP_HOST)
-
 const sendEmail = async (to: string, template: { subject: string; text: string; html: string }) => {
-  if (!canSendEmail()) return
   await mailer.sendMail({
-    from: mailFrom,
+    from: mailFrom as string,
     to,
     subject: template.subject,
     text: template.text,
@@ -35,7 +33,7 @@ export const notifyLeaveSubmitted = async (
   tx: DbClient,
   payload: LeaveRequestNotificationPayload & { staffUserId: string }
 ) => {
-  if (!canSendEmail()) return
+  if (!(await canSendConfiguredEmail(tx))) return
   const staffUser = await tx.user.findUnique({
     where: { id: payload.staffUserId },
     select: {
@@ -81,7 +79,7 @@ export const notifyLeaveReviewed = async (
     reviewerComment: string | null
   }
 ) => {
-  if (!canSendEmail()) return
+  if (!(await canSendConfiguredEmail(tx))) return
   const staffUser = await tx.user.findUnique({
     where: { id: params.staffUserId },
     select: { email: true, name: true },
@@ -123,7 +121,7 @@ export const notifyLeaveCanceled = async (
     canceledByName: string | null
   }
 ) => {
-  if (!canSendEmail()) return
+  if (!(await canSendConfiguredEmail(tx))) return
 
   const isSelfCancel = params.staffUserId === params.canceledByUserId
   if (isSelfCancel) {
@@ -160,6 +158,34 @@ export const notifyLeaveCanceled = async (
     daysCount: params.daysCount,
     actorName: params.canceledByName,
     comment: params.cancelReason,
+  })
+  await sendEmail(staffUser.email, template)
+}
+
+export const notifyLeaveRevoked = async (
+  tx: DbClient,
+  params: LeaveRequestNotificationPayload & {
+    staffUserId: string
+    revokedByName: string | null
+    revokeReason: string | null
+  }
+) => {
+  if (!(await canSendConfiguredEmail(tx))) return
+  const staffUser = await tx.user.findUnique({
+    where: { id: params.staffUserId },
+    select: { email: true, name: true },
+  })
+  if (!staffUser) return
+
+  const template = leaveRequestRevokedEmail({
+    recipientName: staffUser.name,
+    leaveCode: params.leaveCode,
+    leaveName: params.leaveName,
+    startDate: params.startDateIso,
+    endDate: params.endDateIso,
+    daysCount: params.daysCount,
+    actorName: params.revokedByName,
+    comment: params.revokeReason,
   })
   await sendEmail(staffUser.email, template)
 }

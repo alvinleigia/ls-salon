@@ -194,6 +194,7 @@ enum LeaveRequestStatus {
   APPROVED
   REJECTED
   CANCELED
+  REVOKED
 }
 
 enum StaffRosterDaySource {
@@ -241,6 +242,7 @@ model User {
   appointments  Appointment[] @relation("CustomerAppointments")
   appointmentOrders AppointmentOrder[]
   reviewedLeaveRequests LeaveRequest[] @relation("LeaveRequestReviewedBy")
+  revokedLeaveRequests LeaveRequest[] @relation("LeaveRequestRevokedBy")
   managedStaffProfiles StaffProfile[] @relation("StaffProfileManager")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -365,11 +367,15 @@ model LeaveRequest {
   reviewerComment  String?
   canceledAt       DateTime?
   cancelReason     String?
+  revokedAt        DateTime?
+  revokedByUserId  String?
+  revokeReason     String?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   staffProfile     StaffProfile       @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
   leaveDefinition  LeaveDefinition    @relation(fields: [leaveDefinitionId], references: [id], onDelete: Restrict)
   reviewedByUser   User?              @relation("LeaveRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  revokedByUser    User?              @relation("LeaveRequestRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
   rosterHistoryDays StaffRosterHistoryDay[]
 
   @@index([staffProfileId])
@@ -378,6 +384,7 @@ model LeaveRequest {
   @@index([startDate])
   @@index([endDate])
   @@index([reviewedByUserId])
+  @@index([revokedByUserId])
   @@index([createdAt])
 }
 
@@ -553,6 +560,7 @@ model AppSetting {
   dateFormat String   @default("MM/dd/yyyy")
   timeFormat TimeFormat @default(H24)
   firstDayOfWeek Weekday @default(SUNDAY)
+  emailNotificationsEnabled Boolean @default(false)
   currencySymbolPlacement CurrencySymbolPlacement @default(BEFORE)
   numberFormat NumberFormatStyle @default(US_UK)
   updatedAt  DateTime @updatedAt

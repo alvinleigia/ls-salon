@@ -101,6 +101,10 @@ export async function GET(
     reviewerComment: item.reviewerComment,
     canceledAt: item.canceledAt,
     cancelReason: item.cancelReason,
+    revokedAt: item.revokedAt,
+    revokedByName: item.revokedByUser?.name ?? null,
+    revokedByEmail: item.revokedByUser?.email ?? null,
+    revokeReason: item.revokeReason,
   })
 
   return NextResponse.json({ item: serializedItem, ruleChecks, timeline })

@@ -15,7 +15,7 @@ import {
   validateCreateLeaveRequestRules,
 } from "../_requests"
 
-const leaveRequestStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED", "CANCELED"])
+const leaveRequestStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED", "CANCELED", "REVOKED"])
 
 const leaveRequestListSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),

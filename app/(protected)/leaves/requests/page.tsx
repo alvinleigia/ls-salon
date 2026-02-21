@@ -60,6 +60,7 @@ const statusOptions: Array<LeaveRequestStatus | "all"> = [
   "APPROVED",
   "REJECTED",
   "CANCELED",
+  "REVOKED",
 ]
 
 const sortFieldMap: Record<string, "startDate" | "endDate" | "status" | "daysCount" | "createdAt" | "updatedAt"> =

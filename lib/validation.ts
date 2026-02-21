@@ -268,6 +268,7 @@ export const appSettingsSchema = z
   dateFormat: z.string().trim().min(4).max(20),
   timeFormat: timeFormatSchema.default("H24"),
   firstDayOfWeek: weekdaySchema.default("SUNDAY"),
+  emailNotificationsEnabled: z.boolean().default(false),
   currencySymbolPlacement: currencySymbolPlacementSchema.default("BEFORE"),
   numberFormat: numberFormatStyleSchema.default("US_UK"),
   workingHours: z
@@ -1067,7 +1068,16 @@ export const cancelLeaveRequestSchema = z.object({
   cancelReason: z.string().trim().max(500).optional().or(z.literal("")),
 })
 
+export const revokeLeaveRequestSchema = z.object({
+  revokeReason: z
+    .string()
+    .trim()
+    .min(1, "Reason is required when revoking an approved leave request.")
+    .max(500),
+})
+
 export type CreateLeaveRequestInput = z.infer<typeof createLeaveRequestSchema>
 export type ReviewLeaveRequestInput = z.infer<typeof reviewLeaveRequestSchema>
 export type BulkReviewLeaveRequestsInput = z.infer<typeof bulkReviewLeaveRequestsSchema>
 export type CancelLeaveRequestInput = z.infer<typeof cancelLeaveRequestSchema>
+export type RevokeLeaveRequestInput = z.infer<typeof revokeLeaveRequestSchema>

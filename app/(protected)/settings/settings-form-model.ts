@@ -15,6 +15,7 @@ export type SettingsForm = Required<
     | "dateFormat"
     | "timeFormat"
     | "firstDayOfWeek"
+    | "emailNotificationsEnabled"
     | "currencySymbolPlacement"
     | "numberFormat"
   >
@@ -42,6 +43,7 @@ export const defaultSettings: SettingsForm = {
   dateFormat: "MM/dd/yyyy",
   timeFormat: "H24",
   firstDayOfWeek: "SUNDAY",
+  emailNotificationsEnabled: false,
   currencySymbolPlacement: "BEFORE",
   numberFormat: "US_UK",
   workingHours: defaultWorkingHours,

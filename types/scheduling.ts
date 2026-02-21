@@ -91,10 +91,19 @@ export type AppSettingsPayload = {
   dateFormat?: string
   timeFormat?: TimeFormat
   firstDayOfWeek?: Weekday
+  emailNotificationsEnabled?: boolean
   currencySymbolPlacement?: CurrencySymbolPlacement
   numberFormat?: NumberFormatStyle
   workingHours?: WorkingDay[]
   overrides?: DateOverrideDay[]
+}
+
+export type EmailDeliveryStatus = {
+  configured: boolean
+  host: string | null
+  port: number | null
+  from: string | null
+  usernameMasked: string | null
 }
 
 export type TaxRow = {

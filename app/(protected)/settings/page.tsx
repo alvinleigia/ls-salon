@@ -25,6 +25,7 @@ import {
 import type {
   AppSettingsPayload,
   DateOverrideDay,
+  EmailDeliveryStatus,
   WorkingDay,
   WorkingPeriod,
 } from "@/types/scheduling"
@@ -52,6 +53,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
   const [form, setForm] = React.useState<SettingsForm>(defaultSettings)
+  const [emailDelivery, setEmailDelivery] = React.useState<EmailDeliveryStatus | null>(null)
   const { errors, setErrorsFromResponse, clearErrors } = useFormErrors()
   const localeOptions = React.useMemo(() => {
     if (LOCALE_OPTIONS.some((option) => option.value === form.locale)) {
@@ -81,8 +83,12 @@ export default function SettingsPage() {
         setLoading(false)
         return
       }
-      const data = (await response.json()) as { settings?: AppSettingsPayload }
+      const data = (await response.json()) as {
+        settings?: AppSettingsPayload
+        emailDelivery?: EmailDeliveryStatus
+      }
       const settings = data.settings ?? {}
+      setEmailDelivery(data.emailDelivery ?? null)
       setForm({
         ...defaultSettings,
         ...settings,
@@ -94,7 +100,7 @@ export default function SettingsPage() {
     void load()
   }, [])
 
-  const updateField = (key: keyof SettingsForm, value: string | number) => {
+  const updateField = (key: keyof SettingsForm, value: string | number | boolean) => {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
@@ -236,8 +242,12 @@ export default function SettingsPage() {
       return
     }
 
-    const data = (await response.json()) as { settings?: AppSettingsPayload }
+    const data = (await response.json()) as {
+      settings?: AppSettingsPayload
+      emailDelivery?: EmailDeliveryStatus
+    }
     const settings = data.settings ?? {}
+    setEmailDelivery(data.emailDelivery ?? null)
     setForm({
       ...defaultSettings,
       ...settings,
@@ -360,6 +370,23 @@ export default function SettingsPage() {
             </select>
           </FormField>
           <FormField
+            id="settings-email-notifications"
+            label="Email notifications"
+            error={errors.emailNotificationsEnabled}
+          >
+            <label className="flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm">
+              <input
+                id="settings-email-notifications"
+                type="checkbox"
+                checked={form.emailNotificationsEnabled}
+                onChange={(event) =>
+                  updateField("emailNotificationsEnabled", event.target.checked)
+                }
+              />
+              Enable app email notifications
+            </label>
+          </FormField>
+          <FormField
             id="settings-currency-placement"
             label="Currency symbol placement"
             error={errors.currencySymbolPlacement}
@@ -397,6 +424,38 @@ export default function SettingsPage() {
               ))}
             </select>
           </FormField>
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-card p-6">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold">Email delivery</h2>
+          <p className="text-sm text-muted-foreground">
+            SMTP is configured from backend environment variables. Secrets are never shown in UI.
+          </p>
+        </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-md border p-3 text-sm">
+            <p className="font-medium">Status</p>
+            <p className="mt-1 text-muted-foreground">
+              {emailDelivery?.configured ? "Configured" : "Not configured"}
+            </p>
+          </div>
+          <div className="rounded-md border p-3 text-sm">
+            <p className="font-medium">From address</p>
+            <p className="mt-1 text-muted-foreground">{emailDelivery?.from ?? "-"}</p>
+          </div>
+          <div className="rounded-md border p-3 text-sm">
+            <p className="font-medium">SMTP host / port</p>
+            <p className="mt-1 text-muted-foreground">
+              {emailDelivery?.host ?? "-"}
+              {emailDelivery?.port ? `:${emailDelivery.port}` : ""}
+            </p>
+          </div>
+          <div className="rounded-md border p-3 text-sm">
+            <p className="font-medium">SMTP username</p>
+            <p className="mt-1 text-muted-foreground">{emailDelivery?.usernameMasked ?? "-"}</p>
+          </div>
         </div>
       </div>
 

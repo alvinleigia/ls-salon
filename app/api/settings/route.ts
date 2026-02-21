@@ -6,6 +6,7 @@ import { Weekday } from "@prisma/client"
 import { appSettingsSchema } from "@/lib/validation"
 import { toISODate } from "@/lib/date"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { getEmailDeliveryStatus } from "@/lib/mailer"
 
 const SETTINGS_ID = "global"
 const DEFAULT_PERIOD = {
@@ -150,11 +151,20 @@ export async function GET() {
         include: includeWorkingHours,
       })
       if (seeded) {
-        return NextResponse.json({ settings: mapSettingsResponse(seeded) })
+        return NextResponse.json({
+          settings: mapSettingsResponse(seeded),
+          emailDelivery: getEmailDeliveryStatus(),
+        })
       }
-      return NextResponse.json({ settings: mapSettingsResponse(settings) })
+      return NextResponse.json({
+        settings: mapSettingsResponse(settings),
+        emailDelivery: getEmailDeliveryStatus(),
+      })
     }
-    return NextResponse.json({ settings: mapSettingsResponse(settings) })
+    return NextResponse.json({
+      settings: mapSettingsResponse(settings),
+      emailDelivery: getEmailDeliveryStatus(),
+    })
   }
 
   const created = await prisma.appSetting.create({
@@ -168,10 +178,16 @@ export async function GET() {
   })
 
   if (seeded) {
-    return NextResponse.json({ settings: mapSettingsResponse(seeded) })
+    return NextResponse.json({
+      settings: mapSettingsResponse(seeded),
+      emailDelivery: getEmailDeliveryStatus(),
+    })
   }
 
-  return NextResponse.json({ settings: created })
+  return NextResponse.json({
+    settings: created,
+    emailDelivery: getEmailDeliveryStatus(),
+  })
 }
 
 export async function PATCH(request: Request) {
@@ -285,8 +301,11 @@ export async function PATCH(request: Request) {
   })
 
   if (settings) {
-    return NextResponse.json({ settings: mapSettingsResponse(settings) })
+    return NextResponse.json({
+      settings: mapSettingsResponse(settings),
+      emailDelivery: getEmailDeliveryStatus(),
+    })
   }
 
-  return NextResponse.json({ settings })
+  return NextResponse.json({ settings, emailDelivery: getEmailDeliveryStatus() })
 }

@@ -100,3 +100,24 @@ export function leaveRequestCanceledEmail(args: LeaveEventEmailArgs) {
     html,
   }
 }
+
+export function leaveRequestRevokedEmail(args: LeaveEventEmailArgs) {
+  const summary = formatSummary(args)
+  const actorText = args.actorName?.trim() ? ` by ${args.actorName.trim()}` : ""
+  const commentText = args.comment?.trim() ? ` Reason: ${args.comment.trim()}` : ""
+  const text = `Hi ${formatRecipient(args.recipientName)}, your approved leave was revoked${actorText}: ${summary}.${commentText}`
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+      <h2>Approved leave revoked</h2>
+      <p>Hi ${formatRecipient(args.recipientName)}, your approved leave has been revoked${actorText}.</p>
+      <p><strong>${summary}</strong></p>
+      ${args.comment?.trim() ? `<p>Reason: ${args.comment.trim()}</p>` : ""}
+    </div>
+  `
+
+  return {
+    subject: "Your approved leave was revoked",
+    text,
+    html,
+  }
+}

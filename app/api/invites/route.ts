@@ -6,7 +6,7 @@ import { auth } from "@/auth"
 import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { inviteUserSchema } from "@/lib/validation"
-import { mailer, mailFrom } from "@/lib/mailer"
+import { canSendConfiguredEmail, mailer, mailFrom } from "@/lib/mailer"
 import { inviteEmail } from "@/lib/emails/invite"
 import { canInvite, type Role } from "@/lib/permissions"
 
@@ -59,6 +59,12 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "Email is not configured." },
       { status: 500 }
+    )
+  }
+  if (!(await canSendConfiguredEmail(prisma))) {
+    return NextResponse.json(
+      { error: "Email notifications are disabled in settings." },
+      { status: 400 }
     )
   }
 
