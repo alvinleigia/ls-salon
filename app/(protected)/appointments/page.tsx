@@ -73,6 +73,19 @@ type CalendarEvent = {
   CategoryColor?: string
 }
 
+type AppointmentQuickInfo = {
+  lines: Array<{
+    service: string
+    attendant: string
+    quantity: number
+    lineTotalCents: number | null
+  }>
+  subtotalCents: number | null
+  discountCents: number | null
+  taxCents: number | null
+  totalCents: number | null
+}
+
 const APPOINTMENT_STATUS_OPTIONS: Array<AppointmentStatus | "all"> = [
   "all",
   "SCHEDULED",
@@ -98,6 +111,9 @@ const canRescheduleAppointment = (status: AppointmentStatus) =>
 const canCancelAppointment = (status: AppointmentStatus) =>
   status === "SCHEDULED" || status === "CONFIRMED" || status === "IN_PROGRESS"
 
+const canEditAppointment = (status: AppointmentStatus) =>
+  status === "SCHEDULED" || status === "CONFIRMED"
+
 const STATUS_BADGE_CLASS: Record<AppointmentStatus, string> = {
   SCHEDULED: "bg-sky-500/15 text-sky-300 border-sky-500/30",
   CONFIRMED: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
@@ -105,6 +121,33 @@ const STATUS_BADGE_CLASS: Record<AppointmentStatus, string> = {
   COMPLETED: "bg-slate-500/15 text-slate-300 border-slate-500/30",
   CANCELED: "bg-rose-500/15 text-rose-300 border-rose-500/30",
   NO_SHOW: "bg-pink-500/15 text-pink-300 border-pink-500/30",
+}
+
+const APPOINTMENT_STATUS_META: Record<AppointmentStatus, { label: string; helperText: string }> = {
+  SCHEDULED: {
+    label: "Scheduled",
+    helperText: "Scheduled and awaiting confirmation or service start.",
+  },
+  CONFIRMED: {
+    label: "Confirmed",
+    helperText: "Confirmed and ready for service.",
+  },
+  IN_PROGRESS: {
+    label: "In progress",
+    helperText: "Service is currently underway.",
+  },
+  COMPLETED: {
+    label: "Completed",
+    helperText: "Service has been completed.",
+  },
+  CANCELED: {
+    label: "Canceled",
+    helperText: "Appointment was canceled.",
+  },
+  NO_SHOW: {
+    label: "No show",
+    helperText: "Customer did not attend.",
+  },
 }
 
 const SortIndicator = ({ value }: { value: false | "asc" | "desc" }) => {
@@ -146,6 +189,7 @@ export default function AppointmentsPage() {
   const [services, setServices] = React.useState<AppointmentServiceOption[]>([])
   const [firstDayOfWeek, setFirstDayOfWeek] = React.useState(0)
   const [timeFormat, setTimeFormat] = React.useState<AppSettingsPayload["timeFormat"]>("H24")
+  const [currency, setCurrency] = React.useState("USD")
   const [calendarHourMode, setCalendarHourMode] = React.useState<"working" | "full">("working")
   const [calendarStatusFilter, setCalendarStatusFilter] = React.useState<
     "non_canceled" | "all" | AppointmentStatus
@@ -185,6 +229,49 @@ export default function AppointmentsPage() {
   const [availabilityChecking, setAvailabilityChecking] = React.useState(false)
   const [availability, setAvailability] = React.useState<AppointmentAvailabilityResult | null>(
     null
+  )
+  const [quickInfoOpen, setQuickInfoOpen] = React.useState(false)
+  const [quickInfoTarget, setQuickInfoTarget] = React.useState<AppointmentRow | null>(null)
+  const [quickInfoData, setQuickInfoData] = React.useState<AppointmentQuickInfo | null>(null)
+  const [quickInfoLoading, setQuickInfoLoading] = React.useState(false)
+  const quickInfoStart = React.useMemo(
+    () => (quickInfoTarget ? new Date(quickInfoTarget.startAt) : null),
+    [quickInfoTarget]
+  )
+  const quickInfoEnd = React.useMemo(
+    () => (quickInfoTarget ? new Date(quickInfoTarget.endAt) : null),
+    [quickInfoTarget]
+  )
+  const quickInfoDateLabel = React.useMemo(() => {
+    if (!quickInfoStart) return "-"
+    return quickInfoStart.toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    })
+  }, [quickInfoStart])
+  const quickInfoTimeLabel = React.useMemo(() => {
+    if (!quickInfoStart || !quickInfoEnd) return "-"
+    const startLabel = quickInfoStart.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    const endLabel = quickInfoEnd.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    return `${startLabel} - ${endLabel}`
+  }, [quickInfoEnd, quickInfoStart])
+  const formatMoney = React.useCallback(
+    (cents: number | null) => {
+      if (cents === null) return "-"
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency,
+      }).format(cents / 100)
+    },
+    [currency]
   )
 
   const {
@@ -246,6 +333,7 @@ export default function AppointmentsPage() {
       const data = (await settingsRes.json()) as { settings?: AppSettingsPayload }
       setFirstDayOfWeek(weekdayToSchedulerFirstDay(data.settings?.firstDayOfWeek))
       setTimeFormat(data.settings?.timeFormat ?? "H24")
+      setCurrency(data.settings?.currency ?? "USD")
       const workingPeriods =
         data.settings?.workingHours
           ?.flatMap((day) =>
@@ -307,10 +395,16 @@ export default function AppointmentsPage() {
   ])
 
   const loadCalendarAppointments = React.useCallback(async () => {
-    if (!viewDates.length) return
+    const fallbackDates = scheduleRef.current?.getCurrentViewDates?.() ?? []
+    const effectiveViewDates = viewDates.length ? viewDates : fallbackDates
+    if (!effectiveViewDates.length) return
 
-    const startDate = toDateInput(viewDates[0])
-    const endDate = toDateInput(viewDates[viewDates.length - 1])
+    if (!viewDates.length && fallbackDates.length) {
+      setViewDates(fallbackDates)
+    }
+
+    const startDate = toDateInput(effectiveViewDates[0])
+    const endDate = toDateInput(effectiveViewDates[effectiveViewDates.length - 1])
     const params = new URLSearchParams()
     params.set("page", "1")
     params.set("pageSize", "100")
@@ -524,6 +618,15 @@ export default function AppointmentsPage() {
     if (dates.length) setViewDates(dates)
   }, [])
 
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!viewDates.length) {
+        syncViewDates()
+      }
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [syncViewDates, viewDates.length])
+
   const calendarEvents = React.useMemo<CalendarEvent[]>(
     () =>
       calendarAppointments.map((appointment) => {
@@ -563,16 +666,119 @@ export default function AppointmentsPage() {
     [router]
   )
 
+  const loadQuickInfo = React.useCallback(async (appointment: AppointmentRow) => {
+    const fallbackService = appointment.service?.name ?? "Service"
+    const fallbackAttendant = appointment.staffProfile?.user
+      ? appointment.staffProfile.user.name || appointment.staffProfile.user.email
+      : "Staff"
+    const orderId = appointment.orderLine?.order?.id
+    if (!orderId) {
+      setQuickInfoData({
+        lines: [
+          {
+            service: fallbackService,
+            attendant: fallbackAttendant,
+            quantity: 1,
+            lineTotalCents: appointment.service?.priceCents ?? null,
+          },
+        ],
+        subtotalCents: appointment.service?.priceCents ?? null,
+        discountCents: null,
+        taxCents: null,
+        totalCents: appointment.service?.priceCents ?? null,
+      })
+      return
+    }
+
+    setQuickInfoLoading(true)
+    const response = await fetch(`/api/appointments/orders/${orderId}`, { cache: "no-store" })
+    if (!response.ok) {
+      setQuickInfoData({
+        lines: [
+          {
+            service: fallbackService,
+            attendant: fallbackAttendant,
+            quantity: 1,
+            lineTotalCents: appointment.service?.priceCents ?? null,
+          },
+        ],
+        subtotalCents: appointment.service?.priceCents ?? null,
+        discountCents: null,
+        taxCents: null,
+        totalCents: appointment.service?.priceCents ?? null,
+      })
+      setQuickInfoLoading(false)
+      return
+    }
+    const data = (await response.json()) as {
+      order?: {
+        subtotalCents?: number
+        lineDiscountCents?: number
+        couponDiscountCents?: number
+        taxCents?: number
+        totalCents?: number
+        lines?: Array<{
+          quantity?: number
+          lineTotalCents?: number
+          service?: { name?: string | null } | null
+          staffProfile?: { user?: { name?: string | null; email?: string | null } | null } | null
+        }>
+      }
+    }
+    const lines = (data.order?.lines ?? []).map((line) => {
+      const user = line.staffProfile?.user
+      return {
+        service: line.service?.name?.trim() || fallbackService,
+        attendant: user?.name?.trim() || user?.email?.trim() || fallbackAttendant,
+        quantity: line.quantity ?? 1,
+        lineTotalCents:
+          typeof line.lineTotalCents === "number" ? line.lineTotalCents : null,
+      }
+    })
+    setQuickInfoData({
+      lines: lines.length
+        ? lines
+        : [
+            {
+              service: fallbackService,
+              attendant: fallbackAttendant,
+              quantity: 1,
+              lineTotalCents: appointment.service?.priceCents ?? null,
+            },
+          ],
+      subtotalCents:
+        typeof data.order?.subtotalCents === "number" ? data.order.subtotalCents : null,
+      discountCents:
+        typeof data.order?.lineDiscountCents === "number" &&
+        typeof data.order?.couponDiscountCents === "number"
+          ? data.order.lineDiscountCents + data.order.couponDiscountCents
+          : null,
+      taxCents: typeof data.order?.taxCents === "number" ? data.order.taxCents : null,
+      totalCents: typeof data.order?.totalCents === "number" ? data.order.totalCents : null,
+    })
+    setQuickInfoLoading(false)
+  }, [])
+
   const handleEventClick = React.useCallback(
     (args: { event?: Record<string, unknown> }) => {
       const eventId = args.event?.Id as string | undefined
       if (!eventId) return
       const appointment = calendarAppointments.find((item) => item.id === eventId)
       if (!appointment) return
-      openAppointmentEditor(appointment)
+      setQuickInfoTarget(appointment)
+      setQuickInfoData(null)
+      setQuickInfoOpen(true)
+      void loadQuickInfo(appointment)
     },
-    [calendarAppointments, openAppointmentEditor]
+    [calendarAppointments, loadQuickInfo]
   )
+
+  const openQuickInfoDialog = React.useCallback((appointment: AppointmentRow) => {
+    setQuickInfoTarget(appointment)
+    setQuickInfoData(null)
+    setQuickInfoOpen(true)
+    void loadQuickInfo(appointment)
+  }, [loadQuickInfo])
 
   const handleEventRendered = React.useCallback(
     (args: { data?: Record<string, unknown>; element?: HTMLElement }) => {
@@ -659,11 +865,11 @@ export default function AppointmentsPage() {
         cell: ({ row }) => (
           <span
             className={cn(
-              "inline-flex rounded-md border px-2 py-0.5 text-xs font-medium",
+              "inline-flex rounded-full border px-2 py-0.5 text-xs font-medium",
               STATUS_BADGE_CLASS[row.original.status]
             )}
           >
-            {row.original.status}
+            {APPOINTMENT_STATUS_META[row.original.status].label}
           </span>
         ),
       },
@@ -673,6 +879,7 @@ export default function AppointmentsPage() {
         enableHiding: false,
         cell: ({ row }) => {
           const appointment = row.original
+          const canEdit = canEditAppointment(appointment.status)
           const canReschedule = canRescheduleAppointment(appointment.status)
           const canCancel = canCancelAppointment(appointment.status)
           return (
@@ -683,9 +890,15 @@ export default function AppointmentsPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => openAppointmentEditor(appointment)}>
-                  Edit
-                </DropdownMenuItem>
+                {canEdit ? (
+                  <DropdownMenuItem onSelect={() => openAppointmentEditor(appointment)}>
+                    Edit
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem onSelect={() => openQuickInfoDialog(appointment)}>
+                    View details
+                  </DropdownMenuItem>
+                )}
                 {canReschedule ? (
                   <DropdownMenuItem onSelect={() => openAppointmentEditor(appointment)}>
                     Reschedule
@@ -705,7 +918,7 @@ export default function AppointmentsPage() {
         },
       },
     ],
-    [formatDate, openAppointmentEditor, requestCancelAppointment]
+    [formatDate, openAppointmentEditor, openQuickInfoDialog, requestCancelAppointment]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -857,6 +1070,137 @@ export default function AppointmentsPage() {
 
       <DataTable table={table} loading={loading} emptyMessage="No appointments found." />
       <DataTablePagination table={table} totalRows={totalRows} />
+
+      <Dialog
+        open={quickInfoOpen}
+        onOpenChange={(open) => {
+          setQuickInfoOpen(open)
+          if (!open) {
+            setQuickInfoTarget(null)
+            setQuickInfoData(null)
+            setQuickInfoLoading(false)
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Appointment info</DialogTitle>
+            <DialogDescription>
+              Quick details and actions for this booking.
+            </DialogDescription>
+          </DialogHeader>
+          {quickInfoTarget ? (
+            <div className="space-y-3 text-sm">
+              <div className="rounded-md border p-3">
+                <p className="font-medium text-base">
+                  {quickInfoTarget.customer?.name || quickInfoTarget.customer?.email || "Customer"}
+                </p>
+                <div className="mt-2 grid gap-1 text-muted-foreground">
+                  <p>
+                    <span className="font-medium text-foreground">Date:</span> {quickInfoDateLabel}
+                  </p>
+                  <p>
+                    <span className="font-medium text-foreground">Time:</span> {quickInfoTimeLabel}
+                  </p>
+                  <p>
+                    <span className="font-medium text-foreground">Booking:</span>{" "}
+                    {quickInfoTarget.orderLine?.order?.id
+                      ? `#${quickInfoTarget.orderLine.order.id.slice(-6)}`
+                      : `#${quickInfoTarget.id.slice(-6)}`}
+                  </p>
+                </div>
+                <div className="mt-2">
+                  <span
+                    className={cn(
+                      "inline-flex rounded-full border px-2 py-0.5 text-xs font-medium",
+                      STATUS_BADGE_CLASS[quickInfoTarget.status]
+                    )}
+                  >
+                    {APPOINTMENT_STATUS_META[quickInfoTarget.status].label}
+                  </span>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {APPOINTMENT_STATUS_META[quickInfoTarget.status].helperText}
+                  </p>
+                </div>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="font-medium">Services and attendants</p>
+                {quickInfoLoading ? (
+                  <p className="text-muted-foreground">Loading...</p>
+                ) : quickInfoData?.lines.length ? (
+                  <div className="mt-2 overflow-x-auto">
+                    <table className="min-w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-muted-foreground">
+                          <th className="py-1 pr-3 font-medium">Service</th>
+                          <th className="py-1 pr-3 font-medium">Attendant</th>
+                          <th className="py-1 pr-3 font-medium">Qty</th>
+                          <th className="py-1 font-medium">Line total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {quickInfoData.lines.map((line, index) => (
+                          <tr key={`${line.service}-${line.attendant}-${index}`} className="border-t">
+                            <td className="py-1 pr-3">{line.service}</td>
+                            <td className="py-1 pr-3">{line.attendant}</td>
+                            <td className="py-1 pr-3">{line.quantity}</td>
+                            <td className="py-1">{formatMoney(line.lineTotalCents)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">-</p>
+                )}
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="font-medium">Price summary</p>
+                <div className="mt-2 grid grid-cols-2 gap-y-1 text-muted-foreground">
+                  <span>Subtotal</span>
+                  <span className="text-right">{formatMoney(quickInfoData?.subtotalCents ?? null)}</span>
+                  <span>Discount</span>
+                  <span className="text-right">{formatMoney(quickInfoData?.discountCents ?? null)}</span>
+                  <span>Tax</span>
+                  <span className="text-right">{formatMoney(quickInfoData?.taxCents ?? null)}</span>
+                  <span className="font-medium text-foreground">Total</span>
+                  <span className="text-right font-medium text-foreground">
+                    {formatMoney(quickInfoData?.totalCents ?? null)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setQuickInfoOpen(false)}>
+              Close
+            </Button>
+            {quickInfoTarget && canCancelAppointment(quickInfoTarget.status) ? (
+              <Button
+                variant="outline"
+                className="text-destructive"
+                onClick={() => {
+                  setQuickInfoOpen(false)
+                  requestCancelAppointment(quickInfoTarget)
+                }}
+              >
+                Cancel appointment
+              </Button>
+            ) : null}
+            {quickInfoTarget ? (
+              <Button
+                onClick={() => {
+                  setQuickInfoOpen(false)
+                  openAppointmentEditor(quickInfoTarget)
+                }}
+                disabled={!quickInfoTarget.orderLine?.order?.id}
+              >
+                {canEditAppointment(quickInfoTarget.status) ? "Edit booking" : "View booking"}
+              </Button>
+            ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={cancelConfirmOpen}

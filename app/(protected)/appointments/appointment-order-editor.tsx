@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { useFormErrors } from "@/hooks/use-form-errors"
 import type {
   AppointmentCustomerOption,
+  AppointmentOrderStatus,
   CouponRow,
   AppointmentOrderRow,
   AppointmentOrderFormValues,
@@ -104,6 +105,32 @@ const formatCouponScopeLabel = (coupon: CouponRow) => {
   if (coupon.appliesTo === "SERVICE_LINES") return "Services"
   if (coupon.appliesTo === "PRODUCT_LINES") return "Products"
   return "Order"
+}
+
+const ORDER_STATUS_META: Record<
+  AppointmentOrderStatus,
+  { label: string; badgeClass: string; helperText: string }
+> = {
+  DRAFT: {
+    label: "Draft",
+    badgeClass: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+    helperText: "Draft booking. Confirm to lock the schedule and mark it as active.",
+  },
+  CONFIRMED: {
+    label: "Confirmed",
+    badgeClass: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+    helperText: "Confirmed booking. Save changes to update details while keeping status confirmed.",
+  },
+  COMPLETED: {
+    label: "Completed",
+    badgeClass: "border-slate-500/30 bg-slate-500/10 text-slate-300",
+    helperText: "Completed booking. This record is read-only.",
+  },
+  CANCELED: {
+    label: "Canceled",
+    badgeClass: "border-rose-500/30 bg-rose-500/10 text-rose-300",
+    helperText: "Canceled booking. This record is read-only.",
+  },
 }
 
 export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrderEditorProps) {
@@ -720,7 +747,33 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
     void load()
   }, [appointmentId, applyOrderToForm, mode])
 
+  const bookingStartAt = React.useMemo(() => {
+    if (!values.appointmentDate || !values.appointmentStartTime) return null
+    const parsed = new Date(
+      combineLocalDateTimeToISO(values.appointmentDate, values.appointmentStartTime)
+    )
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }, [values.appointmentDate, values.appointmentStartTime])
+
+  const isHistoricalStatus = values.status === "COMPLETED" || values.status === "CANCELED"
+  const isAfterBookingDay = React.useMemo(() => {
+    if (!bookingStartAt) return false
+    const now = new Date()
+    const bookingDateKey = toDateInput(bookingStartAt)
+    const nowDateKey = toDateInput(now)
+    return nowDateKey > bookingDateKey
+  }, [bookingStartAt])
+  const isReadOnlyBooking = mode === "edit" && (isHistoricalStatus || isAfterBookingDay)
+  const currentStatus: AppointmentOrderStatus = values.status ?? "DRAFT"
+  const currentStatusMeta = ORDER_STATUS_META[currentStatus]
+  const canSaveDraft = !isReadOnlyBooking && currentStatus === "DRAFT"
+  const primaryActionLabel = currentStatus === "DRAFT" ? "Confirm booking" : "Save changes"
+
   const handleSave = async (target: "draft" | "confirm") => {
+    if (isReadOnlyBooking) {
+      toast.error("This booking is historical and cannot be modified.")
+      return
+    }
     if (!values.lines.length) {
       toast.error("Add at least one service item.")
       return
@@ -875,6 +928,12 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
           <p className="text-sm text-muted-foreground">
             Invoice-style booking with multiple services, attendants, notes, and coupons.
           </p>
+          <div className="mt-2 flex items-center gap-2 text-xs">
+            <span className={`rounded-full border px-2 py-0.5 font-medium ${currentStatusMeta.badgeClass}`}>
+              {currentStatusMeta.label}
+            </span>
+            <span className="text-muted-foreground">{currentStatusMeta.helperText}</span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => router.push("/appointments")}>
@@ -892,16 +951,37 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
           >
             Email invoice
           </Button>
-          <Button variant="outline" onClick={() => void handleSave("draft")} loading={saving} loadingText="Saving...">
-            Save draft
-          </Button>
-          <Button onClick={() => void handleSave("confirm")} loading={saving} loadingText="Saving...">
-            Confirm booking
-          </Button>
+          {!isReadOnlyBooking ? (
+            <>
+              {canSaveDraft ? (
+                <Button
+                  variant="outline"
+                  onClick={() => void handleSave("draft")}
+                  loading={saving}
+                  loadingText="Saving..."
+                >
+                  Save draft
+                </Button>
+              ) : null}
+              <Button onClick={() => void handleSave("confirm")} loading={saving} loadingText="Saving...">
+                {primaryActionLabel}
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" disabled>
+              Historical record
+            </Button>
+          )}
         </div>
       </div>
 
-      {activeSuggestion ? (
+      {isReadOnlyBooking ? (
+        <div className="rounded-md border border-muted px-3 py-2 text-xs text-muted-foreground">
+          This booking is in the past or in a closed status and is read-only.
+        </div>
+      ) : null}
+
+      {activeSuggestion && !isReadOnlyBooking ? (
         <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs">
           <p className="text-amber-200">{activeSuggestion.reason}</p>
           <p className="mt-1 text-amber-200/90">
@@ -923,25 +1003,27 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
         </div>
       ) : null}
 
-      <AppointmentOrderFormFields
-        values={values}
-        setValues={setValues}
-        errors={errors}
-        customers={customers}
-        staff={staff}
-        services={services}
-        products={products}
-        timeFormat={settings.timeFormat}
-        couponOptions={coupons.map((coupon) => ({
-          value: coupon.code,
-          label: `${coupon.code} (${formatCouponScopeLabel(coupon)})`,
-        }))}
-        couponHints={couponHints}
-        formatCurrencyCentsValue={(valueInCents) => formatCurrencyFromCents(valueInCents, settings)}
-        allowMultipleLines
-        lineTaxCentsById={pricingPreview.lineTaxById}
-        lineScheduleMeta={scheduleMetaByLineId}
-      />
+      <div className={isReadOnlyBooking ? "pointer-events-none select-none opacity-80" : undefined}>
+        <AppointmentOrderFormFields
+          values={values}
+          setValues={setValues}
+          errors={errors}
+          customers={customers}
+          staff={staff}
+          services={services}
+          products={products}
+          timeFormat={settings.timeFormat}
+          couponOptions={coupons.map((coupon) => ({
+            value: coupon.code,
+            label: `${coupon.code} (${formatCouponScopeLabel(coupon)})`,
+          }))}
+          couponHints={couponHints}
+          formatCurrencyCentsValue={(valueInCents) => formatCurrencyFromCents(valueInCents, settings)}
+          allowMultipleLines
+          lineTaxCentsById={pricingPreview.lineTaxById}
+          lineScheduleMeta={scheduleMetaByLineId}
+        />
+      </div>
 
       <div className="rounded-xl border bg-card p-4">
         <h2 className="mb-1 text-sm font-semibold">Schedule preview</h2>
