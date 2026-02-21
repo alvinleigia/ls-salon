@@ -2,6 +2,13 @@ import { NextResponse } from "next/server"
 
 import { AppointmentStatus } from "@prisma/client"
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { checkStaffAppointmentAvailability } from "@/app/api/appointments/_availability"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
@@ -20,61 +27,83 @@ const buildDateTime = (date: string, time: string) => {
 }
 
 export async function POST(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
 
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const payload = await request.json()
-  const parsed = appointmentResolveSchema.safeParse(payload)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid request.", details: parsed.error.flatten() },
-      { status: 400 }
-    )
-  }
+  try {
+    const payload = await request.json()
+    const parsed = appointmentResolveSchema.safeParse(payload)
+    if (!parsed.success) {
+      const response = NextResponse.json(
+        { error: "Invalid request.", details: parsed.error.flatten() },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+      return withRequestId(response, logContext.requestId)
+    }
 
   const body: ResolveAppointmentsInput = parsed.data
   const appointmentIds = body.appointmentIds
-  if (!appointmentIds.length || !body.action) {
-    return NextResponse.json({ error: "Invalid request." }, { status: 400 })
-  }
+    if (!appointmentIds.length || !body.action) {
+      const response = NextResponse.json({ error: "Invalid request." }, { status: 400 })
+      logApiRequestSuccess(logContext, 400, { reason: "invalid_payload" })
+      return withRequestId(response, logContext.requestId)
+    }
 
   if (body.action === "cancel") {
     const result = await prisma.appointment.updateMany({
       where: { id: { in: appointmentIds } },
       data: { status: AppointmentStatus.CANCELED },
     })
-    return NextResponse.json({ updatedCount: result.count })
-  }
+      const response = NextResponse.json({ updatedCount: result.count })
+      logApiRequestSuccess(logContext, 200, { action: body.action, updatedCount: result.count })
+      return withRequestId(response, logContext.requestId)
+    }
 
   if (body.action === "reassign") {
     if (!body.targetStaffId) {
-      return NextResponse.json({ error: "Target staff is required." }, { status: 400 })
+      const response = NextResponse.json({ error: "Target staff is required." }, { status: 400 })
+      logApiRequestSuccess(logContext, 400, { reason: "missing_target_staff" })
+      return withRequestId(response, logContext.requestId)
     }
     const staffProfile = await prisma.staffProfile.findFirst({
       where: { userId: body.targetStaffId },
       select: { id: true },
     })
     if (!staffProfile) {
-      return NextResponse.json({ error: "Target staff profile not found." }, { status: 404 })
+      const response = NextResponse.json({ error: "Target staff profile not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "target_staff_not_found" })
+      return withRequestId(response, logContext.requestId)
     }
     const result = await prisma.appointment.updateMany({
       where: { id: { in: appointmentIds } },
       data: { staffProfileId: staffProfile.id },
     })
-    return NextResponse.json({ updatedCount: result.count })
-  }
+      const response = NextResponse.json({ updatedCount: result.count })
+      logApiRequestSuccess(logContext, 200, { action: body.action, updatedCount: result.count })
+      return withRequestId(response, logContext.requestId)
+    }
 
   if (body.action === "reschedule") {
     if (!body.rescheduleDate || !body.rescheduleTime) {
-      return NextResponse.json({ error: "Reschedule date and time are required." }, { status: 400 })
+      const response = NextResponse.json({ error: "Reschedule date and time are required." }, { status: 400 })
+      logApiRequestSuccess(logContext, 400, { reason: "missing_reschedule_datetime" })
+      return withRequestId(response, logContext.requestId)
     }
     const nextStart = buildDateTime(body.rescheduleDate, body.rescheduleTime)
     if (!nextStart || Number.isNaN(nextStart.getTime())) {
-      return NextResponse.json({ error: "Invalid reschedule date/time." }, { status: 400 })
+      const response = NextResponse.json({ error: "Invalid reschedule date/time." }, { status: 400 })
+      logApiRequestSuccess(logContext, 400, { reason: "invalid_reschedule_datetime" })
+      return withRequestId(response, logContext.requestId)
     }
 
     const appointments = await prisma.appointment.findMany({
@@ -83,7 +112,9 @@ export async function POST(request: Request) {
       orderBy: { startAt: "asc" },
     })
     if (!appointments.length) {
-      return NextResponse.json({ updatedCount: 0 })
+      const response = NextResponse.json({ updatedCount: 0 })
+      logApiRequestSuccess(logContext, 200, { action: body.action, updatedCount: 0 })
+      return withRequestId(response, logContext.requestId)
     }
 
     const firstStartAt = appointments[0].startAt.getTime()
@@ -107,10 +138,12 @@ export async function POST(request: Request) {
 
     for (const move of plannedMoves) {
       if (move.startAt <= new Date()) {
-        return NextResponse.json(
+        const response = NextResponse.json(
           { error: "Cannot reschedule appointments to the past." },
           { status: 400 }
         )
+        logApiRequestSuccess(logContext, 400, { reason: "past_reschedule_datetime" })
+        return withRequestId(response, logContext.requestId)
       }
       const availability = await checkStaffAppointmentAvailability(
         move.staffProfileId,
@@ -118,12 +151,14 @@ export async function POST(request: Request) {
         move.endAt
       )
       if (!availability.ok) {
-        return NextResponse.json(
+        const response = NextResponse.json(
           {
             error: `Reschedule failed for appointment ${move.id}: ${availability.reason}`,
           },
           { status: 409 }
         )
+        logApiRequestSuccess(logContext, 409, { reason: "staff_unavailable", appointmentId: move.id })
+        return withRequestId(response, logContext.requestId)
       }
       const conflict = await prisma.appointment.findFirst({
         where: {
@@ -136,12 +171,14 @@ export async function POST(request: Request) {
         select: { id: true },
       })
       if (conflict) {
-        return NextResponse.json(
+        const response = NextResponse.json(
           {
             error: `Reschedule failed for appointment ${move.id}: staff has another appointment conflict.`,
           },
           { status: 409 }
         )
+        logApiRequestSuccess(logContext, 409, { reason: "staff_conflict", appointmentId: move.id })
+        return withRequestId(response, logContext.requestId)
       }
     }
 
@@ -153,8 +190,17 @@ export async function POST(request: Request) {
     })
 
     await prisma.$transaction(updates)
-    return NextResponse.json({ updatedCount: updates.length })
+      const response = NextResponse.json({ updatedCount: updates.length })
+      logApiRequestSuccess(logContext, 200, { action: body.action, updatedCount: updates.length })
+      return withRequestId(response, logContext.requestId)
   }
 
-  return NextResponse.json({ error: "Unsupported action." }, { status: 400 })
+    const response = NextResponse.json({ error: "Unsupported action." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "unsupported_action", action: body.action })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to resolve appointments." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }

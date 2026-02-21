@@ -3,9 +3,15 @@ import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
-import type { InventoryUnit } from "@/lib/constants/inventory"
 import {
   createInventoryProductSchema,
   inventoryProductStatusSchema,
@@ -94,48 +100,185 @@ const serializeProduct = (item: {
 })
 
 export async function GET(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const unauthorized = await ensureAuthorized()
-  if (unauthorized) return unauthorized
+  if (unauthorized) {
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(unauthorized, logContext.requestId)
+  }
 
   const url = new URL(request.url)
   const parsed = listSchema.safeParse(Object.fromEntries(url.searchParams.entries()))
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid pagination parameters.", details: parsed.error.flatten() },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const { page, pageSize, sort, order, q, status, categoryId } = parsed.data
-  const skip = (page - 1) * pageSize
-  const sortDirection = order ?? "asc"
-  const orderBy =
-    sort === "category"
-      ? { category: { name: sortDirection } }
-      : sort
-        ? { [sort]: sortDirection }
-        : { createdAt: "desc" as const }
-  const where: Prisma.InventoryProductWhereInput = {
-    ...(q
-      ? {
-          OR: [
-            { name: { contains: q, mode: "insensitive" } },
-            { sku: { contains: q, mode: "insensitive" } },
-            { description: { contains: q, mode: "insensitive" } },
-          ],
-        }
-      : {}),
-    ...(status ? { status } : {}),
-    ...(categoryId ? { categoryId } : {}),
+  try {
+    const { page, pageSize, sort, order, q, status, categoryId } = parsed.data
+    const skip = (page - 1) * pageSize
+    const sortDirection = order ?? "asc"
+    const orderBy =
+      sort === "category"
+        ? { category: { name: sortDirection } }
+        : sort
+          ? { [sort]: sortDirection }
+          : { createdAt: "desc" as const }
+    const where: Prisma.InventoryProductWhereInput = {
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: "insensitive" } },
+              { sku: { contains: q, mode: "insensitive" } },
+              { description: { contains: q, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+      ...(status ? { status } : {}),
+      ...(categoryId ? { categoryId } : {}),
+    }
+
+    const [total, items] = await prisma.$transaction([
+      prisma.inventoryProduct.count({ where }),
+      prisma.inventoryProduct.findMany({
+        where,
+        orderBy,
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          sku: true,
+          name: true,
+          description: true,
+          unit: true,
+          status: true,
+          costPriceCents: true,
+          mrpCents: true,
+          reorderPoint: true,
+          reorderQty: true,
+          onHandQty: true,
+          isPhysical: true,
+          createdAt: true,
+          category: { select: { id: true, name: true } },
+          taxes: { select: { taxId: true } },
+          suppliers: {
+            orderBy: [{ isPreferred: "desc" }, { supplier: { name: "asc" } }],
+            select: {
+              supplierId: true,
+              supplierSku: true,
+              supplierCostCents: true,
+              minOrderQty: true,
+              leadTimeDays: true,
+              isPreferred: true,
+              supplier: { select: { name: true } },
+            },
+          },
+        },
+      }),
+    ])
+
+    const response = NextResponse.json({
+      items: items.map(serializeProduct),
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    })
+    logApiRequestSuccess(logContext, 200, { page, pageSize, total })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to load inventory products." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
+}
+
+export async function POST(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
+  const unauthorized = await ensureAuthorized()
+  if (unauthorized) {
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(unauthorized, logContext.requestId)
   }
 
-  const [total, items] = await prisma.$transaction([
-    prisma.inventoryProduct.count({ where }),
-    prisma.inventoryProduct.findMany({
-      where,
-      orderBy,
-      skip,
-      take: pageSize,
+  const body = await request.json().catch(() => null)
+  if (!body) {
+    const response = NextResponse.json({ error: "Invalid JSON body." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "invalid_json" })
+    return withRequestId(response, logContext.requestId)
+  }
+  const parsed = createInventoryProductSchema.safeParse(body)
+  if (!parsed.success) {
+    const response = NextResponse.json(
+      { error: "Invalid input.", details: parsed.error.flatten() },
+      { status: 400 }
+    )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
+  }
+
+  try {
+    const data = parsed.data
+    const existing = await prisma.inventoryProduct.findUnique({
+      where: { sku: data.sku.trim() },
+      select: { id: true },
+    })
+    if (existing) {
+      const response = NextResponse.json({ error: "SKU already exists." }, { status: 409 })
+      logApiRequestSuccess(logContext, 409, { reason: "sku_conflict" })
+      return withRequestId(response, logContext.requestId)
+    }
+
+    const preferredCount = data.supplierLinks.filter((link) => link.isPreferred).length
+    if (preferredCount > 1) {
+      const response = NextResponse.json(
+        { error: "Only one preferred supplier can be selected." },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "multiple_preferred_suppliers" })
+      return withRequestId(response, logContext.requestId)
+    }
+
+    const item = await prisma.inventoryProduct.create({
+      data: {
+        sku: data.sku.trim(),
+        name: data.name.trim(),
+        description: data.description?.trim() || undefined,
+        unit: data.unit ?? "unit",
+        categoryId: data.categoryId,
+        status: data.status ?? "ACTIVE",
+        costPriceCents: data.costPriceCents,
+        mrpCents: data.mrpCents,
+        reorderPoint: data.reorderPoint ?? 0,
+        reorderQty: data.reorderQty ?? 0,
+        onHandQty: data.onHandQty ?? 0,
+        isPhysical: data.isPhysical ?? true,
+        taxes: data.taxIds.length
+          ? {
+              create: [...new Set(data.taxIds)].map((taxId) => ({ taxId })),
+            }
+          : undefined,
+        suppliers: data.supplierLinks.length
+          ? {
+              create: data.supplierLinks.map((link) => ({
+                supplierId: link.supplierId,
+                supplierSku: link.supplierSku?.trim() || undefined,
+                supplierCostCents: link.supplierCostCents,
+                minOrderQty: link.minOrderQty ?? 1,
+                leadTimeDays: link.leadTimeDays,
+                isPreferred: link.isPreferred ?? false,
+              })),
+            }
+          : undefined,
+      },
       select: {
         id: true,
         sku: true,
@@ -165,110 +308,14 @@ export async function GET(request: Request) {
           },
         },
       },
-    }),
-  ])
+    })
 
-  return NextResponse.json({
-    items: items.map(serializeProduct),
-    page,
-    pageSize,
-    total,
-    totalPages: Math.max(1, Math.ceil(total / pageSize)),
-  })
-}
-
-export async function POST(request: Request) {
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) return unauthorized
-
-  const body = await request.json()
-  const parsed = createInventoryProductSchema.safeParse(body)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid input.", details: parsed.error.flatten() },
-      { status: 400 }
-    )
+    const response = NextResponse.json({ item: serializeProduct(item) }, { status: 201 })
+    logApiRequestSuccess(logContext, 201, { productId: item.id })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to create inventory product." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
   }
-
-  const data = parsed.data
-  const existing = await prisma.inventoryProduct.findUnique({
-    where: { sku: data.sku.trim() },
-    select: { id: true },
-  })
-  if (existing) {
-    return NextResponse.json({ error: "SKU already exists." }, { status: 409 })
-  }
-
-  const preferredCount = data.supplierLinks.filter((link) => link.isPreferred).length
-  if (preferredCount > 1) {
-    return NextResponse.json(
-      { error: "Only one preferred supplier can be selected." },
-      { status: 400 }
-    )
-  }
-
-  const item = await prisma.inventoryProduct.create({
-    data: {
-      sku: data.sku.trim(),
-      name: data.name.trim(),
-      description: data.description?.trim() || undefined,
-      unit: data.unit ?? "unit",
-      categoryId: data.categoryId,
-      status: data.status ?? "ACTIVE",
-      costPriceCents: data.costPriceCents,
-      mrpCents: data.mrpCents,
-      reorderPoint: data.reorderPoint ?? 0,
-      reorderQty: data.reorderQty ?? 0,
-      onHandQty: data.onHandQty ?? 0,
-      isPhysical: data.isPhysical ?? true,
-      taxes: data.taxIds.length
-        ? {
-            create: [...new Set(data.taxIds)].map((taxId) => ({ taxId })),
-          }
-        : undefined,
-      suppliers: data.supplierLinks.length
-        ? {
-            create: data.supplierLinks.map((link) => ({
-              supplierId: link.supplierId,
-              supplierSku: link.supplierSku?.trim() || undefined,
-              supplierCostCents: link.supplierCostCents,
-              minOrderQty: link.minOrderQty ?? 1,
-              leadTimeDays: link.leadTimeDays,
-              isPreferred: link.isPreferred ?? false,
-            })),
-          }
-        : undefined,
-    },
-    select: {
-      id: true,
-      sku: true,
-      name: true,
-      description: true,
-      unit: true,
-      status: true,
-      costPriceCents: true,
-      mrpCents: true,
-      reorderPoint: true,
-      reorderQty: true,
-      onHandQty: true,
-      isPhysical: true,
-      createdAt: true,
-      category: { select: { id: true, name: true } },
-      taxes: { select: { taxId: true } },
-      suppliers: {
-        orderBy: [{ isPreferred: "desc" }, { supplier: { name: "asc" } }],
-        select: {
-          supplierId: true,
-          supplierSku: true,
-          supplierCostCents: true,
-          minOrderQty: true,
-          leadTimeDays: true,
-          isPreferred: true,
-          supplier: { select: { name: true } },
-        },
-      },
-    },
-  })
-
-  return NextResponse.json({ item: serializeProduct(item) }, { status: 201 })
 }

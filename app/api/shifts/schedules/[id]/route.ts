@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { toISODate } from "@/lib/date"
 import { prisma } from "@/lib/prisma"
 import { captureRosterHistoryUpToYesterday } from "@/lib/roster-history"
@@ -11,36 +18,52 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const { id } = await params
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
 
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized", scheduleId: id })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const body = await request.json()
+  const body = await request.json().catch(() => null)
+  if (!body) {
+    const response = NextResponse.json({ error: "Invalid JSON body." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "invalid_json", scheduleId: id })
+    return withRequestId(response, logContext.requestId)
+  }
   const parsed = shiftScheduleSchema.safeParse(body)
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid input.", details: parsed.error.flatten() },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed", scheduleId: id })
+    return withRequestId(response, logContext.requestId)
   }
 
   const data = parsed.data
   const today = new Date().toISOString().slice(0, 10)
   if (data.startDate < today) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Schedule start date cannot be in the past." },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "past_schedule_start", scheduleId: id })
+    return withRequestId(response, logContext.requestId)
   }
   if (data.assignmentStartDate && data.assignmentStartDate < today) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Assignment start date cannot be in the past." },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "past_assignment_start", scheduleId: id })
+    return withRequestId(response, logContext.requestId)
   }
   const weekOff2Weeks =
     data.weekOffDay2 && (!data.weekOff2Weeks || !data.weekOff2Weeks.length)
@@ -119,10 +142,12 @@ export async function PATCH(
   } else {
     const staffIds = Array.from(new Set(data.staffIds.map((value) => value.trim())))
     if (!staffIds.length) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: "Select at least one staff member." },
         { status: 400 }
       )
+      logApiRequestSuccess(logContext, 400, { reason: "missing_staff_ids", scheduleId: id })
+      return withRequestId(response, logContext.requestId)
     }
 
     const staffProfiles = await prisma.staffProfile.findMany({
@@ -158,7 +183,9 @@ export async function PATCH(
       .filter(Boolean) as { id: string; userId: string }[]
 
     if (!finalStaffProfiles.length) {
-      return NextResponse.json({ error: "Staff profile not found." }, { status: 404 })
+      const response = NextResponse.json({ error: "Staff profile not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "staff_profile_not_found", scheduleId: id })
+      return withRequestId(response, logContext.requestId)
     }
 
     const assignmentStart = data.assignmentStartDate
@@ -177,10 +204,12 @@ export async function PATCH(
     })
 
     if (existingAssignments.length) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: "Selected staff already have schedules assigned in this range." },
         { status: 409 }
       )
+      logApiRequestSuccess(logContext, 409, { reason: "assignment_conflict", scheduleId: id })
+      return withRequestId(response, logContext.requestId)
     }
 
     schedule = await prisma.$transaction(async (tx) => {
@@ -235,19 +264,26 @@ export async function PATCH(
     },
   })
 
-  return NextResponse.json({ schedule: withBlocks })
+  const response = NextResponse.json({ schedule: withBlocks })
+  logApiRequestSuccess(logContext, 200, { scheduleId: id })
+  return withRequestId(response, logContext.requestId)
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const { id } = await params
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
 
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized", scheduleId: id })
+    return withRequestId(response, logContext.requestId)
   }
 
   const currentSchedule = await prisma.shiftSchedule.findUnique({
@@ -288,6 +324,14 @@ export async function DELETE(
     }
   }
 
-  await prisma.shiftSchedule.delete({ where: { id } })
-  return NextResponse.json({ ok: true })
+  try {
+    await prisma.shiftSchedule.delete({ where: { id } })
+    const response = NextResponse.json({ ok: true })
+    logApiRequestSuccess(logContext, 200, { scheduleId: id, result: "deleted" })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500, { scheduleId: id })
+    const response = NextResponse.json({ error: "Unable to delete schedule." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }

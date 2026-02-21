@@ -21,6 +21,13 @@ import bcrypt from "bcryptjs"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { canManageUsers } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 
@@ -1729,100 +1736,125 @@ const clearModulesData = async (modules: Set<ClearModule>) => {
 }
 
 export async function POST(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const unauthorized = await ensureAuthorized()
-  if (unauthorized) return unauthorized
-
-  const payload = await request.json().catch(() => null)
-  const parsed = requestSchema.safeParse(payload)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid input.", details: parsed.error.flatten() },
-      { status: 400 }
-    )
+  if (unauthorized) {
+    logApiRequestSuccess(logContext, unauthorized.status, { reason: "unauthorized" })
+    return withRequestId(unauthorized, logContext.requestId)
   }
 
-  if (parsed.data.action === "previewClear") {
-    const preview = await previewClearData()
-    return NextResponse.json({
-      ok: true,
-      action: "previewClear",
-      preview,
-      message: "Preview generated.",
-    })
-  }
-
-  if (parsed.data.action === "previewModulesClear") {
-    const mode: ClearMode = parsed.data.mode ?? "include_dependents"
-    const selected = new Set<ClearModule>(parsed.data.modules ?? [])
-    if (selected.size === 0) {
-      return NextResponse.json({ error: "Select at least one module." }, { status: 400 })
-    }
-    const expansion = expandClearModules(selected, mode)
-    if (!expansion.ok) {
-      return NextResponse.json(
-        {
-          error: "Missing module dependencies for strict mode.",
-          details: expansion.missingByModule,
-          expandedModules: expansion.expanded,
-        },
-        { status: 409 }
+  try {
+    const payload = await request.json().catch(() => null)
+    const parsed = requestSchema.safeParse(payload)
+    if (!parsed.success) {
+      const response = NextResponse.json(
+        { error: "Invalid input.", details: parsed.error.flatten() },
+        { status: 400 }
       )
+      logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+      return withRequestId(response, logContext.requestId)
     }
 
-    const expandedSet = new Set<ClearModule>(expansion.expanded)
-    const preview = await countModuleData(expandedSet)
-    return NextResponse.json({
-      ok: true,
-      action: "previewModulesClear",
-      selectedModules: Array.from(selected),
-      expandedModules: expansion.expanded,
-      autoIncludedModules: expansion.expanded.filter((moduleKey) => !selected.has(moduleKey)),
-      mode,
-      preview: { wouldDelete: preview.counts, preservedAdmins: preview.preservedAdmins },
-      message: "Module clear preview generated.",
-    })
-  }
-
-  if (parsed.data.action === "clear") {
-    const result = await clearData()
-    return NextResponse.json({
-      ok: true,
-      action: "clear",
-      result,
-      message: "Data cleared. Admin users and global settings were preserved.",
-    })
-  }
-
-  if (parsed.data.action === "clearModules") {
-    const mode: ClearMode = parsed.data.mode ?? "include_dependents"
-    const selected = new Set<ClearModule>(parsed.data.modules ?? [])
-    if (selected.size === 0) {
-      return NextResponse.json({ error: "Select at least one module." }, { status: 400 })
+    if (parsed.data.action === "previewClear") {
+      const preview = await previewClearData()
+      const response = NextResponse.json({
+        ok: true,
+        action: "previewClear",
+        preview,
+        message: "Preview generated.",
+      })
+      logApiRequestSuccess(logContext, 200, { action: "previewClear" })
+      return withRequestId(response, logContext.requestId)
     }
-    const expansion = expandClearModules(selected, mode)
-    if (!expansion.ok) {
-      return NextResponse.json(
-        {
-          error: "Missing module dependencies for strict mode.",
-          details: expansion.missingByModule,
-          expandedModules: expansion.expanded,
-        },
-        { status: 409 }
-      )
+
+    if (parsed.data.action === "previewModulesClear") {
+      const mode: ClearMode = parsed.data.mode ?? "include_dependents"
+      const selected = new Set<ClearModule>(parsed.data.modules ?? [])
+      if (selected.size === 0) {
+        const response = NextResponse.json({ error: "Select at least one module." }, { status: 400 })
+        logApiRequestSuccess(logContext, 400, { action: "previewModulesClear", reason: "no_modules" })
+        return withRequestId(response, logContext.requestId)
+      }
+      const expansion = expandClearModules(selected, mode)
+      if (!expansion.ok) {
+        const response = NextResponse.json(
+          {
+            error: "Missing module dependencies for strict mode.",
+            details: expansion.missingByModule,
+            expandedModules: expansion.expanded,
+          },
+          { status: 409 }
+        )
+        logApiRequestSuccess(logContext, 409, { action: "previewModulesClear", reason: "dependency_conflict" })
+        return withRequestId(response, logContext.requestId)
+      }
+
+      const expandedSet = new Set<ClearModule>(expansion.expanded)
+      const preview = await countModuleData(expandedSet)
+      const response = NextResponse.json({
+        ok: true,
+        action: "previewModulesClear",
+        selectedModules: Array.from(selected),
+        expandedModules: expansion.expanded,
+        autoIncludedModules: expansion.expanded.filter((moduleKey) => !selected.has(moduleKey)),
+        mode,
+        preview: { wouldDelete: preview.counts, preservedAdmins: preview.preservedAdmins },
+        message: "Module clear preview generated.",
+      })
+      logApiRequestSuccess(logContext, 200, { action: "previewModulesClear" })
+      return withRequestId(response, logContext.requestId)
     }
-    const expandedSet = new Set<ClearModule>(expansion.expanded)
-    const result = await clearModulesData(expandedSet)
-    return NextResponse.json({
-      ok: true,
-      action: "clearModules",
-      selectedModules: Array.from(selected),
-      expandedModules: expansion.expanded,
-      autoIncludedModules: expansion.expanded.filter((moduleKey) => !selected.has(moduleKey)),
-      mode,
-      result,
-      message: "Selected modules cleared. Global settings and admin users were preserved.",
-    })
-  }
+
+    if (parsed.data.action === "clear") {
+      const result = await clearData()
+      const response = NextResponse.json({
+        ok: true,
+        action: "clear",
+        result,
+        message: "Data cleared. Admin users and global settings were preserved.",
+      })
+      logApiRequestSuccess(logContext, 200, { action: "clear" })
+      return withRequestId(response, logContext.requestId)
+    }
+
+    if (parsed.data.action === "clearModules") {
+      const mode: ClearMode = parsed.data.mode ?? "include_dependents"
+      const selected = new Set<ClearModule>(parsed.data.modules ?? [])
+      if (selected.size === 0) {
+        const response = NextResponse.json({ error: "Select at least one module." }, { status: 400 })
+        logApiRequestSuccess(logContext, 400, { action: "clearModules", reason: "no_modules" })
+        return withRequestId(response, logContext.requestId)
+      }
+      const expansion = expandClearModules(selected, mode)
+      if (!expansion.ok) {
+        const response = NextResponse.json(
+          {
+            error: "Missing module dependencies for strict mode.",
+            details: expansion.missingByModule,
+            expandedModules: expansion.expanded,
+          },
+          { status: 409 }
+        )
+        logApiRequestSuccess(logContext, 409, { action: "clearModules", reason: "dependency_conflict" })
+        return withRequestId(response, logContext.requestId)
+      }
+      const expandedSet = new Set<ClearModule>(expansion.expanded)
+      const result = await clearModulesData(expandedSet)
+      const response = NextResponse.json({
+        ok: true,
+        action: "clearModules",
+        selectedModules: Array.from(selected),
+        expandedModules: expansion.expanded,
+        autoIncludedModules: expansion.expanded.filter((moduleKey) => !selected.has(moduleKey)),
+        mode,
+        result,
+        message: "Selected modules cleared. Global settings and admin users were preserved.",
+      })
+      logApiRequestSuccess(logContext, 200, { action: "clearModules" })
+      return withRequestId(response, logContext.requestId)
+    }
 
   const dependencyMap: Record<SeedGroup, SeedGroup[]> = {
     taxes: [],
@@ -1875,12 +1907,19 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({
-    ok: true,
-    action: "seed",
-    summary,
-    executedGroups: Array.from(done),
-    requestId: randomUUID(),
-    message: "Seed data applied successfully.",
-  })
+    const response = NextResponse.json({
+      ok: true,
+      action: "seed",
+      summary,
+      executedGroups: Array.from(done),
+      requestId: randomUUID(),
+      message: "Seed data applied successfully.",
+    })
+    logApiRequestSuccess(logContext, 200, { action: "seed", groups: Array.from(done) })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to process seed request." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }

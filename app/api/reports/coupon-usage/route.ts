@@ -3,6 +3,13 @@ import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import type { ListResponse } from "@/types/api"
@@ -98,37 +105,48 @@ const makeUsageMap = (
 }
 
 export async function GET(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const unauthorized = await ensureAuthorized()
-  if (unauthorized) return unauthorized
+  if (unauthorized) {
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(unauthorized, logContext.requestId)
+  }
 
   const url = new URL(request.url)
   const parsed = querySchema.safeParse(Object.fromEntries(url.searchParams.entries()))
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid query parameters.", details: parsed.error.flatten() },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const { page, pageSize, q, status, couponCode, dateFrom, dateTo } = parsed.data
-  if (dateFrom && dateTo && dateFrom > dateTo) {
-    return NextResponse.json(
-      { error: "dateFrom must be before or equal to dateTo." },
-      { status: 400 }
-    )
-  }
+  try {
+    const { page, pageSize, q, status, couponCode, dateFrom, dateTo } = parsed.data
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      const response = NextResponse.json(
+        { error: "dateFrom must be before or equal to dateTo." },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "invalid_date_range" })
+      return withRequestId(response, logContext.requestId)
+    }
 
-  const customerWhere = buildCustomerWhere(q)
-  const qualifyingOrderWhere = buildQualifyingOrderWhere(couponCode, dateFrom, dateTo)
-  const usageFilterKey = status === "used" ? "some" : "none"
-  const usageCustomerWhere: Prisma.UserWhereInput = {
-    ...customerWhere,
-    appointmentOrders: { [usageFilterKey]: qualifyingOrderWhere },
-  }
+    const customerWhere = buildCustomerWhere(q)
+    const qualifyingOrderWhere = buildQualifyingOrderWhere(couponCode, dateFrom, dateTo)
+    const usageFilterKey = status === "used" ? "some" : "none"
+    const usageCustomerWhere: Prisma.UserWhereInput = {
+      ...customerWhere,
+      appointmentOrders: { [usageFilterKey]: qualifyingOrderWhere },
+    }
 
-  const skip = (page - 1) * pageSize
-  const [total, customers, totalCustomers, usedCustomers, totalRedemptions] =
-    await prisma.$transaction([
+    const skip = (page - 1) * pageSize
+    const [total, customers, totalCustomers, usedCustomers, totalRedemptions] =
+      await prisma.$transaction([
       prisma.user.count({ where: usageCustomerWhere }),
       prisma.user.findMany({
         where: usageCustomerWhere,
@@ -167,14 +185,14 @@ export async function GET(request: Request) {
           },
         },
       }),
-    ])
+      ])
 
-  let usageMap = new Map<
-    string,
-    { usageCount: number; lastUsedAt: Date | null; couponCodes: Set<string> }
-  >()
-  if (status === "used" && customers.length) {
-    const rows = await prisma.appointmentOrderCoupon.findMany({
+    let usageMap = new Map<
+      string,
+      { usageCount: number; lastUsedAt: Date | null; couponCodes: Set<string> }
+    >()
+    if (status === "used" && customers.length) {
+      const rows = await prisma.appointmentOrderCoupon.findMany({
       where: {
         ...(couponCode ? { code: couponCode.trim().toUpperCase() } : {}),
         order: {
@@ -194,45 +212,51 @@ export async function GET(request: Request) {
         code: true,
         order: { select: { customerId: true, createdAt: true } },
       },
-    })
-    usageMap = makeUsageMap(rows)
-  }
-
-  const items: CouponUsageReportRow[] = customers.map((customer) => {
-    const usage = usageMap.get(customer.id)
-    return {
-      customerId: customer.id,
-      customerName: customer.name,
-      customerEmail: customer.email,
-      customerPhone: customer.phone,
-      customerStatus: customer.status,
-      couponUsageCount: usage?.usageCount ?? 0,
-      distinctCouponCount: usage?.couponCodes.size ?? 0,
-      usedCouponCodes: usage ? [...usage.couponCodes].sort() : [],
-      lastCouponUsedAt: usage?.lastUsedAt ? usage.lastUsedAt.toISOString() : null,
+      })
+      usageMap = makeUsageMap(rows)
     }
-  })
 
-  const summary: CouponUsageReportSummary = {
-    totalCustomers,
-    usedCustomers,
-    notUsedCustomers: Math.max(0, totalCustomers - usedCustomers),
-    totalRedemptions,
+    const items: CouponUsageReportRow[] = customers.map((customer) => {
+      const usage = usageMap.get(customer.id)
+      return {
+        customerId: customer.id,
+        customerName: customer.name,
+        customerEmail: customer.email,
+        customerPhone: customer.phone,
+        customerStatus: customer.status,
+        couponUsageCount: usage?.usageCount ?? 0,
+        distinctCouponCount: usage?.couponCodes.size ?? 0,
+        usedCouponCodes: usage ? [...usage.couponCodes].sort() : [],
+        lastCouponUsedAt: usage?.lastUsedAt ? usage.lastUsedAt.toISOString() : null,
+      }
+    })
+
+    const summary: CouponUsageReportSummary = {
+      totalCustomers,
+      usedCustomers,
+      notUsedCustomers: Math.max(0, totalCustomers - usedCustomers),
+      totalRedemptions,
+    }
+
+    const response: ListResponse<CouponUsageReportRow> & {
+      summary: CouponUsageReportSummary
+      status: CouponUsageReportStatus
+    } = {
+      items,
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      summary,
+      status,
+    }
+
+    const json = NextResponse.json(response)
+    logApiRequestSuccess(logContext, 200, { page, pageSize, total, status })
+    return withRequestId(json, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to load coupon usage report." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
   }
-
-  const response: ListResponse<CouponUsageReportRow> & {
-    summary: CouponUsageReportSummary
-    status: CouponUsageReportStatus
-  } = {
-    items,
-    page,
-    pageSize,
-    total,
-    totalPages: Math.max(1, Math.ceil(total / pageSize)),
-    summary,
-    status,
-  }
-
-  return NextResponse.json(response)
 }
-

@@ -2,6 +2,13 @@ import { AppointmentStatus } from "@prisma/client"
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import {
   appointmentOrderCreateSchema,
@@ -39,38 +46,67 @@ const ensureAuthorized = async () => {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) return unauthorized
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
 
-  const { id } = await params
-  const order = await prisma.appointmentOrder.findUnique({
-    where: { id },
-    include: appointmentOrderInclude,
-  })
-  if (!order) {
-    return NextResponse.json({ error: "Appointment order not found." }, { status: 404 })
+  const unauthorized = await ensureAuthorized()
+  if (unauthorized) {
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(unauthorized, logContext.requestId)
   }
-  return NextResponse.json({ order: serializeAppointmentOrder(order) })
+
+  try {
+    const { id } = await params
+    const order = await prisma.appointmentOrder.findUnique({
+      where: { id },
+      include: appointmentOrderInclude,
+    })
+    if (!order) {
+      const response = NextResponse.json({ error: "Appointment order not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { orderId: id, reason: "not_found" })
+      return withRequestId(response, logContext.requestId)
+    }
+    const response = NextResponse.json({ order: serializeAppointmentOrder(order) })
+    logApiRequestSuccess(logContext, 200, { orderId: id, status: order.status })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to load booking order." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const unauthorized = await ensureAuthorized()
-  if (unauthorized) return unauthorized
+  if (unauthorized) {
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(unauthorized, logContext.requestId)
+  }
 
   const { id } = await params
-  const payload = await request.json()
+  const payload = await request.json().catch(() => null)
+  if (!payload) {
+    const response = NextResponse.json({ error: "Invalid JSON body." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { orderId: id, reason: "invalid_json" })
+    return withRequestId(response, logContext.requestId)
+  }
   const parsed = appointmentOrderUpdateSchema.safeParse(payload)
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid input.", details: parsed.error.flatten() },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { orderId: id, reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const currentOrder = await prisma.appointmentOrder.findUnique({
@@ -89,7 +125,9 @@ export async function PATCH(
     },
   })
   if (!currentOrder) {
-    return NextResponse.json({ error: "Appointment order not found." }, { status: 404 })
+    const response = NextResponse.json({ error: "Appointment order not found." }, { status: 404 })
+    logApiRequestSuccess(logContext, 404, { orderId: id, reason: "not_found" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const timeFromCurrent = `${String(currentOrder.appointmentStartAt.getHours()).padStart(2, "0")}:${String(currentOrder.appointmentStartAt.getMinutes()).padStart(2, "0")}`
@@ -132,10 +170,12 @@ export async function PATCH(
   })
 
   if (nextInput.status === "DRAFT" && currentOrder.status !== "DRAFT") {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Confirmed/completed orders cannot be moved back to draft." },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { orderId: id, reason: "invalid_status_transition" })
+    return withRequestId(response, logContext.requestId)
   }
 
   try {
@@ -294,10 +334,12 @@ export async function PATCH(
       return order
     })
 
-    return NextResponse.json({ order: serializeAppointmentOrder(updated) })
+    const response = NextResponse.json({ order: serializeAppointmentOrder(updated) })
+    logApiRequestSuccess(logContext, 200, { orderId: id, status: updated.status })
+    return withRequestId(response, logContext.requestId)
   } catch (error) {
     if (error instanceof AvailabilityConflictError) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         {
           error: error.message,
           suggestedStartAt: error.suggestedStartAt,
@@ -305,13 +347,19 @@ export async function PATCH(
         },
         { status: 409 }
       )
+      logApiRequestSuccess(logContext, 409, { orderId: id, reason: "availability_conflict" })
+      return withRequestId(response, logContext.requestId)
     }
     if (error instanceof StockConflictError) {
-      return NextResponse.json({ error: error.message }, { status: 409 })
+      const response = NextResponse.json({ error: error.message }, { status: 409 })
+      logApiRequestSuccess(logContext, 409, { orderId: id, reason: "stock_conflict" })
+      return withRequestId(response, logContext.requestId)
     }
-    return NextResponse.json(
+    logApiRequestError(logContext, error, 400, { orderId: id })
+    const response = NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to update booking order." },
       { status: 400 }
     )
+    return withRequestId(response, logContext.requestId)
   }
 }

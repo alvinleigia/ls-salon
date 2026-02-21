@@ -2,6 +2,13 @@ import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { updateUserSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
@@ -10,6 +17,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const { id } = await params
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
@@ -19,16 +29,25 @@ export async function PATCH(
     !session?.user ||
     (!canManageUsers(role as Role) && sessionUserId !== id)
   ) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized", targetUserId: id })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const body = await request.json()
+  const body = await request.json().catch(() => null)
+  if (!body) {
+    const response = NextResponse.json({ error: "Invalid JSON body." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "invalid_json", targetUserId: id })
+    return withRequestId(response, logContext.requestId)
+  }
   const parsed = updateUserSchema.safeParse(body)
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid input.", details: parsed.error.flatten() },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed", targetUserId: id })
+    return withRequestId(response, logContext.requestId)
   }
   const bodyData = parsed.data
 
@@ -91,7 +110,9 @@ export async function PATCH(
     if (bodyData.postalCode?.trim()) data.postalCode = bodyData.postalCode.trim()
     if (bodyData.country?.trim()) data.country = bodyData.country.trim()
   } else {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized_role_path", targetUserId: id })
+    return withRequestId(response, logContext.requestId)
   }
 
   if (targetRole === "STAFF") {
@@ -243,24 +264,33 @@ export async function PATCH(
       return updated
     })
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       user: {
         ...user,
         eligibleServiceIds: user.eligibleServices.map((item) => item.serviceId),
       },
     })
+    logApiRequestSuccess(logContext, 200, { targetUserId: id })
+    return withRequestId(response, logContext.requestId)
   } catch (error) {
     if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 400 })
+      logApiRequestError(logContext, error, 400, { targetUserId: id })
+      const response = NextResponse.json({ error: error.message }, { status: 400 })
+      return withRequestId(response, logContext.requestId)
     }
-    return NextResponse.json({ error: "Unable to update user." }, { status: 500 })
+    logApiRequestError(logContext, error, 500, { targetUserId: id })
+    const response = NextResponse.json({ error: "Unable to update user." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
   }
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const { id } = await params
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
@@ -270,10 +300,12 @@ export async function GET(
     !session?.user ||
     (!canManageUsers(role as Role) && sessionUserId !== id)
   ) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Unauthorized. Please sign in and try again." },
       { status: 401 }
     )
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized", targetUserId: id })
+    return withRequestId(response, logContext.requestId)
   }
 
   const ensureStaffProfile = async () => {
@@ -340,16 +372,20 @@ export async function GET(
   })
 
   if (!user) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "User not found. Please refresh and try again." },
       { status: 404 }
     )
+    logApiRequestSuccess(logContext, 404, { reason: "not_found", targetUserId: id })
+    return withRequestId(response, logContext.requestId)
   }
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     user: {
       ...user,
       eligibleServiceIds: user.eligibleServices.map((item) => item.serviceId),
     },
   })
+  logApiRequestSuccess(logContext, 200, { targetUserId: id })
+  return withRequestId(response, logContext.requestId)
 }

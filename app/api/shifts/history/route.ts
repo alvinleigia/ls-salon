@@ -2,6 +2,13 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { toISODate } from "@/lib/date"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
@@ -44,28 +51,37 @@ const parseDateOnly = (value: string) => {
 }
 
 export async function GET(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role as Role | undefined
   if (!session?.user || !canManageUsers(role ?? null)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const parsed = querySchema.safeParse(
     Object.fromEntries(new URL(request.url).searchParams.entries())
   )
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid query parameters.", details: parsed.error.flatten() },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const { startDate, endDate, staffIds } = parsed.data
   if (startDate > endDate) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Start date cannot be after end date." },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "invalid_date_range" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const userIds = (staffIds ?? "")
@@ -73,7 +89,9 @@ export async function GET(request: Request) {
     .map((value) => value.trim())
     .filter(Boolean)
   if (!userIds.length) {
-    return NextResponse.json({ items: [] as RosterHistoryDay[] })
+    const response = NextResponse.json({ items: [] as RosterHistoryDay[] })
+    logApiRequestSuccess(logContext, 200, { itemCount: 0, reason: "no_staff_ids" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const staffProfiles = await prisma.staffProfile.findMany({
@@ -81,7 +99,9 @@ export async function GET(request: Request) {
     select: { id: true, userId: true },
   })
   if (!staffProfiles.length) {
-    return NextResponse.json({ items: [] as RosterHistoryDay[] })
+    const response = NextResponse.json({ items: [] as RosterHistoryDay[] })
+    logApiRequestSuccess(logContext, 200, { itemCount: 0, reason: "no_staff_profiles" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const staffProfileIds = staffProfiles.map((item) => item.id)
@@ -93,74 +113,86 @@ export async function GET(request: Request) {
   const timeZone = settings?.timeZone ?? null
 
   const normalizedPastRange = normalizeHistoryRangeToPast(startDate, endDate, timeZone)
-  if (normalizedPastRange) {
-    await syncRosterHistoryRange(prisma, {
-      staffProfileIds,
-      startDate: normalizedPastRange.startDate,
-      endDate: normalizedPastRange.endDate,
-      mode: "insert-missing",
-    })
-  }
+  try {
+    if (normalizedPastRange) {
+      await syncRosterHistoryRange(prisma, {
+        staffProfileIds,
+        startDate: normalizedPastRange.startDate,
+        endDate: normalizedPastRange.endDate,
+        mode: "insert-missing",
+      })
+    }
 
   const parsedStart = parseDateOnly(startDate)
   const parsedEnd = parseDateOnly(endDate)
-  if (!parsedStart || !parsedEnd) {
-    return NextResponse.json(
-      { error: "Invalid query parameters." },
-      { status: 400 }
-    )
-  }
+    if (!parsedStart || !parsedEnd) {
+      const response = NextResponse.json(
+        { error: "Invalid query parameters." },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "invalid_parsed_dates" })
+      return withRequestId(response, logContext.requestId)
+    }
 
   const rosterHistoryDelegate = (
     prisma as { staffRosterHistoryDay?: RosterHistoryDelegate }
   ).staffRosterHistoryDay
-  if (!rosterHistoryDelegate) {
-    return NextResponse.json({ items: [] as RosterHistoryDay[] })
-  }
+    if (!rosterHistoryDelegate) {
+      const response = NextResponse.json({ items: [] as RosterHistoryDay[] })
+      logApiRequestSuccess(logContext, 200, { itemCount: 0, reason: "delegate_unavailable" })
+      return withRequestId(response, logContext.requestId)
+    }
 
-  const items = await rosterHistoryDelegate.findMany({
-    where: {
-      staffProfileId: { in: staffProfileIds },
-      date: {
-        gte: parsedStart,
-        lte: parsedEnd,
+    const items = await rosterHistoryDelegate.findMany({
+      where: {
+        staffProfileId: { in: staffProfileIds },
+        date: {
+          gte: parsedStart,
+          lte: parsedEnd,
+        },
       },
-    },
-    orderBy: [{ date: "asc" }, { createdAt: "asc" }],
-    select: {
-      staffProfileId: true,
-      date: true,
-      source: true,
-      templateId: true,
-      templateName: true,
-      startTime: true,
-      endTime: true,
-      paidMinutes: true,
-      leaveDefinitionCode: true,
-      leaveDefinitionName: true,
-      leaveReason: true,
-    },
-  })
-
-  const response: RosterHistoryDay[] = items
-    .map((item) => {
-      const staffId = profileToUser.get(item.staffProfileId)
-      if (!staffId) return null
-      return {
-        staffId,
-        date: toISODate(item.date),
-        source: item.source,
-        templateId: item.templateId,
-        templateName: item.templateName,
-        startTime: item.startTime,
-        endTime: item.endTime,
-        paidMinutes: item.paidMinutes,
-        leaveDefinitionCode: item.leaveDefinitionCode,
-        leaveDefinitionName: item.leaveDefinitionName,
-        leaveReason: item.leaveReason,
-      }
+      orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+      select: {
+        staffProfileId: true,
+        date: true,
+        source: true,
+        templateId: true,
+        templateName: true,
+        startTime: true,
+        endTime: true,
+        paidMinutes: true,
+        leaveDefinitionCode: true,
+        leaveDefinitionName: true,
+        leaveReason: true,
+      },
     })
-    .filter(Boolean) as RosterHistoryDay[]
 
-  return NextResponse.json({ items: response })
+    const response: RosterHistoryDay[] = items
+      .map((item) => {
+        const staffId = profileToUser.get(item.staffProfileId)
+        if (!staffId) return null
+        return {
+          staffId,
+          date: toISODate(item.date),
+          source: item.source,
+          templateId: item.templateId,
+          templateName: item.templateName,
+          startTime: item.startTime,
+          endTime: item.endTime,
+          paidMinutes: item.paidMinutes,
+          leaveDefinitionCode: item.leaveDefinitionCode,
+          leaveDefinitionName: item.leaveDefinitionName,
+          leaveReason: item.leaveReason,
+        }
+      })
+      .filter(Boolean) as RosterHistoryDay[]
+
+    const json = NextResponse.json({ items: response })
+    logApiRequestSuccess(logContext, 200, { itemCount: response.length })
+    return withRequestId(json, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to load roster history." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }

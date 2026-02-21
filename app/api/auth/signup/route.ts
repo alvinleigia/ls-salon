@@ -2,18 +2,36 @@ import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import { z } from "zod"
 
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { signUpSchema } from "@/lib/validation"
 
 export async function POST(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   try {
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
+    if (!body) {
+      const response = NextResponse.json({ error: "Invalid JSON body." }, { status: 400 })
+      logApiRequestSuccess(logContext, 400, { reason: "invalid_json" })
+      return withRequestId(response, logContext.requestId)
+    }
+
     const parsed = signUpSchema.safeParse(body)
     if (!parsed.success) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: "Invalid input.", details: parsed.error.flatten() },
         { status: 400 }
       )
+      logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+      return withRequestId(response, logContext.requestId)
     }
 
     const {
@@ -34,18 +52,22 @@ export async function POST(request: Request) {
     } = parsed.data
 
     if (!email || !password) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: "Email and password are required." },
         { status: 400 }
       )
+      logApiRequestSuccess(logContext, 400, { reason: "missing_email_or_password" })
+      return withRequestId(response, logContext.requestId)
     }
 
     const existing = await prisma.user.findUnique({ where: { email } })
     if (existing) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: "Email already in use." },
         { status: 409 }
       )
+      logApiRequestSuccess(logContext, 409, { reason: "email_in_use" })
+      return withRequestId(response, logContext.requestId)
     }
 
     const passwordHash = await bcrypt.hash(password, 10)
@@ -69,17 +91,23 @@ export async function POST(request: Request) {
       },
     })
 
-    return NextResponse.json({ ok: true })
+    const response = NextResponse.json({ ok: true })
+    logApiRequestSuccess(logContext, 200, { result: "signup_created" })
+    return withRequestId(response, logContext.requestId)
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: "Invalid input.", details: error.flatten() },
         { status: 400 }
       )
+      logApiRequestSuccess(logContext, 400, { reason: "zod_error" })
+      return withRequestId(response, logContext.requestId)
     }
-    return NextResponse.json(
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json(
       { error: "Something went wrong. Please try again." },
       { status: 500 }
     )
+    return withRequestId(response, logContext.requestId)
   }
 }

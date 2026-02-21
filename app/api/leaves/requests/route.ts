@@ -3,6 +3,13 @@ import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import type { Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import { createLeaveRequestSchema } from "@/lib/validation"
@@ -35,6 +42,9 @@ const leaveRequestListSchema = z.object({
 })
 
 export async function GET(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role as Role | undefined
   const sessionUserId = (session?.user as { id?: string })?.id
@@ -42,115 +52,142 @@ export async function GET(request: Request) {
   const isManager = role === "MANAGER"
   const isStaff = role === "STAFF"
   if (!session?.user || (!isAdmin && !isManager && !isStaff)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
   if (!sessionUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "missing_session_user_id" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const parsed = leaveRequestListSchema.safeParse(
     Object.fromEntries(new URL(request.url).searchParams.entries())
   )
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid query parameters.", details: parsed.error.flatten() },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  let actorStaffProfile = await prisma.staffProfile.findUnique({
-    where: { userId: sessionUserId },
-    select: { id: true },
-  })
-  if ((isStaff || isManager) && !actorStaffProfile) {
-    actorStaffProfile = await prisma.staffProfile.create({
-      data: { userId: sessionUserId },
+  try {
+    let actorStaffProfile = await prisma.staffProfile.findUnique({
+      where: { userId: sessionUserId },
       select: { id: true },
     })
-  }
-
-  const { page, pageSize, q, status, leaveDefinitionId, mineOnly, staffUserId, sort, order } =
-    parsed.data
-
-  let staffProfileFilterId: string | undefined
-  if (isStaff) {
-    if (!actorStaffProfile) {
-      return NextResponse.json({ error: "Staff profile not found." }, { status: 400 })
+    if ((isStaff || isManager) && !actorStaffProfile) {
+      actorStaffProfile = await prisma.staffProfile.create({
+        data: { userId: sessionUserId },
+        select: { id: true },
+      })
     }
-    staffProfileFilterId = actorStaffProfile.id
-  } else if (mineOnly) {
-    if (!actorStaffProfile) {
-      return NextResponse.json({ error: "Staff profile not found for mine-only filter." }, { status: 400 })
+
+    const { page, pageSize, q, status, leaveDefinitionId, mineOnly, staffUserId, sort, order } =
+      parsed.data
+
+    let staffProfileFilterId: string | undefined
+    if (isStaff) {
+      if (!actorStaffProfile) {
+        const response = NextResponse.json({ error: "Staff profile not found." }, { status: 400 })
+        logApiRequestSuccess(logContext, 400, { reason: "staff_profile_not_found" })
+        return withRequestId(response, logContext.requestId)
+      }
+      staffProfileFilterId = actorStaffProfile.id
+    } else if (mineOnly) {
+      if (!actorStaffProfile) {
+        const response = NextResponse.json({ error: "Staff profile not found for mine-only filter." }, { status: 400 })
+        logApiRequestSuccess(logContext, 400, { reason: "mine_only_staff_profile_not_found" })
+        return withRequestId(response, logContext.requestId)
+      }
+      staffProfileFilterId = actorStaffProfile.id
+    } else if (staffUserId) {
+      const selectedStaffProfile = await prisma.staffProfile.findUnique({
+        where: { userId: staffUserId },
+        select: { id: true },
+      })
+      if (!selectedStaffProfile) {
+        const response = NextResponse.json({ error: "Selected staff user not found." }, { status: 404 })
+        logApiRequestSuccess(logContext, 404, { reason: "selected_staff_not_found" })
+        return withRequestId(response, logContext.requestId)
+      }
+      staffProfileFilterId = selectedStaffProfile.id
     }
-    staffProfileFilterId = actorStaffProfile.id
-  } else if (staffUserId) {
-    const selectedStaffProfile = await prisma.staffProfile.findUnique({
-      where: { userId: staffUserId },
-      select: { id: true },
-    })
-    if (!selectedStaffProfile) {
-      return NextResponse.json({ error: "Selected staff user not found." }, { status: 404 })
+
+    const where: Prisma.LeaveRequestWhereInput = {
+      ...(isManager && !mineOnly
+        ? {
+            staffProfile: {
+              managerUserId: sessionUserId,
+              user: { role: "STAFF" },
+            },
+          }
+        : {}),
+      ...(status ? { status } : {}),
+      ...(leaveDefinitionId ? { leaveDefinitionId } : {}),
+      ...(staffProfileFilterId ? { staffProfileId: staffProfileFilterId } : {}),
+      ...(q
+        ? {
+            OR: [
+              { reason: { contains: q, mode: "insensitive" } },
+              { leaveDefinition: { code: { contains: q, mode: "insensitive" } } },
+              { leaveDefinition: { name: { contains: q, mode: "insensitive" } } },
+              { staffProfile: { user: { name: { contains: q, mode: "insensitive" } } } },
+              { staffProfile: { user: { email: { contains: q, mode: "insensitive" } } } },
+            ],
+          }
+        : {}),
     }
-    staffProfileFilterId = selectedStaffProfile.id
-  }
 
-  const where: Prisma.LeaveRequestWhereInput = {
-    ...(isManager && !mineOnly
-      ? {
-          staffProfile: {
-            managerUserId: sessionUserId,
-            user: { role: "STAFF" },
-          },
-        }
-      : {}),
-    ...(status ? { status } : {}),
-    ...(leaveDefinitionId ? { leaveDefinitionId } : {}),
-    ...(staffProfileFilterId ? { staffProfileId: staffProfileFilterId } : {}),
-    ...(q
-      ? {
-          OR: [
-            { reason: { contains: q, mode: "insensitive" } },
-            { leaveDefinition: { code: { contains: q, mode: "insensitive" } } },
-            { leaveDefinition: { name: { contains: q, mode: "insensitive" } } },
-            { staffProfile: { user: { name: { contains: q, mode: "insensitive" } } } },
-            { staffProfile: { user: { email: { contains: q, mode: "insensitive" } } } },
-          ],
-        }
-      : {}),
-  }
+    const [total, items] = await prisma.$transaction([
+      prisma.leaveRequest.count({ where }),
+      prisma.leaveRequest.findMany({
+        where,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        orderBy: { [sort]: order },
+        select: leaveRequestSelect,
+      }),
+    ])
 
-  const [total, items] = await prisma.$transaction([
-    prisma.leaveRequest.count({ where }),
-    prisma.leaveRequest.findMany({
-      where,
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-      orderBy: { [sort]: order },
-      select: leaveRequestSelect,
-    }),
-  ])
-
-  const response: ListResponse<LeaveRequestRow> = {
-    items: items.map(serializeLeaveRequest),
-    page,
-    pageSize,
-    total,
-    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    const response: ListResponse<LeaveRequestRow> = {
+      items: items.map(serializeLeaveRequest),
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    }
+    const json = NextResponse.json(response)
+    logApiRequestSuccess(logContext, 200, { page, pageSize, total })
+    return withRequestId(json, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to load leave requests." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
   }
-  return NextResponse.json(response)
 }
 
 export async function POST(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role as Role | undefined
   const sessionUserId = (session?.user as { id?: string })?.id
   const isManager = role === "MANAGER"
   const isStaff = role === "STAFF"
   if (!session?.user || (!isManager && !isStaff)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
   if (!sessionUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "missing_session_user_id" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const staffProfile = await prisma.staffProfile.findUnique({
@@ -164,16 +201,20 @@ export async function POST(request: Request) {
       select: { id: true },
     }))
   if (!resolvedStaffProfile) {
-    return NextResponse.json({ error: "Staff profile not found." }, { status: 400 })
+    const response = NextResponse.json({ error: "Staff profile not found." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "staff_profile_not_found" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const payload = await request.json().catch(() => ({}))
   const parsed = createLeaveRequestSchema.safeParse(payload)
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid input.", details: parsed.error.flatten() },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
   }
 
   try {
@@ -214,11 +255,17 @@ export async function POST(request: Request) {
       daysCount: serialized.daysCount,
     })
 
-    return NextResponse.json({ item: serialized }, { status: 201 })
+    const response = NextResponse.json({ item: serialized }, { status: 201 })
+    logApiRequestSuccess(logContext, 201, { leaveRequestId: serialized.id, status: serialized.status })
+    return withRequestId(response, logContext.requestId)
   } catch (error) {
     if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 400 })
+      logApiRequestError(logContext, error, 400)
+      const response = NextResponse.json({ error: error.message }, { status: 400 })
+      return withRequestId(response, logContext.requestId)
     }
-    return NextResponse.json({ error: "Unable to create leave request." }, { status: 500 })
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to create leave request." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
   }
 }

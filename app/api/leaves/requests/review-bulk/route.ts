@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import {
@@ -16,15 +23,22 @@ import {
 } from "../../_requests"
 
 export async function POST(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role as Role | undefined
   const sessionUserId = (session?.user as { id?: string })?.id
   const sessionUserEmail = (session?.user as { email?: string })?.email?.trim().toLowerCase()
   if (!session?.user || !canManageUsers(role ?? null)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
   if (!sessionUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "missing_session_user_id" })
+    return withRequestId(response, logContext.requestId)
   }
   const reviewerById = await prisma.user.findUnique({
     where: { id: sessionUserId },
@@ -39,93 +53,102 @@ export async function POST(request: Request) {
         })
       : null)
   if (!reviewer) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Session user not found. Please sign in again." },
       { status: 401 }
     )
+    logApiRequestSuccess(logContext, 401, { reason: "reviewer_not_found" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const payload = await request.json().catch(() => ({}))
-  const parsed = bulkReviewLeaveRequestsSchema.safeParse(payload)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid input.", details: parsed.error.flatten() },
-      { status: 400 }
-    )
-  }
+  try {
+    const payload = await request.json().catch(() => ({}))
+    const parsed = bulkReviewLeaveRequestsSchema.safeParse(payload)
+    if (!parsed.success) {
+      const response = NextResponse.json(
+        { error: "Invalid input.", details: parsed.error.flatten() },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+      return withRequestId(response, logContext.requestId)
+    }
 
-  const { requestIds, status, reviewerComment } = parsed.data
-  const now = new Date()
-  const currentItems = await prisma.leaveRequest.findMany({
-    where: { id: { in: requestIds } },
-    select: {
-      id: true,
-      staffProfileId: true,
-      startDate: true,
-      endDate: true,
-      status: true,
-      staffProfile: {
-        select: {
-          managerUserId: true,
-          user: {
-            select: { role: true },
+    const { requestIds, status, reviewerComment } = parsed.data
+    const now = new Date()
+    const currentItems = await prisma.leaveRequest.findMany({
+      where: { id: { in: requestIds } },
+      select: {
+        id: true,
+        staffProfileId: true,
+        startDate: true,
+        endDate: true,
+        status: true,
+        staffProfile: {
+          select: {
+            managerUserId: true,
+            user: {
+              select: { role: true },
+            },
           },
         },
       },
-    },
-  })
-  const pendingIds = currentItems
-    .filter((item) => item.status === "PENDING")
-    .filter((item) =>
-      role === "MANAGER"
-        ? item.staffProfile.user.role === "STAFF" && item.staffProfile.managerUserId === reviewer.id
-        : true
-    )
-    .map((item) => item.id)
-  const skippedIds = requestIds.filter((id) => !pendingIds.includes(id))
-
-  if (pendingIds.length === 0) {
-    return NextResponse.json({
-      items: [],
-      updatedCount: 0,
-      skippedCount: skippedIds.length,
-      skippedIds,
     })
-  }
-
-  if (status === "APPROVED") {
-    const conflicts = await findLeaveApprovalConflicts(
-      prisma,
-      currentItems
-        .filter((item) => pendingIds.includes(item.id))
-        .map((item) => ({
-          id: item.id,
-          staffProfileId: item.staffProfileId,
-          startDate: item.startDate,
-          endDate: item.endDate,
-        }))
-    )
-    if (conflicts.length > 0) {
-      return NextResponse.json(
-        {
-          error: "Cannot approve selected leave requests because active appointments overlap.",
-          conflicts,
-          blockedRequestIds: conflicts.map((item) => item.requestId),
-        },
-        { status: 409 }
+    const pendingIds = currentItems
+      .filter((item) => item.status === "PENDING")
+      .filter((item) =>
+        role === "MANAGER"
+          ? item.staffProfile.user.role === "STAFF" && item.staffProfile.managerUserId === reviewer.id
+          : true
       )
-    }
-  }
+      .map((item) => item.id)
+    const skippedIds = requestIds.filter((id) => !pendingIds.includes(id))
 
-  await prisma.leaveRequest.updateMany({
-    where: { id: { in: pendingIds }, status: "PENDING" },
-    data: {
-      status,
-      reviewedByUserId: reviewer.id,
-      reviewedAt: now,
-      reviewerComment: reviewerComment?.trim() || null,
-    },
-  })
+    if (pendingIds.length === 0) {
+      const response = NextResponse.json({
+        items: [],
+        updatedCount: 0,
+        skippedCount: skippedIds.length,
+        skippedIds,
+      })
+      logApiRequestSuccess(logContext, 200, { updatedCount: 0, skippedCount: skippedIds.length })
+      return withRequestId(response, logContext.requestId)
+    }
+
+    if (status === "APPROVED") {
+      const conflicts = await findLeaveApprovalConflicts(
+        prisma,
+        currentItems
+          .filter((item) => pendingIds.includes(item.id))
+          .map((item) => ({
+            id: item.id,
+            staffProfileId: item.staffProfileId,
+            startDate: item.startDate,
+            endDate: item.endDate,
+          }))
+      )
+      if (conflicts.length > 0) {
+        const response = NextResponse.json(
+          {
+            error: "Cannot approve selected leave requests because active appointments overlap.",
+            conflicts,
+            blockedRequestIds: conflicts.map((item) => item.requestId),
+          },
+          { status: 409 }
+        )
+        logApiRequestSuccess(logContext, 409, { reason: "approval_conflicts", conflictCount: conflicts.length })
+        return withRequestId(response, logContext.requestId)
+      }
+    }
+
+    await prisma.leaveRequest.updateMany({
+      where: { id: { in: pendingIds }, status: "PENDING" },
+      data: {
+        status,
+        reviewedByUserId: reviewer.id,
+        reviewedAt: now,
+        reviewerComment: reviewerComment?.trim() || null,
+      },
+    })
 
   const updatedItems = await prisma.leaveRequest.findMany({
     where: { id: { in: pendingIds } },
@@ -159,10 +182,21 @@ export async function POST(request: Request) {
     })
   }
 
-  return NextResponse.json({
-    items: serializedItems,
-    updatedCount: serializedItems.length,
-    skippedCount: skippedIds.length,
-    skippedIds,
-  })
+    const response = NextResponse.json({
+      items: serializedItems,
+      updatedCount: serializedItems.length,
+      skippedCount: skippedIds.length,
+      skippedIds,
+    })
+    logApiRequestSuccess(logContext, 200, {
+      updatedCount: serializedItems.length,
+      skippedCount: skippedIds.length,
+      status,
+    })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to bulk review leave requests." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }

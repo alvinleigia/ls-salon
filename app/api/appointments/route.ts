@@ -3,6 +3,13 @@ import { AppointmentStatus, Prisma } from "@prisma/client"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { appointmentCreateSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
@@ -49,21 +56,29 @@ const serializeAppointment = <
   })
 
 export async function GET(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
 
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const url = new URL(request.url)
-  const parsed = appointmentListSchema.safeParse(Object.fromEntries(url.searchParams.entries()))
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid query parameters.", details: parsed.error.flatten() },
-      { status: 400 }
-    )
-  }
+  try {
+    const url = new URL(request.url)
+    const parsed = appointmentListSchema.safeParse(Object.fromEntries(url.searchParams.entries()))
+    if (!parsed.success) {
+      const response = NextResponse.json(
+        { error: "Invalid query parameters.", details: parsed.error.flatten() },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+      return withRequestId(response, logContext.requestId)
+    }
 
   const { page, pageSize, q, staffId, customerId, status, startDate, endDate, sort, order } =
     parsed.data
@@ -152,34 +167,53 @@ export async function GET(request: Request) {
     totalPages,
   }
 
-  return NextResponse.json(response)
+    const jsonResponse = NextResponse.json(response)
+    logApiRequestSuccess(logContext, 200, { page, pageSize, total })
+    return withRequestId(jsonResponse, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to load appointments." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }
 
 export async function POST(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
 
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const payload = await request.json()
-  const parsed = appointmentCreateSchema.safeParse(payload)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid input.", details: parsed.error.flatten() },
-      { status: 400 }
-    )
-  }
+  try {
+    const payload = await request.json()
+    const parsed = appointmentCreateSchema.safeParse(payload)
+    if (!parsed.success) {
+      const response = NextResponse.json(
+        { error: "Invalid input.", details: parsed.error.flatten() },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+      return withRequestId(response, logContext.requestId)
+    }
 
   const data = parsed.data
   const startAt = new Date(data.startAt)
-  if (Number.isNaN(startAt.getTime())) {
-    return NextResponse.json({ error: "Invalid startAt value." }, { status: 400 })
-  }
-  if (startAt <= new Date()) {
-    return NextResponse.json({ error: "Cannot book appointments in the past." }, { status: 400 })
-  }
+    if (Number.isNaN(startAt.getTime())) {
+      const response = NextResponse.json({ error: "Invalid startAt value." }, { status: 400 })
+      logApiRequestSuccess(logContext, 400, { reason: "invalid_start_at" })
+      return withRequestId(response, logContext.requestId)
+    }
+    if (startAt <= new Date()) {
+      const response = NextResponse.json({ error: "Cannot book appointments in the past." }, { status: 400 })
+      logApiRequestSuccess(logContext, 400, { reason: "past_start_at" })
+      return withRequestId(response, logContext.requestId)
+    }
 
   const [customer, service, staffProfile] = await Promise.all([
     prisma.user.findUnique({
@@ -196,28 +230,42 @@ export async function POST(request: Request) {
     }),
   ])
 
-  if (!customer) {
-    return NextResponse.json({ error: "Customer not found." }, { status: 404 })
-  }
+    if (!customer) {
+      const response = NextResponse.json({ error: "Customer not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "customer_not_found" })
+      return withRequestId(response, logContext.requestId)
+    }
   if (customer.role !== "CUSTOMER") {
-    return NextResponse.json({ error: "Selected user is not a customer." }, { status: 400 })
+    const response = NextResponse.json({ error: "Selected user is not a customer." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "invalid_customer_role" })
+    return withRequestId(response, logContext.requestId)
   }
   if (customer.status !== "ACTIVE") {
-    return NextResponse.json({ error: "Customer is not active." }, { status: 400 })
+    const response = NextResponse.json({ error: "Customer is not active." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "customer_inactive" })
+    return withRequestId(response, logContext.requestId)
   }
 
   if (!service) {
-    return NextResponse.json({ error: "Service not found." }, { status: 404 })
+    const response = NextResponse.json({ error: "Service not found." }, { status: 404 })
+    logApiRequestSuccess(logContext, 404, { reason: "service_not_found" })
+    return withRequestId(response, logContext.requestId)
   }
   if (service.status !== "ACTIVE") {
-    return NextResponse.json({ error: "Service is not active." }, { status: 400 })
+    const response = NextResponse.json({ error: "Service is not active." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "service_inactive" })
+    return withRequestId(response, logContext.requestId)
   }
 
   if (!staffProfile) {
-    return NextResponse.json({ error: "Staff profile not found." }, { status: 404 })
+    const response = NextResponse.json({ error: "Staff profile not found." }, { status: 404 })
+    logApiRequestSuccess(logContext, 404, { reason: "staff_profile_not_found" })
+    return withRequestId(response, logContext.requestId)
   }
   if (staffProfile.user.status !== "ACTIVE") {
-    return NextResponse.json({ error: "Staff member is not active." }, { status: 400 })
+    const response = NextResponse.json({ error: "Staff member is not active." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "staff_inactive" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const endAt = new Date(startAt)
@@ -225,7 +273,9 @@ export async function POST(request: Request) {
 
   const availability = await checkStaffAppointmentAvailability(staffProfile.id, startAt, endAt)
   if (!availability.ok) {
-    return NextResponse.json({ error: availability.reason }, { status: 409 })
+    const response = NextResponse.json({ error: availability.reason }, { status: 409 })
+    logApiRequestSuccess(logContext, 409, { reason: "staff_unavailable" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const [staffConflict, customerConflict] = await Promise.all([
@@ -250,16 +300,20 @@ export async function POST(request: Request) {
   ])
 
   if (staffConflict) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Staff member already has an appointment in this time range." },
       { status: 409 }
     )
+    logApiRequestSuccess(logContext, 409, { reason: "staff_conflict" })
+    return withRequestId(response, logContext.requestId)
   }
   if (customerConflict) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Customer already has an appointment in this time range." },
       { status: 409 }
     )
+    logApiRequestSuccess(logContext, 409, { reason: "customer_conflict" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const appointment = await prisma.appointment.create({
@@ -289,5 +343,12 @@ export async function POST(request: Request) {
     },
   })
 
-  return NextResponse.json({ appointment: serializeAppointment(appointment) }, { status: 201 })
+    const response = NextResponse.json({ appointment: serializeAppointment(appointment) }, { status: 201 })
+    logApiRequestSuccess(logContext, 201, { appointmentId: appointment.id })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to create appointment." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }

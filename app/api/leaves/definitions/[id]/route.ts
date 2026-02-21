@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import { updateLeaveDefinitionSchema } from "@/lib/validation"
@@ -11,104 +18,134 @@ import {
 } from "../../_definitions"
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const { id } = await params
-  const item = await prisma.leaveDefinition.findUnique({
-    where: { id },
-    select: leaveDefinitionSelect,
-  })
-  if (!item) {
-    return NextResponse.json({ error: "Leave definition not found." }, { status: 404 })
+  try {
+    const { id } = await params
+    const item = await prisma.leaveDefinition.findUnique({
+      where: { id },
+      select: leaveDefinitionSelect,
+    })
+    if (!item) {
+      const response = NextResponse.json({ error: "Leave definition not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found", itemId: id })
+      return withRequestId(response, logContext.requestId)
+    }
+    const response = NextResponse.json({ item: serializeLeaveDefinition(item) })
+    logApiRequestSuccess(logContext, 200, { itemId: id })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to load leave definition." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
   }
-  return NextResponse.json({ item: serializeLeaveDefinition(item) })
 }
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  const { id } = await params
-  const current = await prisma.leaveDefinition.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      code: true,
-      name: true,
-      minDaysPerRequest: true,
-      maxDaysPerRequest: true,
-      maxConsecutiveDays: true,
-    },
-  })
-  if (!current) {
-    return NextResponse.json({ error: "Leave definition not found." }, { status: 404 })
-  }
-
-  const payload = await request.json().catch(() => ({}))
-  const parsed = updateLeaveDefinitionSchema.safeParse(payload)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid input.", details: parsed.error.flatten() },
-      { status: 400 }
-    )
-  }
-
-  const nextMin = parsed.data.minDaysPerRequest ?? current.minDaysPerRequest
-  const nextMax = parsed.data.maxDaysPerRequest ?? current.maxDaysPerRequest
-  const nextMaxConsecutive = parsed.data.maxConsecutiveDays ?? current.maxConsecutiveDays
-  if (nextMin > nextMax) {
-    return NextResponse.json(
-      { error: "Minimum days must be less than or equal to maximum days." },
-      { status: 400 }
-    )
-  }
-  if (nextMaxConsecutive > nextMax) {
-    return NextResponse.json(
-      { error: "Max consecutive days cannot be more than max days per request." },
-      { status: 400 }
-    )
-  }
-
-  const code = parsed.data.code?.trim().toUpperCase()
-  const name = parsed.data.name?.trim()
-  if (code || name) {
-    const duplicate = await prisma.leaveDefinition.findFirst({
-      where: {
-        id: { not: id },
-        OR: [
-          ...(code ? [{ code }] : []),
-          ...(name ? [{ name }] : []),
-        ],
-      },
-      select: { id: true, code: true, name: true },
-    })
-    if (duplicate) {
-      return NextResponse.json(
-        {
-          error:
-            code && duplicate.code === code
-              ? "Leave code already exists."
-              : "Leave name already exists.",
-        },
-        { status: 409 }
-      )
-    }
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
   try {
+    const { id } = await params
+    const current = await prisma.leaveDefinition.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        minDaysPerRequest: true,
+        maxDaysPerRequest: true,
+        maxConsecutiveDays: true,
+      },
+    })
+    if (!current) {
+      const response = NextResponse.json({ error: "Leave definition not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found", itemId: id })
+      return withRequestId(response, logContext.requestId)
+    }
+
+    const payload = await request.json().catch(() => ({}))
+    const parsed = updateLeaveDefinitionSchema.safeParse(payload)
+    if (!parsed.success) {
+      const response = NextResponse.json(
+        { error: "Invalid input.", details: parsed.error.flatten() },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+      return withRequestId(response, logContext.requestId)
+    }
+
+    const nextMin = parsed.data.minDaysPerRequest ?? current.minDaysPerRequest
+    const nextMax = parsed.data.maxDaysPerRequest ?? current.maxDaysPerRequest
+    const nextMaxConsecutive = parsed.data.maxConsecutiveDays ?? current.maxConsecutiveDays
+    if (nextMin > nextMax) {
+      const response = NextResponse.json(
+        { error: "Minimum days must be less than or equal to maximum days." },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "invalid_day_range" })
+      return withRequestId(response, logContext.requestId)
+    }
+    if (nextMaxConsecutive > nextMax) {
+      const response = NextResponse.json(
+        { error: "Max consecutive days cannot be more than max days per request." },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "invalid_max_consecutive" })
+      return withRequestId(response, logContext.requestId)
+    }
+
+    const code = parsed.data.code?.trim().toUpperCase()
+    const name = parsed.data.name?.trim()
+    if (code || name) {
+      const duplicate = await prisma.leaveDefinition.findFirst({
+        where: {
+          id: { not: id },
+          OR: [
+            ...(code ? [{ code }] : []),
+            ...(name ? [{ name }] : []),
+          ],
+        },
+        select: { id: true, code: true, name: true },
+      })
+      if (duplicate) {
+        const response = NextResponse.json(
+          {
+            error:
+              code && duplicate.code === code
+                ? "Leave code already exists."
+                : "Leave name already exists.",
+          },
+          { status: 409 }
+        )
+        logApiRequestSuccess(logContext, 409, { reason: "duplicate_code_or_name" })
+        return withRequestId(response, logContext.requestId)
+      }
+    }
+
     const item = await prisma.$transaction(async (tx) => {
       await tx.leaveDefinition.update({
         where: { id },
@@ -165,34 +202,55 @@ export async function PATCH(
         select: leaveDefinitionSelect,
       })
     })
-    return NextResponse.json({ item: serializeLeaveDefinition(item) })
+    const response = NextResponse.json({ item: serializeLeaveDefinition(item) })
+    logApiRequestSuccess(logContext, 200, { itemId: id })
+    return withRequestId(response, logContext.requestId)
   } catch (error) {
     if (error instanceof Error) {
-      return NextResponse.json({ error: error.message }, { status: 400 })
+      const response = NextResponse.json({ error: error.message }, { status: 400 })
+      logApiRequestSuccess(logContext, 400, { reason: "domain_error", message: error.message })
+      return withRequestId(response, logContext.requestId)
     }
-    return NextResponse.json({ error: "Unable to update leave definition." }, { status: 500 })
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to update leave definition." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
   }
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const { id } = await params
-  const exists = await prisma.leaveDefinition.findUnique({
-    where: { id },
-    select: { id: true },
-  })
-  if (!exists) {
-    return NextResponse.json({ error: "Leave definition not found." }, { status: 404 })
-  }
+  try {
+    const { id } = await params
+    const exists = await prisma.leaveDefinition.findUnique({
+      where: { id },
+      select: { id: true },
+    })
+    if (!exists) {
+      const response = NextResponse.json({ error: "Leave definition not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found", itemId: id })
+      return withRequestId(response, logContext.requestId)
+    }
 
-  await prisma.leaveDefinition.delete({ where: { id } })
-  return NextResponse.json({ ok: true })
+    await prisma.leaveDefinition.delete({ where: { id } })
+    const response = NextResponse.json({ ok: true })
+    logApiRequestSuccess(logContext, 200, { itemId: id })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to delete leave definition." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }

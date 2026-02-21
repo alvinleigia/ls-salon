@@ -3,6 +3,13 @@ import bcrypt from "bcryptjs"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { createUserSchema } from "@/lib/validation"
@@ -26,11 +33,16 @@ const paginationSchema = z.object({
 })
 
 export async function GET(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
 
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const url = new URL(request.url)
@@ -38,103 +50,126 @@ export async function GET(request: Request) {
     Object.fromEntries(url.searchParams.entries())
   )
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid pagination parameters." },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const {
-    page,
-    pageSize,
-    search,
-    q,
-    role: roleFilter,
-    status,
-    sortBy,
-    sort,
-    sortDir,
-    order,
-  } = parsed.data
-  const skip = (page - 1) * pageSize
-  const trimmedSearch = (q ?? search)?.trim()
-  const resolvedSortBy = sort ?? sortBy
-  const resolvedSortDir = order ?? sortDir
+  try {
+    const {
+      page,
+      pageSize,
+      search,
+      q,
+      role: roleFilter,
+      status,
+      sortBy,
+      sort,
+      sortDir,
+      order,
+    } = parsed.data
+    const skip = (page - 1) * pageSize
+    const trimmedSearch = (q ?? search)?.trim()
+    const resolvedSortBy = sort ?? sortBy
+    const resolvedSortDir = order ?? sortDir
 
-  const where = {
-    ...(roleFilter ? { role: roleFilter } : {}),
-    ...(status ? { status } : {}),
-    ...(trimmedSearch
-      ? {
-          OR: [
-            { name: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
-            { email: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
-            { phone: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
-          ],
-        }
-      : {}),
+    const where = {
+      ...(roleFilter ? { role: roleFilter } : {}),
+      ...(status ? { status } : {}),
+      ...(trimmedSearch
+        ? {
+            OR: [
+              { name: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
+              { email: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
+              { phone: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } },
+            ],
+          }
+        : {}),
+    }
+
+    const orderBy = resolvedSortBy
+      ? { [resolvedSortBy]: resolvedSortDir }
+      : { createdAt: "desc" as const }
+
+    const [total, users] = await prisma.$transaction([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          image: true,
+          dateOfBirth: true,
+          gender: true,
+          status: true,
+          lastLoginAt: true,
+          marketingOptIn: true,
+          addressLine1: true,
+          addressLine2: true,
+          city: true,
+          state: true,
+          postalCode: true,
+          country: true,
+          role: true,
+          createdAt: true,
+        },
+        where,
+        orderBy,
+        skip,
+        take: pageSize,
+      }),
+    ])
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize))
+
+    const response = NextResponse.json({
+      items: users,
+      page,
+      pageSize,
+      total,
+      totalPages,
+    })
+    logApiRequestSuccess(logContext, 200, { page, pageSize, total })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to load users." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
   }
-
-  const orderBy = resolvedSortBy
-    ? { [resolvedSortBy]: resolvedSortDir }
-    : { createdAt: "desc" as const }
-
-  const [total, users] = await prisma.$transaction([
-    prisma.user.count({ where }),
-    prisma.user.findMany({
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        image: true,
-        dateOfBirth: true,
-        gender: true,
-        status: true,
-        lastLoginAt: true,
-        marketingOptIn: true,
-        addressLine1: true,
-        addressLine2: true,
-        city: true,
-        state: true,
-        postalCode: true,
-        country: true,
-        role: true,
-        createdAt: true,
-      },
-      where,
-      orderBy,
-      skip,
-      take: pageSize,
-    }),
-  ])
-
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-
-  return NextResponse.json({
-    items: users,
-    page,
-    pageSize,
-    total,
-    totalPages,
-  })
 }
 
 export async function POST(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
 
   if (!session?.user || !canInvite(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const body = await request.json()
+  const body = await request.json().catch(() => null)
+  if (!body) {
+    const response = NextResponse.json({ error: "Invalid JSON body." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "invalid_json" })
+    return withRequestId(response, logContext.requestId)
+  }
+
   const parsed = createUserSchema.safeParse(body)
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid input.", details: parsed.error.flatten() },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const {
@@ -157,67 +192,77 @@ export async function POST(request: Request) {
     country,
   } = parsed.data
 
-  const existing = await prisma.user.findUnique({ where: { email } })
-  if (existing) {
-    return NextResponse.json(
-      { error: "Email already in use." },
-      { status: 409 }
-    )
+  try {
+    const existing = await prisma.user.findUnique({ where: { email } })
+    if (existing) {
+      const response = NextResponse.json(
+        { error: "Email already in use." },
+        { status: 409 }
+      )
+      logApiRequestSuccess(logContext, 409, { reason: "email_in_use" })
+      return withRequestId(response, logContext.requestId)
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10)
+    const normalizedEligibleServiceIds =
+      userRole === "STAFF" && eligibleServiceIds
+        ? Array.from(new Set(eligibleServiceIds))
+        : []
+
+    const user = await prisma.user.create({
+      data: {
+        name: name || undefined,
+        email,
+        passwordHash,
+        role: userRole ?? "CUSTOMER",
+        phone: phone || undefined,
+        image: image || undefined,
+        dateOfBirth,
+        gender,
+        status: status ?? "ACTIVE",
+        marketingOptIn: userRole === "STAFF" ? false : marketingOptIn ?? false,
+        addressLine1: addressLine1 || undefined,
+        addressLine2: addressLine2 || undefined,
+        city: city || undefined,
+        state: state || undefined,
+        postalCode: postalCode || undefined,
+        country: country || undefined,
+        eligibleServices: normalizedEligibleServiceIds.length
+          ? {
+              createMany: {
+                data: normalizedEligibleServiceIds.map((serviceId) => ({ serviceId })),
+              },
+            }
+          : undefined,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        image: true,
+        dateOfBirth: true,
+        gender: true,
+        status: true,
+        lastLoginAt: true,
+        marketingOptIn: true,
+        addressLine1: true,
+        addressLine2: true,
+        city: true,
+        state: true,
+        postalCode: true,
+        country: true,
+        role: true,
+        createdAt: true,
+      },
+    })
+
+    const response = NextResponse.json({ user })
+    logApiRequestSuccess(logContext, 200, { userId: user.id, role: user.role })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to create user." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
   }
-
-  const passwordHash = await bcrypt.hash(password, 10)
-  const normalizedEligibleServiceIds =
-    userRole === "STAFF" && eligibleServiceIds
-      ? Array.from(new Set(eligibleServiceIds))
-      : []
-
-  const user = await prisma.user.create({
-    data: {
-      name: name || undefined,
-      email,
-      passwordHash,
-      role: userRole ?? "CUSTOMER",
-      phone: phone || undefined,
-      image: image || undefined,
-      dateOfBirth,
-      gender,
-      status: status ?? "ACTIVE",
-      marketingOptIn: userRole === "STAFF" ? false : marketingOptIn ?? false,
-      addressLine1: addressLine1 || undefined,
-      addressLine2: addressLine2 || undefined,
-      city: city || undefined,
-      state: state || undefined,
-      postalCode: postalCode || undefined,
-      country: country || undefined,
-      eligibleServices: normalizedEligibleServiceIds.length
-        ? {
-            createMany: {
-              data: normalizedEligibleServiceIds.map((serviceId) => ({ serviceId })),
-            },
-          }
-        : undefined,
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      phone: true,
-      image: true,
-      dateOfBirth: true,
-      gender: true,
-      status: true,
-      lastLoginAt: true,
-      marketingOptIn: true,
-      addressLine1: true,
-      addressLine2: true,
-      city: true,
-      state: true,
-      postalCode: true,
-      country: true,
-      role: true,
-      createdAt: true,
-    },
-  })
-
-  return NextResponse.json({ user })
 }

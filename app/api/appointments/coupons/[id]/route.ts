@@ -2,16 +2,26 @@ import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 
 import { auth } from "@/auth"
+import {
+  type ApiLogContext,
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { couponUpdateSchema } from "@/lib/validation"
 import type { CouponRow } from "@/types/appointments"
 
-const ensureAuthorized = async () => {
+const ensureAuthorized = async (logContext: ApiLogContext) => {
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
   return null
 }
@@ -62,76 +72,100 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await ensureAuthorized()
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+  const unauthorized = await ensureAuthorized(logContext)
   if (unauthorized) return unauthorized
 
-  const { id } = await params
-  const payload = await request.json()
-  const parsed = couponUpdateSchema.safeParse(payload)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid input.", details: parsed.error.flatten() },
-      { status: 400 }
-    )
+  try {
+    const { id } = await params
+    const payload = await request.json()
+    const parsed = couponUpdateSchema.safeParse(payload)
+    if (!parsed.success) {
+      const response = NextResponse.json(
+        { error: "Invalid input.", details: parsed.error.flatten() },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+      return withRequestId(response, logContext.requestId)
+    }
+
+    const data = parsed.data
+    const validFrom =
+      data.validFrom === undefined
+        ? undefined
+        : data.validFrom
+          ? new Date(`${data.validFrom}T00:00:00.000Z`)
+          : null
+    const validTo =
+      data.validTo === undefined
+        ? undefined
+        : data.validTo
+          ? new Date(`${data.validTo}T00:00:00.000Z`)
+          : null
+
+    if (
+      validFrom !== undefined &&
+      validTo !== undefined &&
+      validFrom !== null &&
+      validTo !== null &&
+      validFrom > validTo
+    ) {
+      const response = NextResponse.json({ error: "Valid from must be before valid to." }, { status: 400 })
+      logApiRequestSuccess(logContext, 400, { reason: "invalid_date_range" })
+      return withRequestId(response, logContext.requestId)
+    }
+
+    const coupon = await prisma.coupon.update({
+      where: { id },
+      data: {
+        ...(data.code !== undefined ? { code: data.code.toUpperCase() } : {}),
+        ...(data.name !== undefined ? { name: data.name?.trim() || null } : {}),
+        ...(data.discountType !== undefined ? { discountType: data.discountType } : {}),
+        ...(data.discountValue !== undefined ? { discountValue: data.discountValue } : {}),
+        ...(data.appliesTo !== undefined ? { appliesTo: data.appliesTo } : {}),
+        ...(data.allowedServiceIds !== undefined ? { allowedServiceIds: data.allowedServiceIds } : {}),
+        ...(data.allowedCategoryIds !== undefined ? { allowedCategoryIds: data.allowedCategoryIds } : {}),
+        ...(data.allowedProductIds !== undefined ? { allowedProductIds: data.allowedProductIds } : {}),
+        ...(data.minSubtotalCents !== undefined ? { minSubtotalCents: data.minSubtotalCents } : {}),
+        ...(data.stackingMode !== undefined ? { stackingMode: data.stackingMode } : {}),
+        ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+        ...(validFrom !== undefined ? { validFrom } : {}),
+        ...(validTo !== undefined ? { validTo } : {}),
+        ...(data.maxUses !== undefined ? { maxUses: data.maxUses } : {}),
+        ...(data.maxUsesPerCustomer !== undefined
+          ? { maxUsesPerCustomer: data.maxUsesPerCustomer }
+          : {}),
+      } as unknown as Prisma.CouponUncheckedUpdateInput,
+    })
+
+    const response = NextResponse.json({ coupon: serializeCoupon(coupon) })
+    logApiRequestSuccess(logContext, 200, { couponId: id })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to update coupon." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
   }
-
-  const data = parsed.data
-  const validFrom =
-    data.validFrom === undefined
-      ? undefined
-      : data.validFrom
-        ? new Date(`${data.validFrom}T00:00:00.000Z`)
-        : null
-  const validTo =
-    data.validTo === undefined
-      ? undefined
-      : data.validTo
-        ? new Date(`${data.validTo}T00:00:00.000Z`)
-        : null
-
-  if (
-    validFrom !== undefined &&
-    validTo !== undefined &&
-    validFrom !== null &&
-    validTo !== null &&
-    validFrom > validTo
-  ) {
-    return NextResponse.json({ error: "Valid from must be before valid to." }, { status: 400 })
-  }
-
-  const coupon = await prisma.coupon.update({
-    where: { id },
-    data: {
-      ...(data.code !== undefined ? { code: data.code.toUpperCase() } : {}),
-      ...(data.name !== undefined ? { name: data.name?.trim() || null } : {}),
-      ...(data.discountType !== undefined ? { discountType: data.discountType } : {}),
-      ...(data.discountValue !== undefined ? { discountValue: data.discountValue } : {}),
-      ...(data.appliesTo !== undefined ? { appliesTo: data.appliesTo } : {}),
-      ...(data.allowedServiceIds !== undefined ? { allowedServiceIds: data.allowedServiceIds } : {}),
-      ...(data.allowedCategoryIds !== undefined ? { allowedCategoryIds: data.allowedCategoryIds } : {}),
-      ...(data.allowedProductIds !== undefined ? { allowedProductIds: data.allowedProductIds } : {}),
-      ...(data.minSubtotalCents !== undefined ? { minSubtotalCents: data.minSubtotalCents } : {}),
-      ...(data.stackingMode !== undefined ? { stackingMode: data.stackingMode } : {}),
-      ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
-      ...(validFrom !== undefined ? { validFrom } : {}),
-      ...(validTo !== undefined ? { validTo } : {}),
-      ...(data.maxUses !== undefined ? { maxUses: data.maxUses } : {}),
-      ...(data.maxUsesPerCustomer !== undefined
-        ? { maxUsesPerCustomer: data.maxUsesPerCustomer }
-        : {}),
-    } as unknown as Prisma.CouponUncheckedUpdateInput,
-  })
-
-  return NextResponse.json({ coupon: serializeCoupon(coupon) })
 }
 
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await ensureAuthorized()
+  const logContext = createApiLogContext(_request)
+  logApiRequestStart(logContext, _request)
+  const unauthorized = await ensureAuthorized(logContext)
   if (unauthorized) return unauthorized
-  const { id } = await params
-  await prisma.coupon.delete({ where: { id } })
-  return NextResponse.json({ ok: true })
+  try {
+    const { id } = await params
+    await prisma.coupon.delete({ where: { id } })
+    const response = NextResponse.json({ ok: true })
+    logApiRequestSuccess(logContext, 200, { couponId: id })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to delete coupon." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }

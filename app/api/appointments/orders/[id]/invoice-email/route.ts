@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { canSendConfiguredEmail, mailer, mailFrom } from "@/lib/mailer"
@@ -10,32 +17,44 @@ import { appointmentOrderInclude, serializeAppointmentOrder } from "../../_helpe
 export const runtime = "nodejs"
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const { id } = await params
-  const order = await prisma.appointmentOrder.findUnique({
-    where: { id },
-    include: appointmentOrderInclude,
-  })
-  if (!order) {
-    return NextResponse.json({ error: "Appointment order not found." }, { status: 404 })
-  }
-  if (!order.customer?.email) {
-    return NextResponse.json({ error: "Customer email not available." }, { status: 400 })
-  }
-  if (!(await canSendConfiguredEmail(prisma))) {
-    return NextResponse.json(
-      { error: "Email notifications are disabled or SMTP is not configured." },
-      { status: 400 }
-    )
-  }
+  try {
+    const { id } = await params
+    const order = await prisma.appointmentOrder.findUnique({
+      where: { id },
+      include: appointmentOrderInclude,
+    })
+    if (!order) {
+      const response = NextResponse.json({ error: "Appointment order not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found", orderId: id })
+      return withRequestId(response, logContext.requestId)
+    }
+    if (!order.customer?.email) {
+      const response = NextResponse.json({ error: "Customer email not available." }, { status: 400 })
+      logApiRequestSuccess(logContext, 400, { reason: "missing_customer_email", orderId: id })
+      return withRequestId(response, logContext.requestId)
+    }
+    if (!(await canSendConfiguredEmail(prisma))) {
+      const response = NextResponse.json(
+        { error: "Email notifications are disabled or SMTP is not configured." },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "email_not_configured", orderId: id })
+      return withRequestId(response, logContext.requestId)
+    }
 
   const settings = await prisma.appSetting.findUnique({
     where: { id: "global" },
@@ -58,19 +77,26 @@ export async function POST(
   const customerName = order.customer?.name || "customer"
   const from = mailFrom || "no-reply@ls-salon.com"
 
-  await mailer.sendMail({
-    to: order.customer.email,
-    from,
-    subject,
-    text: `Hi ${customerName},\n\nPlease find your invoice attached.\n\nThanks,\nLS Salon`,
-    attachments: [
-      {
-        filename: `invoice-${order.id}.pdf`,
-        content: pdf,
-        contentType: "application/pdf",
-      },
-    ],
-  })
+    await mailer.sendMail({
+      to: order.customer.email,
+      from,
+      subject,
+      text: `Hi ${customerName},\n\nPlease find your invoice attached.\n\nThanks,\nLS Salon`,
+      attachments: [
+        {
+          filename: `invoice-${order.id}.pdf`,
+          content: pdf,
+          contentType: "application/pdf",
+        },
+      ],
+    })
 
-  return NextResponse.json({ ok: true })
+    const response = NextResponse.json({ ok: true })
+    logApiRequestSuccess(logContext, 200, { orderId: id, sentTo: order.customer.email })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to send invoice email." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }

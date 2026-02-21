@@ -3,6 +3,13 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import {
   appointmentOrderCreateSchema,
@@ -42,57 +49,81 @@ const ensureAuthorized = async () => {
 }
 
 export async function GET(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const unauthorized = await ensureAuthorized()
-  if (unauthorized) return unauthorized
+  if (unauthorized) {
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(unauthorized, logContext.requestId)
+  }
 
   const url = new URL(request.url)
   const parsed = listSchema.safeParse(Object.fromEntries(url.searchParams.entries()))
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid query parameters.", details: parsed.error.flatten() },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const { page, pageSize, status, customerId } = parsed.data
-  const where: Prisma.AppointmentOrderWhereInput = {}
-  if (status) where.status = status
-  if (customerId) where.customerId = customerId
+  try {
+    const { page, pageSize, status, customerId } = parsed.data
+    const where: Prisma.AppointmentOrderWhereInput = {}
+    if (status) where.status = status
+    if (customerId) where.customerId = customerId
 
-  const skip = (page - 1) * pageSize
-  const [total, orders] = await prisma.$transaction([
-    prisma.appointmentOrder.count({ where }),
-    prisma.appointmentOrder.findMany({
-      where,
-      include: appointmentOrderInclude,
-      orderBy: { updatedAt: "desc" },
-      skip,
-      take: pageSize,
-    }),
-  ])
+    const skip = (page - 1) * pageSize
+    const [total, orders] = await prisma.$transaction([
+      prisma.appointmentOrder.count({ where }),
+      prisma.appointmentOrder.findMany({
+        where,
+        include: appointmentOrderInclude,
+        orderBy: { updatedAt: "desc" },
+        skip,
+        take: pageSize,
+      }),
+    ])
 
-  const response: ListResponse<AppointmentOrderRow> = {
-    items: orders.map(serializeAppointmentOrder),
-    page,
-    pageSize,
-    total,
-    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    const response: ListResponse<AppointmentOrderRow> = {
+      items: orders.map(serializeAppointmentOrder),
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    }
+
+    const json = NextResponse.json(response)
+    logApiRequestSuccess(logContext, 200, { page, pageSize, total })
+    return withRequestId(json, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to load booking orders." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
   }
-
-  return NextResponse.json(response)
 }
 
 export async function POST(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const unauthorized = await ensureAuthorized()
-  if (unauthorized) return unauthorized
+  if (unauthorized) {
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(unauthorized, logContext.requestId)
+  }
 
   const payload = await request.json()
   const parsed = appointmentOrderCreateSchema.safeParse(payload)
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid input.", details: parsed.error.flatten() },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
   }
 
   try {
@@ -214,10 +245,12 @@ export async function POST(request: Request) {
       return created
     })
 
-    return NextResponse.json({ order: serializeAppointmentOrder(order) }, { status: 201 })
+    const response = NextResponse.json({ order: serializeAppointmentOrder(order) }, { status: 201 })
+    logApiRequestSuccess(logContext, 201, { orderId: order.id, status: order.status })
+    return withRequestId(response, logContext.requestId)
   } catch (error) {
     if (error instanceof AvailabilityConflictError) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         {
           error: error.message,
           suggestedStartAt: error.suggestedStartAt,
@@ -225,13 +258,19 @@ export async function POST(request: Request) {
         },
         { status: 409 }
       )
+      logApiRequestSuccess(logContext, 409, { reason: "availability_conflict" })
+      return withRequestId(response, logContext.requestId)
     }
     if (error instanceof StockConflictError) {
-      return NextResponse.json({ error: error.message }, { status: 409 })
+      const response = NextResponse.json({ error: error.message }, { status: 409 })
+      logApiRequestSuccess(logContext, 409, { reason: "stock_conflict" })
+      return withRequestId(response, logContext.requestId)
     }
-    return NextResponse.json(
+    logApiRequestError(logContext, error, 400)
+    const response = NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to create booking order." },
       { status: 400 }
     )
+    return withRequestId(response, logContext.requestId)
   }
 }

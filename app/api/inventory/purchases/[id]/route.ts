@@ -1,15 +1,25 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import {
+  type ApiLogContext,
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { updatePurchaseOrderSchema } from "@/lib/validation"
 
-const ensureAuthorized = async () => {
+const ensureAuthorized = async (logContext: ApiLogContext) => {
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
   return null
 }
@@ -20,21 +30,26 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await ensureAuthorized()
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+  const unauthorized = await ensureAuthorized(logContext)
   if (unauthorized) return unauthorized
 
-  const { id } = await params
-  const body = await request.json()
-  const parsed = updatePurchaseOrderSchema.safeParse(body)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid input.", details: parsed.error.flatten() },
-      { status: 400 }
-    )
-  }
+  try {
+    const { id } = await params
+    const body = await request.json()
+    const parsed = updatePurchaseOrderSchema.safeParse(body)
+    if (!parsed.success) {
+      const response = NextResponse.json(
+        { error: "Invalid input.", details: parsed.error.flatten() },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+      return withRequestId(response, logContext.requestId)
+    }
 
-  const data = parsed.data
-  const updated = await prisma.$transaction(async (tx) => {
+    const data = parsed.data
+    const updated = await prisma.$transaction(async (tx) => {
     const existing = await tx.purchaseOrder.findUnique({
       where: { id },
       select: {
@@ -134,32 +149,41 @@ export async function PATCH(
     }
 
     return order
-  }).catch((error: Error) => {
-    if (error.message === "NOT_FOUND") {
-      return null
+    }).catch((error: Error) => {
+      if (error.message === "NOT_FOUND") {
+        return null
+      }
+      throw error
+    })
+
+    if (!updated) {
+      const response = NextResponse.json({ error: "Purchase order not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found", orderId: id })
+      return withRequestId(response, logContext.requestId)
     }
-    throw error
-  })
 
-  if (!updated) {
-    return NextResponse.json({ error: "Purchase order not found." }, { status: 404 })
+    const response = NextResponse.json({
+      item: {
+        id: updated.id,
+        orderNumber: updated.orderNumber,
+        supplier: updated.supplier,
+        status: updated.status,
+        orderDate: updated.orderDate.toISOString().slice(0, 10),
+        expectedDate: updated.expectedDate
+          ? updated.expectedDate.toISOString().slice(0, 10)
+          : null,
+        subtotalCents: updated.subtotalCents,
+        taxCents: updated.taxCents,
+        totalCents: updated.totalCents,
+        createdAt: updated.createdAt.toISOString(),
+        items: updated.items,
+      },
+    })
+    logApiRequestSuccess(logContext, 200, { orderId: id, status: updated.status })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to update purchase order." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
   }
-
-  return NextResponse.json({
-    item: {
-      id: updated.id,
-      orderNumber: updated.orderNumber,
-      supplier: updated.supplier,
-      status: updated.status,
-      orderDate: updated.orderDate.toISOString().slice(0, 10),
-      expectedDate: updated.expectedDate
-        ? updated.expectedDate.toISOString().slice(0, 10)
-        : null,
-      subtotalCents: updated.subtotalCents,
-      taxCents: updated.taxCents,
-      totalCents: updated.totalCents,
-      createdAt: updated.createdAt.toISOString(),
-      items: updated.items,
-    },
-  })
 }

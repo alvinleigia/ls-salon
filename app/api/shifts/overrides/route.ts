@@ -2,6 +2,13 @@ import { NextResponse } from "next/server"
 
 import { AppointmentStatus } from "@prisma/client"
 import { auth } from "@/auth"
+import {
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import {
   normalizeHistoryRangeToPast,
@@ -57,11 +64,16 @@ const getMinutesInTimeZone = (value: Date, timeZone: string) => {
 }
 
 export async function GET(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
 
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const url = new URL(request.url)
@@ -71,7 +83,9 @@ export async function GET(request: Request) {
   const endDate = searchParams.get("endDate")?.trim()
 
   if (!startDate || !endDate) {
-    return NextResponse.json({ error: "Start and end dates are required." }, { status: 400 })
+    const response = NextResponse.json({ error: "Start and end dates are required." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "missing_dates" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const staffIds = staffIdsParam
@@ -88,53 +102,75 @@ export async function GET(request: Request) {
   const staffProfileIds = staffProfiles.map((profile) => profile.id)
   const staffProfileMap = new Map(staffProfiles.map((profile) => [profile.id, profile.userId]))
 
-  const overrides = await prisma.staffShiftOverride.findMany({
-    where: {
-      ...(staffProfileIds.length ? { staffProfileId: { in: staffProfileIds } } : {}),
-      date: {
-        gte: new Date(startDate),
-        lte: new Date(endDate),
+  try {
+    const overrides = await prisma.staffShiftOverride.findMany({
+      where: {
+        ...(staffProfileIds.length ? { staffProfileId: { in: staffProfileIds } } : {}),
+        date: {
+          gte: new Date(startDate),
+          lte: new Date(endDate),
+        },
       },
-    },
-    select: {
-      id: true,
-      staffProfileId: true,
-      date: true,
-      templateId: true,
-      template: { select: { id: true, name: true, startTime: true, endTime: true } },
-    },
-  })
+      select: {
+        id: true,
+        staffProfileId: true,
+        date: true,
+        templateId: true,
+        template: { select: { id: true, name: true, startTime: true, endTime: true } },
+      },
+    })
 
-  const items = overrides.map((override) => ({
-    ...override,
-    staffId: staffProfileMap.get(override.staffProfileId) ?? null,
-  }))
+    const items = overrides.map((override) => ({
+      ...override,
+      staffId: staffProfileMap.get(override.staffProfileId) ?? null,
+    }))
 
-  return NextResponse.json({ items })
+    const response = NextResponse.json({ items })
+    logApiRequestSuccess(logContext, 200, { itemCount: items.length })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to load shift overrides." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }
 
 export async function POST(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
 
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
-  const body = await request.json()
+  const body = await request.json().catch(() => null)
+  if (!body) {
+    const response = NextResponse.json({ error: "Invalid JSON body." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "invalid_json" })
+    return withRequestId(response, logContext.requestId)
+  }
   const parsed = shiftOverrideSchema.safeParse(body)
   if (!parsed.success) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Invalid input.", details: parsed.error.flatten() },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const data = parsed.data
   const start = new Date(data.startDate)
   const end = new Date(data.endDate)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
-    return NextResponse.json({ error: "Invalid date range." }, { status: 400 })
+    const response = NextResponse.json({ error: "Invalid date range." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "invalid_date_range" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const staffProfile = await prisma.staffProfile.findFirst({
@@ -143,7 +179,9 @@ export async function POST(request: Request) {
   })
 
   if (!staffProfile) {
-    return NextResponse.json({ error: "Staff profile not found." }, { status: 404 })
+    const response = NextResponse.json({ error: "Staff profile not found." }, { status: 404 })
+    logApiRequestSuccess(logContext, 404, { reason: "staff_profile_not_found" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const [defaultSchedule, assignments, settings] = await Promise.all([
@@ -333,13 +371,15 @@ export async function POST(request: Request) {
   }
 
   if (conflicts.length) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         error: "Shift change conflicts with existing appointments.",
         conflicts,
       },
       { status: 409 }
     )
+    logApiRequestSuccess(logContext, 409, { reason: "appointment_conflicts", conflictCount: conflicts.length })
+    return withRequestId(response, logContext.requestId)
   }
 
   const results = await prisma.$transaction(
@@ -373,15 +413,22 @@ export async function POST(request: Request) {
     })
   }
 
-  return NextResponse.json({ createdCount: results.length })
+  const response = NextResponse.json({ createdCount: results.length })
+  logApiRequestSuccess(logContext, 200, { createdCount: results.length })
+  return withRequestId(response, logContext.requestId)
 }
 
 export async function DELETE(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
 
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const body = (await request.json()) as {
@@ -395,16 +442,20 @@ export async function DELETE(request: Request) {
   const endDate = body.endDate?.trim()
 
   if (!staffId || !startDate || !endDate) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Staff, start date, and end date are required." },
       { status: 400 }
     )
+    logApiRequestSuccess(logContext, 400, { reason: "missing_required_fields" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const start = new Date(startDate)
   const end = new Date(endDate)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
-    return NextResponse.json({ error: "Invalid date range." }, { status: 400 })
+    const response = NextResponse.json({ error: "Invalid date range." }, { status: 400 })
+    logApiRequestSuccess(logContext, 400, { reason: "invalid_date_range" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const staffProfile = await prisma.staffProfile.findFirst({
@@ -413,7 +464,9 @@ export async function DELETE(request: Request) {
   })
 
   if (!staffProfile) {
-    return NextResponse.json({ error: "Staff profile not found." }, { status: 404 })
+    const response = NextResponse.json({ error: "Staff profile not found." }, { status: 404 })
+    logApiRequestSuccess(logContext, 404, { reason: "staff_profile_not_found" })
+    return withRequestId(response, logContext.requestId)
   }
 
   const result = await prisma.staffShiftOverride.deleteMany({
@@ -436,5 +489,7 @@ export async function DELETE(request: Request) {
     })
   }
 
-  return NextResponse.json({ deletedCount: result.count })
+  const response = NextResponse.json({ deletedCount: result.count })
+  logApiRequestSuccess(logContext, 200, { deletedCount: result.count })
+  return withRequestId(response, logContext.requestId)
 }

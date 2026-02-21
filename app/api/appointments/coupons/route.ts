@@ -3,6 +3,14 @@ import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
 import { auth } from "@/auth"
+import {
+  type ApiLogContext,
+  createApiLogContext,
+  logApiRequestError,
+  logApiRequestStart,
+  logApiRequestSuccess,
+  withRequestId,
+} from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { couponCreateSchema } from "@/lib/validation"
@@ -19,11 +27,13 @@ const listSchema = z.object({
     .transform((value) => (value === undefined ? undefined : value === "true")),
 })
 
-const ensureAuthorized = async () => {
+const ensureAuthorized = async (logContext: ApiLogContext) => {
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
   if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
   }
   return null
 }
@@ -71,17 +81,22 @@ const serializeCoupon = (coupon: {
 })
 
 export async function GET(request: Request) {
-  const unauthorized = await ensureAuthorized()
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+  const unauthorized = await ensureAuthorized(logContext)
   if (unauthorized) return unauthorized
 
-  const url = new URL(request.url)
-  const parsed = listSchema.safeParse(Object.fromEntries(url.searchParams.entries()))
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid query parameters.", details: parsed.error.flatten() },
-      { status: 400 }
-    )
-  }
+  try {
+    const url = new URL(request.url)
+    const parsed = listSchema.safeParse(Object.fromEntries(url.searchParams.entries()))
+    if (!parsed.success) {
+      const response = NextResponse.json(
+        { error: "Invalid query parameters.", details: parsed.error.flatten() },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+      return withRequestId(response, logContext.requestId)
+    }
 
   const { page, pageSize, q, active } = parsed.data
   const where: Prisma.CouponWhereInput = {}
@@ -114,29 +129,43 @@ export async function GET(request: Request) {
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
   }
 
-  return NextResponse.json(response)
+    const jsonResponse = NextResponse.json(response)
+    logApiRequestSuccess(logContext, 200, { page, pageSize, total })
+    return withRequestId(jsonResponse, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to load coupons." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }
 
 export async function POST(request: Request) {
-  const unauthorized = await ensureAuthorized()
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+  const unauthorized = await ensureAuthorized(logContext)
   if (unauthorized) return unauthorized
 
-  const payload = await request.json()
-  const parsed = couponCreateSchema.safeParse(payload)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid input.", details: parsed.error.flatten() },
-      { status: 400 }
-    )
-  }
+  try {
+    const payload = await request.json()
+    const parsed = couponCreateSchema.safeParse(payload)
+    if (!parsed.success) {
+      const response = NextResponse.json(
+        { error: "Invalid input.", details: parsed.error.flatten() },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+      return withRequestId(response, logContext.requestId)
+    }
 
   const data = parsed.data
   const code = data.code.toUpperCase()
   const validFrom = data.validFrom ? new Date(`${data.validFrom}T00:00:00.000Z`) : null
   const validTo = data.validTo ? new Date(`${data.validTo}T00:00:00.000Z`) : null
-  if (validFrom && validTo && validFrom > validTo) {
-    return NextResponse.json({ error: "Valid from must be before valid to." }, { status: 400 })
-  }
+    if (validFrom && validTo && validFrom > validTo) {
+      const response = NextResponse.json({ error: "Valid from must be before valid to." }, { status: 400 })
+      logApiRequestSuccess(logContext, 400, { reason: "invalid_date_range" })
+      return withRequestId(response, logContext.requestId)
+    }
 
   const coupon = await prisma.coupon.create({
     data: {
@@ -158,5 +187,12 @@ export async function POST(request: Request) {
     } as unknown as Prisma.CouponUncheckedCreateInput,
   })
 
-  return NextResponse.json({ coupon: serializeCoupon(coupon) }, { status: 201 })
+    const response = NextResponse.json({ coupon: serializeCoupon(coupon) }, { status: 201 })
+    logApiRequestSuccess(logContext, 201, { couponId: coupon.id, code: coupon.code })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to create coupon." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
 }
