@@ -1,7 +1,6 @@
 import { AppointmentStatus } from "@prisma/client"
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -15,6 +14,7 @@ import {
   appointmentOrderUpdateSchema,
 } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import {
   appointmentOrderInclude,
   serializeAppointmentOrder,
@@ -36,13 +36,15 @@ const ACTIVE_APPOINTMENT_STATUSES: AppointmentStatus[] = [
   AppointmentStatus.IN_PROGRESS,
 ]
 
-const ensureAuthorized = async () => {
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+const ensureAuthorized = async (request: Request) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    return { error: tenantSession.error }
   }
-  return null
+  if (!canManageUsers(tenantSession.context.role as Role)) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
+  }
+  return { context: tenantSession.context }
 }
 
 export async function GET(
@@ -52,16 +54,17 @@ export async function GET(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   try {
     const { id } = await params
-    const order = await prisma.appointmentOrder.findUnique({
-      where: { id },
+    const order = await prisma.appointmentOrder.findFirst({
+      where: { id, tenantId },
       include: appointmentOrderInclude,
     })
     if (!order) {
@@ -86,11 +89,12 @@ export async function PATCH(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   const { id } = await params
   const payload = await request.json().catch(() => null)
@@ -109,8 +113,8 @@ export async function PATCH(
     return withRequestId(response, logContext.requestId)
   }
 
-  const currentOrder = await prisma.appointmentOrder.findUnique({
-    where: { id },
+  const currentOrder = await prisma.appointmentOrder.findFirst({
+    where: { id, tenantId },
     include: {
       ...appointmentOrderInclude,
       lines: {
@@ -179,10 +183,11 @@ export async function PATCH(
   }
 
   try {
-    const resolved = await resolveOrderData(nextInput, { existingOrderId: id })
+    const resolved = await resolveOrderData(nextInput, { existingOrderId: id, tenantId })
     const existingOrderLineIds = currentOrder.lines.map((line) => line.id)
     const existingAppointments = await prisma.appointment.findMany({
       where: {
+        tenantId,
         orderLineId:
           existingOrderLineIds.length > 0 ? { in: existingOrderLineIds } : undefined,
       },
@@ -198,6 +203,7 @@ export async function PATCH(
       const order = await tx.appointmentOrder.update({
         where: { id },
         data: {
+          tenantId,
           customerId: resolved.customerId,
           appointmentDate: resolved.appointmentDate,
           appointmentStartAt: resolved.appointmentStartAt,
@@ -273,7 +279,7 @@ export async function PATCH(
 
       if (resolved.status === "CONFIRMED") {
         await tx.appointment.deleteMany({
-          where: { id: { in: excludedIds } },
+          where: { id: { in: excludedIds }, tenantId },
         })
         const createdLineBySortOrder = new Map(
           order.lines.map((line) => [line.sortOrder, line])
@@ -284,6 +290,7 @@ export async function PATCH(
               const createdLine = createdLineBySortOrder.get(line.sortOrder)
               if (!createdLine) return []
               return [{
+                tenantId,
                 staffProfileId: line.staffProfileId,
                 customerId: order.customerId,
                 serviceId: line.serviceId,
@@ -296,20 +303,21 @@ export async function PATCH(
         })
       } else if (resolved.status === "CANCELED") {
         await tx.appointment.updateMany({
-          where: { id: { in: excludedIds } },
+          where: { id: { in: excludedIds }, tenantId },
           data: { status: AppointmentStatus.CANCELED },
         })
       } else if (resolved.status === "COMPLETED") {
         await tx.appointment.updateMany({
           where: {
             id: { in: excludedIds },
+            tenantId,
             status: { in: ACTIVE_APPOINTMENT_STATUSES },
           },
           data: { status: AppointmentStatus.COMPLETED },
         })
       } else {
         await tx.appointment.deleteMany({
-          where: { id: { in: excludedIds } },
+          where: { id: { in: excludedIds }, tenantId },
         })
       }
 
@@ -329,6 +337,7 @@ export async function PATCH(
         tx,
         deltaByProduct: stockDelta,
         orderId: order.id,
+        tenantId,
       })
 
       return order

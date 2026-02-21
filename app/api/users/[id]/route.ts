@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -12,6 +11,7 @@ import {
 import { prisma } from "@/lib/prisma"
 import { updateUserSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 export async function PATCH(
   request: Request,
@@ -21,12 +21,14 @@ export async function PATCH(
   logApiRequestStart(logContext, request)
 
   const { id } = await params
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  const sessionUserId = (session?.user as { id?: string })?.id
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed", targetUserId: id })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role, sessionUserId } = tenantSession.context
 
   if (
-    !session?.user ||
     (!canManageUsers(role as Role) && sessionUserId !== id)
   ) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -51,17 +53,22 @@ export async function PATCH(
   }
   const bodyData = parsed.data
 
-  const existingUser = await prisma.user.findUnique({
-    where: { id },
+  const existingUser = await prisma.user.findFirst({
+    where: { id, tenantId },
     select: { role: true },
   })
+  if (!existingUser) {
+    const response = NextResponse.json({ error: "User not found." }, { status: 404 })
+    logApiRequestSuccess(logContext, 404, { reason: "not_found", targetUserId: id })
+    return withRequestId(response, logContext.requestId)
+  }
 
   const targetRole = (bodyData.role ?? existingUser?.role ?? null) as Role | null
 
   const data: {
     name?: string
     email?: string
-    role?: "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
+    role?: "OWNER" | "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
     passwordHash?: string
     phone?: string
     image?: string
@@ -79,7 +86,7 @@ export async function PATCH(
   const eligibleServiceIds = bodyData.eligibleServiceIds
   const staffProfileInput = bodyData.staffProfile
 
-  if (role === "ADMIN") {
+  if (role === "OWNER" || role === "ADMIN") {
     if (bodyData.name?.trim()) data.name = bodyData.name.trim()
     if (bodyData.email?.trim()) data.email = bodyData.email.trim().toLowerCase()
     if (bodyData.role) data.role = bodyData.role
@@ -179,7 +186,7 @@ export async function PATCH(
       },
     })
 
-    if (role === "ADMIN") {
+    if (role === "OWNER" || role === "ADMIN") {
       if (normalizedEligibleServiceIds !== null) {
         await tx.staffServiceEligibility.deleteMany({ where: { userId: id } })
         if (normalizedEligibleServiceIds.length) {
@@ -205,8 +212,19 @@ export async function PATCH(
             where: { id: managerUserId },
             select: { id: true, role: true, status: true },
           })
-          if (!managerUser || managerUser.role !== "MANAGER" || managerUser.status !== "ACTIVE") {
+          if (
+            !managerUser ||
+            managerUser.role !== "MANAGER" ||
+            managerUser.status !== "ACTIVE"
+          ) {
             throw new Error("Selected manager is invalid or inactive.")
+          }
+          const managerInTenant = await tx.user.findFirst({
+            where: { id: managerUserId, tenantId },
+            select: { id: true },
+          })
+          if (!managerInTenant) {
+            throw new Error("Selected manager does not belong to this tenant.")
           }
         }
 
@@ -292,12 +310,14 @@ export async function GET(
   logApiRequestStart(logContext, request)
 
   const { id } = await params
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  const sessionUserId = (session?.user as { id?: string })?.id
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed", targetUserId: id })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role, sessionUserId } = tenantSession.context
 
   if (
-    !session?.user ||
     (!canManageUsers(role as Role) && sessionUserId !== id)
   ) {
     const response = NextResponse.json(
@@ -313,6 +333,11 @@ export async function GET(
       where: { id },
       select: { role: true, staffProfile: { select: { id: true } } },
     })
+    const targetInTenant = await prisma.user.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    })
+    if (!targetInTenant) return
     if (!target || target.role !== "STAFF" || target.staffProfile) {
       return
     }
@@ -377,6 +402,19 @@ export async function GET(
       { status: 404 }
     )
     logApiRequestSuccess(logContext, 404, { reason: "not_found", targetUserId: id })
+    return withRequestId(response, logContext.requestId)
+  }
+
+  const tenantMatch = await prisma.user.findFirst({
+    where: { id: user.id, tenantId },
+    select: { id: true },
+  })
+  if (!tenantMatch) {
+    const response = NextResponse.json(
+      { error: "User not found. Please refresh and try again." },
+      { status: 404 }
+    )
+    logApiRequestSuccess(logContext, 404, { reason: "not_found_in_tenant", targetUserId: id })
     return withRequestId(response, logContext.requestId)
   }
 

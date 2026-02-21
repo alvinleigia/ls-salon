@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -13,6 +12,7 @@ import { prisma } from "@/lib/prisma"
 import { captureRosterHistoryUpToYesterday } from "@/lib/roster-history"
 import { shiftScheduleSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 export async function PATCH(
   request: Request,
@@ -22,10 +22,13 @@ export async function PATCH(
   logApiRequestStart(logContext, request)
 
   const { id } = await params
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed", scheduleId: id })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized", scheduleId: id })
     return withRequestId(response, logContext.requestId)
@@ -69,9 +72,23 @@ export async function PATCH(
     data.weekOffDay2 && (!data.weekOff2Weeks || !data.weekOff2Weeks.length)
       ? [1, 2, 3, 4, 5]
       : data.weekOff2Weeks ?? []
-  let schedule = null as Awaited<ReturnType<typeof prisma.shiftSchedule.update>> | null
-  const currentSchedule = await prisma.shiftSchedule.findUnique({
-    where: { id },
+  const templateIds = [...new Set(data.blocks.map((block) => block.templateId))]
+  if (templateIds.length) {
+    const templateCount = await prisma.shiftTemplate.count({
+      where: { tenantId, id: { in: templateIds } },
+    })
+    if (templateCount !== templateIds.length) {
+      const response = NextResponse.json(
+        { error: "One or more shift templates were not found in this tenant." },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "invalid_template_ids", scheduleId: id })
+      return withRequestId(response, logContext.requestId)
+    }
+  }
+  let schedule: { id: string } | null = null
+  const currentSchedule = await prisma.shiftSchedule.findFirst({
+    where: { id, tenantId },
     select: {
       id: true,
       isDefault: true,
@@ -87,11 +104,15 @@ export async function PATCH(
 
   if (currentSchedule) {
     if (currentSchedule.isDefault) {
-      const allStaffProfiles = await prisma.staffProfile.findMany({ select: { id: true } })
+      const allStaffProfiles = await prisma.staffProfile.findMany({
+        where: { user: { tenantId } },
+        select: { id: true },
+      })
       if (allStaffProfiles.length) {
         await captureRosterHistoryUpToYesterday(prisma, {
           staffProfileIds: allStaffProfiles.map((item) => item.id),
           startDate: toISODate(currentSchedule.startDate),
+          tenantId,
         })
       }
     } else if (currentSchedule.assignments.length) {
@@ -104,15 +125,16 @@ export async function PATCH(
       await captureRosterHistoryUpToYesterday(prisma, {
         staffProfileIds,
         startDate: earliest,
+        tenantId,
       })
     }
   }
 
   if (data.isDefault) {
-    await prisma.shiftSchedule.updateMany({ data: { isDefault: false } })
+    await prisma.shiftSchedule.updateMany({ where: { tenantId }, data: { isDefault: false } })
     schedule = await prisma.$transaction(async (tx) => {
-      const updated = await tx.shiftSchedule.update({
-        where: { id },
+      const updated = await tx.shiftSchedule.updateMany({
+        where: { id, tenantId },
         data: {
           name: data.name?.trim() || null,
           isDefault: true,
@@ -122,8 +144,9 @@ export async function PATCH(
           weekOff2Weeks,
         },
       })
+      if (!updated.count) return null
 
-      await tx.shiftScheduleBlock.deleteMany({ where: { scheduleId: id } })
+      await tx.shiftScheduleBlock.deleteMany({ where: { scheduleId: id, schedule: { tenantId } } })
       if (data.blocks.length) {
         await tx.shiftScheduleBlock.createMany({
           data: data.blocks.map((block, index) => ({
@@ -135,9 +158,9 @@ export async function PATCH(
         })
       }
 
-      await tx.staffScheduleAssignment.deleteMany({ where: { scheduleId: id } })
+      await tx.staffScheduleAssignment.deleteMany({ where: { scheduleId: id, schedule: { tenantId } } })
 
-      return updated
+      return { id }
     })
   } else {
     const staffIds = Array.from(new Set(data.staffIds.map((value) => value.trim())))
@@ -151,7 +174,7 @@ export async function PATCH(
     }
 
     const staffProfiles = await prisma.staffProfile.findMany({
-      where: { userId: { in: staffIds } },
+      where: { userId: { in: staffIds }, user: { tenantId } },
       select: { id: true, userId: true },
     })
 
@@ -160,7 +183,7 @@ export async function PATCH(
 
     if (missingStaffIds.length) {
       const staffUsers = await prisma.user.findMany({
-        where: { id: { in: missingStaffIds }, role: "STAFF" },
+        where: { id: { in: missingStaffIds }, role: "STAFF", tenantId },
         select: { id: true },
       })
       if (staffUsers.length) {
@@ -197,6 +220,7 @@ export async function PATCH(
       where: {
         staffProfileId: { in: finalStaffProfiles.map((profile) => profile.id) },
         scheduleId: { not: id },
+        schedule: { tenantId },
         ...(assignmentEnd ? { startDate: { lte: assignmentEnd } } : {}),
         OR: [{ endDate: null }, { endDate: { gte: assignmentStart } }],
       },
@@ -213,8 +237,8 @@ export async function PATCH(
     }
 
     schedule = await prisma.$transaction(async (tx) => {
-      const updated = await tx.shiftSchedule.update({
-        where: { id },
+      const updated = await tx.shiftSchedule.updateMany({
+        where: { id, tenantId },
         data: {
           name: data.name?.trim() || null,
           isDefault: false,
@@ -224,8 +248,9 @@ export async function PATCH(
           weekOff2Weeks,
         },
       })
+      if (!updated.count) return null
 
-      await tx.shiftScheduleBlock.deleteMany({ where: { scheduleId: id } })
+      await tx.shiftScheduleBlock.deleteMany({ where: { scheduleId: id, schedule: { tenantId } } })
       if (data.blocks.length) {
         await tx.shiftScheduleBlock.createMany({
           data: data.blocks.map((block, index) => ({
@@ -237,7 +262,7 @@ export async function PATCH(
         })
       }
 
-      await tx.staffScheduleAssignment.deleteMany({ where: { scheduleId: id } })
+      await tx.staffScheduleAssignment.deleteMany({ where: { scheduleId: id, schedule: { tenantId } } })
       await tx.staffScheduleAssignment.createMany({
         data: finalStaffProfiles.map((profile) => ({
           staffProfileId: profile.id,
@@ -247,12 +272,17 @@ export async function PATCH(
         })),
       })
 
-      return updated
+      return { id }
     })
   }
+  if (!schedule) {
+    const response = NextResponse.json({ error: "Schedule not found." }, { status: 404 })
+    logApiRequestSuccess(logContext, 404, { reason: "not_found", scheduleId: id })
+    return withRequestId(response, logContext.requestId)
+  }
 
-  const withBlocks = await prisma.shiftSchedule.findUnique({
-    where: { id: schedule.id },
+  const withBlocks = await prisma.shiftSchedule.findFirst({
+    where: { id: schedule.id, tenantId },
     include: {
       blocks: {
         orderBy: { sortOrder: "asc" },
@@ -277,17 +307,20 @@ export async function DELETE(
   logApiRequestStart(logContext, request)
 
   const { id } = await params
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed", scheduleId: id })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized", scheduleId: id })
     return withRequestId(response, logContext.requestId)
   }
 
-  const currentSchedule = await prisma.shiftSchedule.findUnique({
-    where: { id },
+  const currentSchedule = await prisma.shiftSchedule.findFirst({
+    where: { id, tenantId },
     select: {
       id: true,
       isDefault: true,
@@ -303,11 +336,15 @@ export async function DELETE(
 
   if (currentSchedule) {
     if (currentSchedule.isDefault) {
-      const allStaffProfiles = await prisma.staffProfile.findMany({ select: { id: true } })
+      const allStaffProfiles = await prisma.staffProfile.findMany({
+        where: { user: { tenantId } },
+        select: { id: true },
+      })
       if (allStaffProfiles.length) {
         await captureRosterHistoryUpToYesterday(prisma, {
           staffProfileIds: allStaffProfiles.map((item) => item.id),
           startDate: toISODate(currentSchedule.startDate),
+          tenantId,
         })
       }
     } else if (currentSchedule.assignments.length) {
@@ -320,12 +357,18 @@ export async function DELETE(
       await captureRosterHistoryUpToYesterday(prisma, {
         staffProfileIds,
         startDate: earliest,
+        tenantId,
       })
     }
   }
 
   try {
-    await prisma.shiftSchedule.delete({ where: { id } })
+    const deleted = await prisma.shiftSchedule.deleteMany({ where: { id, tenantId } })
+    if (!deleted.count) {
+      const response = NextResponse.json({ error: "Schedule not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found", scheduleId: id })
+      return withRequestId(response, logContext.requestId)
+    }
     const response = NextResponse.json({ ok: true })
     logApiRequestSuccess(logContext, 200, { scheduleId: id, result: "deleted" })
     return withRequestId(response, logContext.requestId)

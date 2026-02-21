@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -12,6 +11,7 @@ import {
 import { toISODate } from "@/lib/date"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import {
   normalizeHistoryRangeToPast,
   syncRosterHistoryRange,
@@ -54,9 +54,13 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role as Role | undefined
-  if (!session?.user || !canManageUsers(role ?? null)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers((role as Role | null) ?? null)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -95,7 +99,7 @@ export async function GET(request: Request) {
   }
 
   const staffProfiles = await prisma.staffProfile.findMany({
-    where: { userId: { in: userIds } },
+    where: { userId: { in: userIds }, user: { tenantId } },
     select: { id: true, userId: true },
   })
   if (!staffProfiles.length) {
@@ -107,7 +111,7 @@ export async function GET(request: Request) {
   const staffProfileIds = staffProfiles.map((item) => item.id)
   const profileToUser = new Map(staffProfiles.map((item) => [item.id, item.userId]))
   const settings = await prisma.appSetting.findUnique({
-    where: { id: "global" },
+    where: { tenantId },
     select: { timeZone: true },
   })
   const timeZone = settings?.timeZone ?? null
@@ -120,6 +124,7 @@ export async function GET(request: Request) {
         startDate: normalizedPastRange.startDate,
         endDate: normalizedPastRange.endDate,
         mode: "insert-missing",
+        tenantId,
       })
     }
 

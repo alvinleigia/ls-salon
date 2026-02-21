@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -10,17 +9,23 @@ import {
 } from "@/lib/api-logging"
 import type { Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role as Role | undefined
-  const sessionUserId = (session?.user as { id?: string })?.id
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId } = tenantSession.context
+  const role = tenantSession.context.role as Role | undefined
+  const sessionUserId = tenantSession.context.sessionUserId
   const isManager = role === "MANAGER"
   const isStaff = role === "STAFF"
-  if (!session?.user || (!isManager && !isStaff)) {
+  if (!isManager && !isStaff) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -32,8 +37,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const staffProfile = await prisma.staffProfile.findUnique({
-      where: { userId: sessionUserId },
+    const staffProfile = await prisma.staffProfile.findFirst({
+      where: { userId: sessionUserId, user: { tenantId } },
       select: { id: true },
     })
     const resolvedStaffProfile =
@@ -45,10 +50,12 @@ export async function GET(request: Request) {
 
     const items = await prisma.leaveDefinition.findMany({
       where: {
+        tenantId,
         status: "ACTIVE",
         leaveGroups: {
           some: {
             leaveGroup: {
+              tenantId,
               status: "ACTIVE",
               OR: [
                 { assignmentMode: "ALL_STAFF" },

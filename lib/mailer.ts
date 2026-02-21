@@ -33,10 +33,10 @@ export const getEmailDeliveryStatus = () => ({
   usernameMasked: maskValue(user),
 })
 
-export const canSendConfiguredEmail = async (tx: DbClient) => {
+export const canSendConfiguredEmail = async (tx: DbClient, tenantId?: string | null) => {
   if (!smtpConfigured) return false
-  const setting = await tx.appSetting.findUnique({
-    where: { id: "global" },
+  const setting = await tx.appSetting.findFirst({
+    where: tenantId ? { tenantId } : {},
     select: { emailNotificationsEnabled: true },
   })
   return Boolean(setting?.emailNotificationsEnabled)

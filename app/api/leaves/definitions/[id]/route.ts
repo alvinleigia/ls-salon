@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -10,6 +9,7 @@ import {
 } from "@/lib/api-logging"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import { updateLeaveDefinitionSchema } from "@/lib/validation"
 import {
   leaveDefinitionSelect,
@@ -24,9 +24,13 @@ export async function GET(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -34,8 +38,8 @@ export async function GET(
 
   try {
     const { id } = await params
-    const item = await prisma.leaveDefinition.findUnique({
-      where: { id },
+    const item = await prisma.leaveDefinition.findFirst({
+      where: { id, tenantId },
       select: leaveDefinitionSelect,
     })
     if (!item) {
@@ -60,9 +64,13 @@ export async function PATCH(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -70,8 +78,8 @@ export async function PATCH(
 
   try {
     const { id } = await params
-    const current = await prisma.leaveDefinition.findUnique({
-      where: { id },
+    const current = await prisma.leaveDefinition.findFirst({
+      where: { id, tenantId },
       select: {
         id: true,
         code: true,
@@ -123,6 +131,7 @@ export async function PATCH(
     if (code || name) {
       const duplicate = await prisma.leaveDefinition.findFirst({
         where: {
+          tenantId,
           id: { not: id },
           OR: [
             ...(code ? [{ code }] : []),
@@ -147,8 +156,8 @@ export async function PATCH(
     }
 
     const item = await prisma.$transaction(async (tx) => {
-      await tx.leaveDefinition.update({
-        where: { id },
+      const updated = await tx.leaveDefinition.updateMany({
+        where: { id, tenantId },
         data: {
           ...(code ? { code } : {}),
           ...(name ? { name } : {}),
@@ -194,11 +203,14 @@ export async function PATCH(
           ...(typeof parsed.data.sortOrder === "number" ? { sortOrder: parsed.data.sortOrder } : {}),
         },
       })
-      if (parsed.data.nonClubbableWithIds) {
-        await replaceNonClubbableRules(tx, id, parsed.data.nonClubbableWithIds)
+      if (!updated.count) {
+        throw new Error("Leave definition not found.")
       }
-      return tx.leaveDefinition.findUniqueOrThrow({
-        where: { id },
+      if (parsed.data.nonClubbableWithIds) {
+        await replaceNonClubbableRules(tx, id, parsed.data.nonClubbableWithIds, tenantId)
+      }
+      return tx.leaveDefinition.findFirstOrThrow({
+        where: { id, tenantId },
         select: leaveDefinitionSelect,
       })
     })
@@ -224,9 +236,13 @@ export async function DELETE(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -234,8 +250,8 @@ export async function DELETE(
 
   try {
     const { id } = await params
-    const exists = await prisma.leaveDefinition.findUnique({
-      where: { id },
+    const exists = await prisma.leaveDefinition.findFirst({
+      where: { id, tenantId },
       select: { id: true },
     })
     if (!exists) {
@@ -244,7 +260,7 @@ export async function DELETE(
       return withRequestId(response, logContext.requestId)
     }
 
-    await prisma.leaveDefinition.delete({ where: { id } })
+    await prisma.leaveDefinition.deleteMany({ where: { id, tenantId } })
     const response = NextResponse.json({ ok: true })
     logApiRequestSuccess(logContext, 200, { itemId: id })
     return withRequestId(response, logContext.requestId)

@@ -11,12 +11,20 @@ import {
 } from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { signUpSchema } from "@/lib/validation"
+import { resolveTenantFromRequest } from "@/lib/tenancy"
 
 export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
   try {
+    const tenant = await resolveTenantFromRequest(request)
+    if (!tenant) {
+      const response = NextResponse.json({ error: "Tenant not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "tenant_not_found" })
+      return withRequestId(response, logContext.requestId)
+    }
+
     const body = await request.json().catch(() => null)
     if (!body) {
       const response = NextResponse.json({ error: "Invalid JSON body." }, { status: 400 })
@@ -60,7 +68,7 @@ export async function POST(request: Request) {
       return withRequestId(response, logContext.requestId)
     }
 
-    const existing = await prisma.user.findUnique({ where: { email } })
+    const existing = await prisma.user.findFirst({ where: { email, tenantId: tenant.id } })
     if (existing) {
       const response = NextResponse.json(
         { error: "Email already in use." },
@@ -74,6 +82,7 @@ export async function POST(request: Request) {
 
     await prisma.user.create({
       data: {
+        tenantId: tenant.id,
         name: name || undefined,
         email,
         passwordHash,

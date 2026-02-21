@@ -420,6 +420,8 @@ const leaveGroupSeeds = [
   },
 ] as const
 
+const DEFAULT_TENANT_ID = "tenant_default"
+
 const ensureAuthorized = async () => {
   const session = await auth()
   const role = (session?.user as { role?: Role })?.role
@@ -437,13 +439,14 @@ const seedTaxes = async () => {
   const created: string[] = []
   for (const tax of taxes) {
     const row = await prisma.tax.upsert({
-      where: { name: tax.name },
+      where: { tenantId_name: { tenantId: DEFAULT_TENANT_ID, name: tax.name } },
       update: {
         percent: tax.percent,
         isActive: true,
         sortOrder: tax.sortOrder,
       },
       create: {
+        tenantId: DEFAULT_TENANT_ID,
         name: tax.name,
         percent: tax.percent,
         isActive: true,
@@ -498,12 +501,13 @@ const seedServiceCatalog = async () => {
   const categoryByName = new Map<string, string>()
   for (const item of serviceCategorySeeds) {
     const category = await prisma.serviceCategory.upsert({
-      where: { name: item.name },
+      where: { tenantId_name: { tenantId: DEFAULT_TENANT_ID, name: item.name } },
       update: {
         description: item.description,
         status: "ACTIVE",
       },
       create: {
+        tenantId: DEFAULT_TENANT_ID,
         name: item.name,
         description: item.description,
         status: "ACTIVE",
@@ -515,7 +519,7 @@ const seedServiceCatalog = async () => {
   const taxByName = new Map(
     (
       await prisma.tax.findMany({
-        where: { name: { in: ["GST 18%", "VAT 5%"] } },
+        where: { tenantId: DEFAULT_TENANT_ID, name: { in: ["GST 18%", "VAT 5%"] } },
         select: { id: true, name: true },
       })
     ).map((tax) => [tax.name, tax.id])
@@ -535,6 +539,7 @@ const seedServiceCatalog = async () => {
             description: item.description,
             durationMinutes: item.durationMinutes,
             priceCents: item.priceCents,
+            tenantId: DEFAULT_TENANT_ID,
             categoryId,
             status: "ACTIVE",
             type: item.type,
@@ -543,6 +548,7 @@ const seedServiceCatalog = async () => {
         })
       : await prisma.service.create({
           data: {
+            tenantId: DEFAULT_TENANT_ID,
             name: item.name,
             description: item.description,
             durationMinutes: item.durationMinutes,
@@ -627,12 +633,13 @@ const seedInventoryCatalog = async () => {
   const categoryByName = new Map<string, string>()
   for (const item of inventoryCategorySeeds) {
     const category = await prisma.inventoryCategory.upsert({
-      where: { name: item.name },
+      where: { tenantId_name: { tenantId: DEFAULT_TENANT_ID, name: item.name } },
       update: {
         description: item.description,
         status: InventoryCategoryStatus.ACTIVE,
       },
       create: {
+        tenantId: DEFAULT_TENANT_ID,
         name: item.name,
         description: item.description,
         status: InventoryCategoryStatus.ACTIVE,
@@ -643,7 +650,9 @@ const seedInventoryCatalog = async () => {
 
   const supplierByName = new Map<string, string>()
   for (const item of supplierSeeds) {
-    const existing = await prisma.supplier.findFirst({ where: { name: item.name } })
+    const existing = await prisma.supplier.findFirst({
+      where: { tenantId: DEFAULT_TENANT_ID, name: item.name },
+    })
     const supplier = existing
       ? await prisma.supplier.update({
           where: { id: existing.id },
@@ -655,6 +664,7 @@ const seedInventoryCatalog = async () => {
         })
       : await prisma.supplier.create({
           data: {
+            tenantId: DEFAULT_TENANT_ID,
             name: item.name,
             email: item.email,
             phone: item.phone,
@@ -667,7 +677,7 @@ const seedInventoryCatalog = async () => {
   const taxByName = new Map(
     (
       await prisma.tax.findMany({
-        where: { name: { in: ["GST 18%", "VAT 5%"] } },
+        where: { tenantId: DEFAULT_TENANT_ID, name: { in: ["GST 18%", "VAT 5%"] } },
         select: { id: true, name: true },
       })
     ).map((tax) => [tax.name, tax.id])
@@ -679,8 +689,9 @@ const seedInventoryCatalog = async () => {
     const supplierId = supplierByName.get(item.supplierName)
     if (!categoryId || !supplierId) continue
     const product = await prisma.inventoryProduct.upsert({
-      where: { sku: item.sku },
+      where: { tenantId_sku: { tenantId: DEFAULT_TENANT_ID, sku: item.sku } },
       update: {
+        tenantId: DEFAULT_TENANT_ID,
         name: item.name,
         categoryId,
         status: InventoryProductStatus.ACTIVE,
@@ -691,6 +702,7 @@ const seedInventoryCatalog = async () => {
         onHandQty: item.initialQty,
       },
       create: {
+        tenantId: DEFAULT_TENANT_ID,
         sku: item.sku,
         name: item.name,
         categoryId,
@@ -732,13 +744,18 @@ const seedInventoryCatalog = async () => {
 }
 
 const seedPurchases = async () => {
-  const supplier = await prisma.supplier.findFirst({ where: { name: supplierSeeds[0].name } })
+  const supplier = await prisma.supplier.findFirst({
+    where: { tenantId: DEFAULT_TENANT_ID, name: supplierSeeds[0].name },
+  })
   if (!supplier) {
     throw new Error("Supplier seeds are missing. Seed inventory catalog first.")
   }
 
   const products = await prisma.inventoryProduct.findMany({
-    where: { sku: { in: [productSeeds[0].sku, productSeeds[1].sku] } },
+    where: {
+      tenantId: DEFAULT_TENANT_ID,
+      sku: { in: [productSeeds[0].sku, productSeeds[1].sku] },
+    },
     select: { id: true, sku: true },
   })
   if (products.length < 2) {
@@ -748,7 +765,7 @@ const seedPurchases = async () => {
 
   const orderNumber = "SEED-PO-001"
   const existing = await prisma.purchaseOrder.findUnique({
-    where: { orderNumber },
+    where: { tenantId_orderNumber: { tenantId: DEFAULT_TENANT_ID, orderNumber } },
     select: { id: true },
   })
   if (existing) {
@@ -780,6 +797,7 @@ const seedPurchases = async () => {
 
   const order = await prisma.purchaseOrder.create({
     data: {
+      tenantId: DEFAULT_TENANT_ID,
       orderNumber,
       supplierId: supplier.id,
       status: PurchaseOrderStatus.RECEIVED,
@@ -802,6 +820,7 @@ const seedPurchases = async () => {
       })
       await tx.inventoryStockMovement.create({
         data: {
+          tenantId: DEFAULT_TENANT_ID,
           productId: item.productId,
           orderItemId: item.id,
           type: "PURCHASE_RECEIPT",
@@ -820,7 +839,7 @@ const seedCoupons = async () => {
   let touched = 0
   for (const item of couponSeeds) {
     await prisma.coupon.upsert({
-      where: { code: item.code },
+      where: { tenantId_code: { tenantId: DEFAULT_TENANT_ID, code: item.code } },
       update: {
         name: item.name,
         discountType: item.discountType,
@@ -829,6 +848,7 @@ const seedCoupons = async () => {
         isActive: true,
       },
       create: {
+        tenantId: DEFAULT_TENANT_ID,
         code: item.code,
         name: item.name,
         discountType: item.discountType,
@@ -1188,7 +1208,7 @@ const seedLeaves = async () => {
   const definitionIdByCode = new Map<string, string>()
   for (const item of leaveDefinitionSeeds) {
     const row = await prisma.leaveDefinition.upsert({
-      where: { code: item.code },
+      where: { tenantId_code: { tenantId: DEFAULT_TENANT_ID, code: item.code } },
       update: {
         name: item.name,
         leaveType: item.leaveType,
@@ -1209,6 +1229,7 @@ const seedLeaves = async () => {
         sortOrder: item.sortOrder,
       },
       create: {
+        tenantId: DEFAULT_TENANT_ID,
         code: item.code,
         name: item.name,
         leaveType: item.leaveType,
@@ -1261,6 +1282,7 @@ const seedLeaves = async () => {
   const staffProfiles = await prisma.staffProfile.findMany({
     where: {
       user: {
+        tenantId: DEFAULT_TENANT_ID,
         role: Role.STAFF,
         email: { in: seededUsers.filter((user) => user.role === Role.STAFF).map((user) => user.email) },
       },
@@ -1279,7 +1301,7 @@ const seedLeaves = async () => {
         : []
 
     await prisma.leaveGroup.upsert({
-      where: { code: group.code },
+      where: { tenantId_code: { tenantId: DEFAULT_TENANT_ID, code: group.code } },
       update: {
         name: group.name,
         description: group.description,
@@ -1300,6 +1322,7 @@ const seedLeaves = async () => {
         },
       },
       create: {
+        tenantId: DEFAULT_TENANT_ID,
         code: group.code,
         name: group.name,
         description: group.description,

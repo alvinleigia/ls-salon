@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -12,6 +11,7 @@ import {
 } from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import { taxCreateSchema } from "@/lib/validation"
 import type { ListResponse } from "@/types/api"
 import type { TaxRow } from "@/types/scheduling"
@@ -26,13 +26,15 @@ const listSchema = z.object({
     .transform((value) => (value === undefined ? undefined : value === "true")),
 })
 
-const ensureAuthorized = async () => {
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+const ensureAuthorized = async (request: Request) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    return { error: tenantSession.error }
   }
-  return null
+  if (!canManageUsers(tenantSession.context.role as Role)) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
+  }
+  return { context: tenantSession.context }
 }
 
 const serializeTax = (tax: {
@@ -57,11 +59,12 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   const url = new URL(request.url)
   const parsed = listSchema.safeParse(Object.fromEntries(url.searchParams.entries()))
@@ -76,7 +79,7 @@ export async function GET(request: Request) {
 
   try {
     const { page, pageSize, q, active } = parsed.data
-    const where: Prisma.TaxWhereInput = {}
+    const where: Prisma.TaxWhereInput = { tenantId }
     if (q) {
       where.name = { contains: q, mode: "insensitive" }
     }
@@ -117,11 +120,12 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   const payload = await request.json().catch(() => null)
   if (!payload) {
@@ -143,6 +147,7 @@ export async function POST(request: Request) {
     const data = parsed.data
     const tax = await prisma.tax.create({
       data: {
+        tenantId,
         name: data.name.trim(),
         percent: data.percent,
         isActive: data.isActive ?? true,
@@ -154,6 +159,11 @@ export async function POST(request: Request) {
     logApiRequestSuccess(logContext, 201, { taxId: tax.id })
     return withRequestId(response, logContext.requestId)
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const response = NextResponse.json({ error: "Tax name already exists." }, { status: 409 })
+      logApiRequestSuccess(logContext, 409, { reason: "name_conflict" })
+      return withRequestId(response, logContext.requestId)
+    }
     logApiRequestError(logContext, error, 500)
     const response = NextResponse.json({ error: "Unable to create tax." }, { status: 500 })
     return withRequestId(response, logContext.requestId)

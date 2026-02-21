@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -14,13 +13,14 @@ import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { createUserSchema } from "@/lib/validation"
 import { canInvite, canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().trim().optional(),
   q: z.string().trim().optional(),
-  role: z.enum(["ADMIN", "MANAGER", "STAFF", "CUSTOMER"]).optional(),
+  role: z.enum(["OWNER", "ADMIN", "MANAGER", "STAFF", "CUSTOMER"]).optional(),
   status: z.enum(["ACTIVE", "SUSPENDED", "INVITED", "ARCHIVED"]).optional(),
   sortBy: z
     .enum(["createdAt", "name", "email", "phone", "role", "status", "lastLoginAt"])
@@ -36,10 +36,14 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -77,6 +81,7 @@ export async function GET(request: Request) {
     const resolvedSortDir = order ?? sortDir
 
     const where = {
+      tenantId,
       ...(roleFilter ? { role: roleFilter } : {}),
       ...(status ? { status } : {}),
       ...(trimmedSearch
@@ -146,10 +151,14 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canInvite(role as Role)) {
+  if (!canInvite(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -193,7 +202,7 @@ export async function POST(request: Request) {
   } = parsed.data
 
   try {
-    const existing = await prisma.user.findUnique({ where: { email } })
+    const existing = await prisma.user.findFirst({ where: { email, tenantId } })
     if (existing) {
       const response = NextResponse.json(
         { error: "Email already in use." },
@@ -212,6 +221,7 @@ export async function POST(request: Request) {
     const user = await prisma.user.create({
       data: {
         name: name || undefined,
+        tenantId,
         email,
         passwordHash,
         role: userRole ?? "CUSTOMER",

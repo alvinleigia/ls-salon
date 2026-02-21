@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -17,6 +16,7 @@ import {
   serviceTypeSchema,
 } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 const listSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -43,10 +43,14 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -76,6 +80,7 @@ export async function GET(request: Request) {
     const trimmedSearch = q?.trim()
 
     const where = {
+      tenantId,
       ...(trimmedSearch
         ? {
             OR: [
@@ -140,10 +145,14 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -188,8 +197,46 @@ export async function POST(request: Request) {
   }
 
   try {
+    const category = await prisma.serviceCategory.findFirst({
+      where: { id: categoryId, tenantId },
+      select: { id: true },
+    })
+    if (!category) {
+      const response = NextResponse.json({ error: "Service category not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "category_not_found" })
+      return withRequestId(response, logContext.requestId)
+    }
+    if (packageItemIds?.length) {
+      const packageItemsCount = await prisma.service.count({
+        where: { tenantId, id: { in: packageItemIds } },
+      })
+      if (packageItemsCount !== packageItemIds.length) {
+        const response = NextResponse.json(
+          { error: "One or more package services were not found in this tenant." },
+          { status: 400 }
+        )
+        logApiRequestSuccess(logContext, 400, { reason: "invalid_package_item_ids" })
+        return withRequestId(response, logContext.requestId)
+      }
+    }
+    if (taxIds?.length) {
+      const uniqueTaxIds = [...new Set(taxIds)]
+      const taxCount = await prisma.tax.count({
+        where: { tenantId, id: { in: uniqueTaxIds }, isActive: true },
+      })
+      if (taxCount !== uniqueTaxIds.length) {
+        const response = NextResponse.json(
+          { error: "One or more taxes were not found in this tenant." },
+          { status: 400 }
+        )
+        logApiRequestSuccess(logContext, 400, { reason: "invalid_tax_ids" })
+        return withRequestId(response, logContext.requestId)
+      }
+    }
+
     const item = await prisma.service.create({
       data: {
+        tenantId,
         name: name.trim(),
         description: description?.trim() || undefined,
         categoryId,

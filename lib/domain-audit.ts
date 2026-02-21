@@ -5,6 +5,7 @@ import { logger } from "@/lib/logger"
 type DbClient = PrismaClient | Prisma.TransactionClient
 
 type DomainAuditInput = {
+  tenantId?: string | null
   event: string
   entityType: string
   entityId?: string | null
@@ -36,6 +37,7 @@ export const recordDomainAuditEvent = async (db: DbClient, input: DomainAuditInp
 
   await db.auditLog.create({
     data: {
+      tenantId: input.tenantId ?? null,
       event: input.event,
       entityType: input.entityType,
       entityId: input.entityId ?? null,

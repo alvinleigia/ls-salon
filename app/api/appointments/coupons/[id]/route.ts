@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 
-import { auth } from "@/auth"
 import {
-  type ApiLogContext,
   createApiLogContext,
   logApiRequestError,
   logApiRequestStart,
@@ -12,18 +10,19 @@ import {
 } from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import { couponUpdateSchema } from "@/lib/validation"
 import type { CouponRow } from "@/types/appointments"
 
-const ensureAuthorized = async (logContext: ApiLogContext) => {
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
-    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(response, logContext.requestId)
+const ensureAuthorized = async (request: Request) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    return { error: tenantSession.error }
   }
-  return null
+  if (!canManageUsers(tenantSession.context.role as Role)) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
+  }
+  return { context: tenantSession.context }
 }
 
 const serializeCoupon = (coupon: {
@@ -74,8 +73,12 @@ export async function PATCH(
 ) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
-  const unauthorized = await ensureAuthorized(logContext)
-  if (unauthorized) return unauthorized
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
+  }
+  const { tenantId } = authorized.context
 
   try {
     const { id } = await params
@@ -116,8 +119,18 @@ export async function PATCH(
       return withRequestId(response, logContext.requestId)
     }
 
+    const existing = await prisma.coupon.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    })
+    if (!existing) {
+      const response = NextResponse.json({ error: "Coupon not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found" })
+      return withRequestId(response, logContext.requestId)
+    }
+
     const coupon = await prisma.coupon.update({
-      where: { id },
+      where: { id: existing.id },
       data: {
         ...(data.code !== undefined ? { code: data.code.toUpperCase() } : {}),
         ...(data.name !== undefined ? { name: data.name?.trim() || null } : {}),
@@ -143,6 +156,11 @@ export async function PATCH(
     logApiRequestSuccess(logContext, 200, { couponId: id })
     return withRequestId(response, logContext.requestId)
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const response = NextResponse.json({ error: "Coupon code already exists." }, { status: 409 })
+      logApiRequestSuccess(logContext, 409, { reason: "code_conflict" })
+      return withRequestId(response, logContext.requestId)
+    }
     logApiRequestError(logContext, error, 500)
     const response = NextResponse.json({ error: "Unable to update coupon." }, { status: 500 })
     return withRequestId(response, logContext.requestId)
@@ -150,16 +168,25 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const logContext = createApiLogContext(_request)
-  logApiRequestStart(logContext, _request)
-  const unauthorized = await ensureAuthorized(logContext)
-  if (unauthorized) return unauthorized
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
+  }
+  const { tenantId } = authorized.context
   try {
     const { id } = await params
-    await prisma.coupon.delete({ where: { id } })
+    const deleted = await prisma.coupon.deleteMany({ where: { id, tenantId } })
+    if (deleted.count === 0) {
+      const response = NextResponse.json({ error: "Coupon not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found" })
+      return withRequestId(response, logContext.requestId)
+    }
     const response = NextResponse.json({ ok: true })
     logApiRequestSuccess(logContext, 200, { couponId: id })
     return withRequestId(response, logContext.requestId)

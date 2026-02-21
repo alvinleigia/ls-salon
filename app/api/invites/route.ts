@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import crypto from "crypto"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -16,6 +15,7 @@ import { inviteUserSchema } from "@/lib/validation"
 import { canSendConfiguredEmail, mailer, mailFrom } from "@/lib/mailer"
 import { inviteEmail } from "@/lib/emails/invite"
 import { canInvite, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -32,10 +32,14 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role, sessionUserId } = tenantSession.context
 
-  if (!session?.user || !canInvite(role as Role)) {
+  if (!canInvite(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -65,15 +69,15 @@ export async function POST(request: Request) {
     await prisma.invitation.create({
       data: {
         email,
+        tenantId,
         token,
         role: inviteRole ?? "CUSTOMER",
         expiresAt,
-        invitedById: session.user.id,
+        invitedById: sessionUserId,
       },
     })
 
-    const appUrl = process.env.APP_URL ?? "http://localhost:3000"
-    const inviteUrl = `${appUrl}/auth/invite?token=${token}`
+    const inviteUrl = new URL(`/auth/invite?token=${token}`, request.url).toString()
 
     if (!mailer || !mailFrom) {
       const response = NextResponse.json(
@@ -83,7 +87,7 @@ export async function POST(request: Request) {
       logApiRequestSuccess(logContext, 500, { reason: "mailer_not_configured" })
       return withRequestId(response, logContext.requestId)
     }
-    if (!(await canSendConfiguredEmail(prisma))) {
+    if (!(await canSendConfiguredEmail(prisma, tenantId))) {
       const response = NextResponse.json(
         { error: "Email notifications are disabled in settings." },
         { status: 400 }
@@ -116,10 +120,14 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canInvite(role as Role)) {
+  if (!canInvite(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -148,6 +156,7 @@ export async function GET(request: Request) {
       : { createdAt: "desc" as const }
     const trimmedSearch = q?.trim()
     const where = {
+      tenantId,
       ...(trimmedSearch
         ? { email: { contains: trimmedSearch, mode: Prisma.QueryMode.insensitive } }
         : {}),

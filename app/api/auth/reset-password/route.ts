@@ -11,6 +11,7 @@ import {
 } from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { resetPasswordSchema } from "@/lib/validation"
+import { resolveTenantFromRequest } from "@/lib/tenancy"
 
 export const runtime = "nodejs"
 
@@ -30,6 +31,13 @@ export async function POST(request: Request) {
   }
 
   try {
+    const tenant = await resolveTenantFromRequest(request)
+    if (!tenant) {
+      const response = NextResponse.json({ error: "Tenant not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "tenant_not_found" })
+      return withRequestId(response, logContext.requestId)
+    }
+
     const { token, password } = parsed.data
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex")
 
@@ -39,9 +47,16 @@ export async function POST(request: Request) {
         usedAt: null,
         expiresAt: { gt: new Date() },
       },
+      include: {
+        user: {
+          select: {
+            tenantId: true,
+          },
+        },
+      },
     })
 
-    if (!resetToken) {
+    if (!resetToken || resetToken.user.tenantId !== tenant.id) {
       const response = NextResponse.json(
         { error: "This reset link is invalid or expired." },
         { status: 400 }

@@ -106,7 +106,8 @@ export const serializeLeaveGroup = (item: LeaveGroupWithRelations): LeaveGroupRo
 export const replaceGroupLeaves = async (
   tx: DbClient,
   leaveGroupId: string,
-  leaveDefinitionIds: string[]
+  leaveDefinitionIds: string[],
+  tenantId?: string
 ) => {
   const uniqueIds = Array.from(new Set(leaveDefinitionIds.map((id) => id.trim()).filter(Boolean)))
   if (!uniqueIds.length) {
@@ -114,7 +115,7 @@ export const replaceGroupLeaves = async (
   }
 
   const count = await tx.leaveDefinition.count({
-    where: { id: { in: uniqueIds } },
+    where: { id: { in: uniqueIds }, ...(tenantId ? { tenantId } : {}) },
   })
   if (count !== uniqueIds.length) {
     throw new Error("One or more selected leave definitions were not found.")
@@ -134,7 +135,8 @@ export const replaceGroupStaffAssignments = async (
   tx: DbClient,
   leaveGroupId: string,
   assignmentMode: LeaveGroupRow["assignmentMode"],
-  staffUserIds: string[]
+  staffUserIds: string[],
+  tenantId?: string
 ) => {
   await tx.leaveGroupStaffAssignment.deleteMany({ where: { leaveGroupId } })
   if (assignmentMode === "ALL_STAFF") return
@@ -145,7 +147,10 @@ export const replaceGroupStaffAssignments = async (
   }
 
   const staffProfiles = await tx.staffProfile.findMany({
-    where: { userId: { in: uniqueUserIds } },
+    where: {
+      userId: { in: uniqueUserIds },
+      ...(tenantId ? { user: { tenantId } } : {}),
+    },
     select: { id: true, userId: true, user: { select: { role: true, status: true } } },
   })
   if (staffProfiles.length !== uniqueUserIds.length) {

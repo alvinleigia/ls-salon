@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -11,6 +10,7 @@ import {
 } from "@/lib/api-logging"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import type { LeaveRosterItem } from "@/types/leaves"
 
 const querySchema = z.object({
@@ -23,9 +23,13 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role as Role | undefined
-  if (!session?.user || !canManageUsers(role ?? null)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers((role as Role | null) ?? null)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -60,7 +64,7 @@ export async function GET(request: Request) {
       .filter(Boolean)
     const staffProfiles = staffUserIds.length
       ? await prisma.staffProfile.findMany({
-          where: { userId: { in: staffUserIds } },
+          where: { userId: { in: staffUserIds }, user: { tenantId } },
           select: { id: true },
         })
       : []
@@ -68,6 +72,7 @@ export async function GET(request: Request) {
 
     const items = await prisma.leaveRequest.findMany({
       where: {
+        tenantId,
         status: "APPROVED",
         startDate: { lte: new Date(`${endDate}T00:00:00.000Z`) },
         endDate: { gte: new Date(`${startDate}T00:00:00.000Z`) },

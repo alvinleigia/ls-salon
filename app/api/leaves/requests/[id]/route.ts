@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -10,6 +9,7 @@ import {
 } from "@/lib/api-logging"
 import type { Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import {
   buildLeaveRequestRuleChecks,
   buildLeaveRequestTimeline,
@@ -24,13 +24,18 @@ export async function GET(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role as Role | undefined
-  const sessionUserId = (session?.user as { id?: string })?.id
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId } = tenantSession.context
+  const role = tenantSession.context.role as Role | undefined
+  const sessionUserId = tenantSession.context.sessionUserId
   const isAdmin = role === "ADMIN"
   const isManager = role === "MANAGER"
   const isStaff = role === "STAFF"
-  if (!session?.user || (!isAdmin && !isManager && !isStaff)) {
+  if (!isAdmin && !isManager && !isStaff) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -45,8 +50,8 @@ export async function GET(
     const { id } = await params
     const includeRuleChecks =
       new URL(request.url).searchParams.get("includeRuleChecks") === "true"
-    const item = await prisma.leaveRequest.findUnique({
-      where: { id },
+    const item = await prisma.leaveRequest.findFirst({
+      where: { id, tenantId },
       select: leaveRequestSelect,
     })
     if (!item) {
@@ -73,8 +78,8 @@ export async function GET(
       return withRequestId(response, logContext.requestId)
     }
 
-  const leaveDefinition = await prisma.leaveDefinition.findUnique({
-    where: { id: item.leaveDefinitionId },
+  const leaveDefinition = await prisma.leaveDefinition.findFirst({
+    where: { id: item.leaveDefinitionId, tenantId },
     select: {
       allowedUsers: true,
       minDaysPerRequest: true,
@@ -94,8 +99,8 @@ export async function GET(
       return withRequestId(response, logContext.requestId)
     }
 
-  const staff = await prisma.staffProfile.findUnique({
-    where: { id: item.staffProfileId },
+  const staff = await prisma.staffProfile.findFirst({
+    where: { id: item.staffProfileId, user: { tenantId } },
     select: {
       user: {
         select: {
@@ -107,6 +112,7 @@ export async function GET(
 
   const ruleChecks = await buildLeaveRequestRuleChecks({
     tx: prisma,
+    tenantId,
     staffProfileId: item.staffProfileId,
     staffGender: staff?.user.gender ?? null,
     leaveDefinition,

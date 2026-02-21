@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -16,6 +15,7 @@ import {
   createInventoryCategorySchema,
   inventoryCategoryStatusSchema,
 } from "@/lib/validation"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 const listSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -26,24 +26,25 @@ const listSchema = z.object({
   status: inventoryCategoryStatusSchema.optional(),
 })
 
-const ensureAuthorized = async () => {
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+const ensureAuthorized = async (request: Request) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) return { error: tenantSession.error }
+  if (!canManageUsers(tenantSession.context.role as Role)) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
   }
-  return null
+  return { context: tenantSession.context }
 }
 
 export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   const url = new URL(request.url)
   const parsed = listSchema.safeParse(Object.fromEntries(url.searchParams.entries()))
@@ -64,6 +65,7 @@ export async function GET(request: Request) {
       : { sortOrder: "asc" as const }
 
     const where: Prisma.InventoryCategoryWhereInput = {
+      tenantId,
       ...(q
         ? {
             OR: [
@@ -116,11 +118,12 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   const body = await request.json().catch(() => null)
   if (!body) {
@@ -140,8 +143,8 @@ export async function POST(request: Request) {
 
   try {
     const data = parsed.data
-    const existing = await prisma.inventoryCategory.findUnique({
-      where: { name: data.name.trim() },
+    const existing = await prisma.inventoryCategory.findFirst({
+      where: { tenantId, name: data.name.trim() },
       select: { id: true },
     })
     if (existing) {
@@ -155,6 +158,7 @@ export async function POST(request: Request) {
 
     const item = await prisma.inventoryCategory.create({
       data: {
+        tenantId,
         name: data.name.trim(),
         description: data.description?.trim() || undefined,
         status: data.status ?? "ACTIVE",

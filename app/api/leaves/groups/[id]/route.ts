@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -10,6 +9,7 @@ import {
 } from "@/lib/api-logging"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import { updateLeaveGroupSchema } from "@/lib/validation"
 import {
   leaveGroupSelect,
@@ -25,9 +25,13 @@ export async function GET(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -35,8 +39,8 @@ export async function GET(
 
   try {
     const { id } = await params
-    const item = await prisma.leaveGroup.findUnique({
-      where: { id },
+    const item = await prisma.leaveGroup.findFirst({
+      where: { id, tenantId },
       select: leaveGroupSelect,
     })
     if (!item) {
@@ -61,9 +65,13 @@ export async function PATCH(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -71,8 +79,8 @@ export async function PATCH(
 
   try {
     const { id } = await params
-    const current = await prisma.leaveGroup.findUnique({
-      where: { id },
+    const current = await prisma.leaveGroup.findFirst({
+      where: { id, tenantId },
       select: { id: true, code: true, name: true, assignmentMode: true },
     })
     if (!current) {
@@ -97,6 +105,7 @@ export async function PATCH(
     if (code || name) {
       const existing = await prisma.leaveGroup.findFirst({
         where: {
+          tenantId,
           id: { not: id },
           OR: [...(code ? [{ code }] : []), ...(name ? [{ name }] : [])],
         },
@@ -114,8 +123,8 @@ export async function PATCH(
 
     const item = await prisma.$transaction(async (tx) => {
       const assignmentMode = parsed.data.assignmentMode ?? current.assignmentMode
-      await tx.leaveGroup.update({
-        where: { id },
+      const updated = await tx.leaveGroup.updateMany({
+        where: { id, tenantId },
         data: {
           ...(code ? { code } : {}),
           ...(name ? { name } : {}),
@@ -127,21 +136,23 @@ export async function PATCH(
           ...(typeof parsed.data.sortOrder === "number" ? { sortOrder: parsed.data.sortOrder } : {}),
         },
       })
+      if (!updated.count) throw new Error("Leave group not found.")
 
       if (parsed.data.leaveDefinitionIds) {
-        await replaceGroupLeaves(tx, id, parsed.data.leaveDefinitionIds)
+        await replaceGroupLeaves(tx, id, parsed.data.leaveDefinitionIds, tenantId)
       }
       if (parsed.data.staffIds || parsed.data.assignmentMode) {
         await replaceGroupStaffAssignments(
           tx,
           id,
           assignmentMode,
-          parsed.data.staffIds ?? []
+          parsed.data.staffIds ?? [],
+          tenantId
         )
       }
 
-      return tx.leaveGroup.findUniqueOrThrow({
-        where: { id },
+      return tx.leaveGroup.findFirstOrThrow({
+        where: { id, tenantId },
         select: leaveGroupSelect,
       })
     })
@@ -168,9 +179,13 @@ export async function DELETE(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -178,14 +193,14 @@ export async function DELETE(
 
   try {
     const { id } = await params
-    const exists = await prisma.leaveGroup.findUnique({ where: { id }, select: { id: true } })
+    const exists = await prisma.leaveGroup.findFirst({ where: { id, tenantId }, select: { id: true } })
     if (!exists) {
       const response = NextResponse.json({ error: "Leave group not found." }, { status: 404 })
       logApiRequestSuccess(logContext, 404, { reason: "not_found", itemId: id })
       return withRequestId(response, logContext.requestId)
     }
 
-    await prisma.leaveGroup.delete({ where: { id } })
+    await prisma.leaveGroup.deleteMany({ where: { id, tenantId } })
     const response = NextResponse.json({ ok: true })
     logApiRequestSuccess(logContext, 200, { itemId: id })
     return withRequestId(response, logContext.requestId)

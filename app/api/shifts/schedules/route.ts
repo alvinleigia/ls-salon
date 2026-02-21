@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -14,16 +13,20 @@ import { toISODate } from "@/lib/date"
 import { captureRosterHistoryUpToYesterday } from "@/lib/roster-history"
 import { shiftScheduleSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import type { ListResponse } from "@/types/api"
 
 export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -46,7 +49,7 @@ export async function GET(request: Request) {
     const page = hasPagination ? Math.max(1, pageParam) : 1
     const pageSize = hasPagination ? Math.max(1, pageSizeParam) : undefined
 
-    const where: Prisma.ShiftScheduleWhereInput = {}
+    const where: Prisma.ShiftScheduleWhereInput = { tenantId }
     if (staffId) {
       where.assignments = { some: { staffProfile: { userId: staffId } } }
     }
@@ -121,10 +124,13 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -168,26 +174,42 @@ export async function POST(request: Request) {
     data.weekOffDay2 && (!data.weekOff2Weeks || !data.weekOff2Weeks.length)
       ? [1, 2, 3, 4, 5]
       : data.weekOff2Weeks ?? []
+  const templateIds = [...new Set(data.blocks.map((block) => block.templateId))]
+  if (templateIds.length) {
+    const templateCount = await prisma.shiftTemplate.count({
+      where: { tenantId, id: { in: templateIds } },
+    })
+    if (templateCount !== templateIds.length) {
+      const response = NextResponse.json(
+        { error: "One or more shift templates were not found in this tenant." },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "invalid_template_ids" })
+      return withRequestId(response, logContext.requestId)
+    }
+  }
   const staffIds = Array.from(new Set(data.staffIds.map((value) => value.trim())))
 
   if (data.isDefault) {
     try {
       const [existingDefault, allStaffProfiles] = await Promise.all([
         prisma.shiftSchedule.findFirst({
-          where: { isDefault: true },
+          where: { tenantId, isDefault: true },
           select: { id: true, startDate: true },
         }),
-        prisma.staffProfile.findMany({ select: { id: true } }),
+        prisma.staffProfile.findMany({ where: { user: { tenantId } }, select: { id: true } }),
       ])
       if (existingDefault && allStaffProfiles.length) {
         await captureRosterHistoryUpToYesterday(prisma, {
           staffProfileIds: allStaffProfiles.map((item) => item.id),
           startDate: toISODate(existingDefault.startDate),
+          tenantId,
         })
       }
-      await prisma.shiftSchedule.updateMany({ data: { isDefault: false } })
+      await prisma.shiftSchedule.updateMany({ where: { tenantId }, data: { isDefault: false } })
       const schedule = await prisma.shiftSchedule.create({
         data: {
+          tenantId,
           name: data.name?.trim() || null,
           isDefault: true,
           startDate: new Date(data.startDate),
@@ -232,7 +254,7 @@ export async function POST(request: Request) {
   }
 
   const staffProfiles = await prisma.staffProfile.findMany({
-    where: { userId: { in: staffIds } },
+    where: { userId: { in: staffIds }, user: { tenantId } },
     select: { id: true, userId: true },
   })
 
@@ -241,7 +263,7 @@ export async function POST(request: Request) {
 
   if (missingStaffIds.length) {
     const staffUsers = await prisma.user.findMany({
-      where: { id: { in: missingStaffIds }, role: "STAFF" },
+      where: { id: { in: missingStaffIds }, role: "STAFF", tenantId },
       select: { id: true },
     })
     if (staffUsers.length) {
@@ -275,9 +297,10 @@ export async function POST(request: Request) {
   const assignmentEnd = data.assignmentEndDate ? new Date(data.assignmentEndDate) : null
 
   const existingAssignments = await prisma.staffScheduleAssignment.findMany({
-    where: {
-      staffProfileId: { in: finalStaffProfiles.map((profile) => profile.id) },
-      ...(assignmentEnd
+      where: {
+        staffProfileId: { in: finalStaffProfiles.map((profile) => profile.id) },
+        schedule: { tenantId },
+        ...(assignmentEnd
         ? { startDate: { lte: assignmentEnd } }
         : {}),
       OR: [{ endDate: null }, { endDate: { gte: assignmentStart } }],
@@ -296,6 +319,7 @@ export async function POST(request: Request) {
 
   const schedule = await prisma.shiftSchedule.create({
     data: {
+      tenantId,
       name: data.name?.trim() || null,
       isDefault: false,
       startDate: new Date(data.startDate),

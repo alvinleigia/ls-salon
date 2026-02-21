@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -12,6 +11,7 @@ import {
 } from "@/lib/api-logging"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import type { ListResponse } from "@/types/api"
 import type {
   CouponUsageReportRow,
@@ -29,21 +29,24 @@ const querySchema = z.object({
   dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 })
 
-const ensureAuthorized = async () => {
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+const ensureAuthorized = async (request: Request) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    return { error: tenantSession.error }
   }
-  return null
+  if (!canManageUsers(tenantSession.context.role as Role)) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
+  }
+  return { context: tenantSession.context }
 }
 
-const buildCustomerWhere = (q?: string): Prisma.UserWhereInput => {
+const buildCustomerWhere = (tenantId: string, q?: string): Prisma.UserWhereInput => {
   if (!q) {
-    return { role: "CUSTOMER" }
+    return { role: "CUSTOMER", tenantId }
   }
   return {
     role: "CUSTOMER",
+    tenantId,
     OR: [
       { name: { contains: q, mode: "insensitive" } },
       { email: { contains: q, mode: "insensitive" } },
@@ -53,6 +56,7 @@ const buildCustomerWhere = (q?: string): Prisma.UserWhereInput => {
 }
 
 const buildQualifyingOrderWhere = (
+  tenantId: string,
   couponCode?: string,
   dateFrom?: string,
   dateTo?: string
@@ -68,6 +72,7 @@ const buildQualifyingOrderWhere = (
   const normalizedCouponCode = couponCode?.trim().toUpperCase()
 
   return {
+    tenantId,
     status: { not: "CANCELED" },
     ...(dateFrom || dateTo ? { createdAt } : {}),
     coupons: normalizedCouponCode
@@ -108,11 +113,12 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   const url = new URL(request.url)
   const parsed = querySchema.safeParse(Object.fromEntries(url.searchParams.entries()))
@@ -136,8 +142,13 @@ export async function GET(request: Request) {
       return withRequestId(response, logContext.requestId)
     }
 
-    const customerWhere = buildCustomerWhere(q)
-    const qualifyingOrderWhere = buildQualifyingOrderWhere(couponCode, dateFrom, dateTo)
+    const customerWhere = buildCustomerWhere(tenantId, q)
+    const qualifyingOrderWhere = buildQualifyingOrderWhere(
+      tenantId,
+      couponCode,
+      dateFrom,
+      dateTo
+    )
     const usageFilterKey = status === "used" ? "some" : "none"
     const usageCustomerWhere: Prisma.UserWhereInput = {
       ...customerWhere,
@@ -172,6 +183,7 @@ export async function GET(request: Request) {
         where: {
           ...(couponCode ? { code: couponCode.trim().toUpperCase() } : {}),
           order: {
+            tenantId,
             status: { not: "CANCELED" },
             customer: customerWhere,
             ...(dateFrom || dateTo
@@ -196,6 +208,7 @@ export async function GET(request: Request) {
       where: {
         ...(couponCode ? { code: couponCode.trim().toUpperCase() } : {}),
         order: {
+          tenantId,
           customerId: { in: customers.map((customer) => customer.id) },
           status: { not: "CANCELED" },
           ...(dateFrom || dateTo

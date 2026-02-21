@@ -2,9 +2,7 @@ import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
-  type ApiLogContext,
   createApiLogContext,
   logApiRequestError,
   logApiRequestStart,
@@ -13,6 +11,7 @@ import {
 } from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import { couponCreateSchema } from "@/lib/validation"
 import type { ListResponse } from "@/types/api"
 import type { CouponRow } from "@/types/appointments"
@@ -27,15 +26,15 @@ const listSchema = z.object({
     .transform((value) => (value === undefined ? undefined : value === "true")),
 })
 
-const ensureAuthorized = async (logContext: ApiLogContext) => {
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
-    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(response, logContext.requestId)
+const ensureAuthorized = async (request: Request) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    return { error: tenantSession.error }
   }
-  return null
+  if (!canManageUsers(tenantSession.context.role as Role)) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
+  }
+  return { context: tenantSession.context }
 }
 
 const serializeCoupon = (coupon: {
@@ -83,8 +82,12 @@ const serializeCoupon = (coupon: {
 export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
-  const unauthorized = await ensureAuthorized(logContext)
-  if (unauthorized) return unauthorized
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
+  }
+  const { tenantId } = authorized.context
 
   try {
     const url = new URL(request.url)
@@ -99,7 +102,7 @@ export async function GET(request: Request) {
     }
 
   const { page, pageSize, q, active } = parsed.data
-  const where: Prisma.CouponWhereInput = {}
+  const where: Prisma.CouponWhereInput = { tenantId }
   if (q) {
     where.OR = [
       { code: { contains: q, mode: "insensitive" } },
@@ -142,8 +145,12 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
-  const unauthorized = await ensureAuthorized(logContext)
-  if (unauthorized) return unauthorized
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
+  }
+  const { tenantId } = authorized.context
 
   try {
     const payload = await request.json()
@@ -169,6 +176,7 @@ export async function POST(request: Request) {
 
   const coupon = await prisma.coupon.create({
     data: {
+      tenantId,
       code,
       name: data.name?.trim() || null,
       discountType: data.discountType,
@@ -191,6 +199,11 @@ export async function POST(request: Request) {
     logApiRequestSuccess(logContext, 201, { couponId: coupon.id, code: coupon.code })
     return withRequestId(response, logContext.requestId)
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const response = NextResponse.json({ error: "Coupon code already exists." }, { status: 409 })
+      logApiRequestSuccess(logContext, 409, { reason: "code_conflict" })
+      return withRequestId(response, logContext.requestId)
+    }
     logApiRequestError(logContext, error, 500)
     const response = NextResponse.json({ error: "Unable to create coupon." }, { status: 500 })
     return withRequestId(response, logContext.requestId)

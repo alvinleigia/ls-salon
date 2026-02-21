@@ -73,13 +73,14 @@ export const applyStockDelta = async (params: {
   tx: Prisma.TransactionClient
   deltaByProduct: Map<string, number>
   orderId: string
+  tenantId: string
 }) => {
-  const { tx, deltaByProduct, orderId } = params
+  const { tx, deltaByProduct, orderId, tenantId } = params
   if (!deltaByProduct.size) return
 
   const productIds = [...deltaByProduct.keys()]
   const products = await tx.inventoryProduct.findMany({
-    where: { id: { in: productIds } },
+    where: { tenantId, id: { in: productIds } },
     select: { id: true, name: true, onHandQty: true },
   })
   const productMap = new Map(products.map((product) => [product.id, product]))
@@ -99,8 +100,8 @@ export const applyStockDelta = async (params: {
 
   await Promise.all(
     productIds.map((productId) =>
-      tx.inventoryProduct.update({
-        where: { id: productId },
+      tx.inventoryProduct.updateMany({
+        where: { id: productId, tenantId },
         data: {
           onHandQty: { increment: deltaByProduct.get(productId) ?? 0 },
         },
@@ -114,6 +115,7 @@ export const applyStockDelta = async (params: {
         const delta = deltaByProduct.get(productId) ?? 0
         if (delta === 0) return null
         return {
+          tenantId,
           productId,
           type:
             delta < 0

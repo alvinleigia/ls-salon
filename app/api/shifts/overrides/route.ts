@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 
 import { AppointmentStatus } from "@prisma/client"
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -16,6 +15,7 @@ import {
 } from "@/lib/roster-history"
 import { shiftOverrideSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 const toISODate = (value: Date) => value.toISOString().slice(0, 10)
 const parseTimeToMinutes = (value: string) => {
@@ -67,10 +67,13 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -93,8 +96,8 @@ export async function GET(request: Request) {
     : []
 
   const staffProfiles = staffIds.length
-    ? await prisma.staffProfile.findMany({
-        where: { userId: { in: staffIds } },
+      ? await prisma.staffProfile.findMany({
+        where: { userId: { in: staffIds }, user: { tenantId } },
         select: { id: true, userId: true },
       })
     : []
@@ -139,10 +142,13 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -174,7 +180,7 @@ export async function POST(request: Request) {
   }
 
   const staffProfile = await prisma.staffProfile.findFirst({
-    where: { userId: data.staffId },
+    where: { userId: data.staffId, user: { tenantId } },
     select: { id: true },
   })
 
@@ -186,7 +192,7 @@ export async function POST(request: Request) {
 
   const [defaultSchedule, assignments, settings] = await Promise.all([
     prisma.shiftSchedule.findFirst({
-      where: { isDefault: true },
+      where: { tenantId, isDefault: true },
       select: {
         startDate: true,
         weekOffDay1: true,
@@ -197,6 +203,7 @@ export async function POST(request: Request) {
     prisma.staffScheduleAssignment.findMany({
       where: {
         staffProfileId: staffProfile.id,
+        schedule: { tenantId },
         startDate: { lte: end },
         OR: [{ endDate: null }, { endDate: { gte: start } }],
       },
@@ -213,15 +220,16 @@ export async function POST(request: Request) {
       orderBy: { startDate: "desc" },
     }),
     prisma.appSetting.findUnique({
-      where: { id: "global" },
+      where: { tenantId },
       select: { timeZone: true },
     }),
   ])
   const timeZone = settings?.timeZone ?? "UTC"
 
   const holidayOverrides = data.skipHolidays
-    ? await prisma.appSettingOverride.findMany({
+      ? await prisma.appSettingOverride.findMany({
         where: {
+          setting: { tenantId },
           isOpen: false,
           date: {
             gte: new Date(data.startDate),
@@ -276,8 +284,8 @@ export async function POST(request: Request) {
   const template = data.isUnavailable
     ? null
     : data.templateId
-      ? await prisma.shiftTemplate.findUnique({
-          where: { id: data.templateId },
+      ? await prisma.shiftTemplate.findFirst({
+          where: { id: data.templateId, tenantId },
           include: { breaks: { orderBy: { sortOrder: "asc" } } },
         })
       : null
@@ -290,6 +298,7 @@ export async function POST(request: Request) {
   const appointments = await prisma.appointment.findMany({
     where: {
       staffProfileId: staffProfile.id,
+      tenantId,
       status: {
         in: [
           AppointmentStatus.SCHEDULED,
@@ -410,6 +419,7 @@ export async function POST(request: Request) {
       startDate: normalizedPastRange.startDate,
       endDate: normalizedPastRange.endDate,
       mode: "replace",
+      tenantId,
     })
   }
 
@@ -422,10 +432,13 @@ export async function DELETE(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -459,7 +472,7 @@ export async function DELETE(request: Request) {
   }
 
   const staffProfile = await prisma.staffProfile.findFirst({
-    where: { userId: staffId },
+    where: { userId: staffId, user: { tenantId } },
     select: { id: true },
   })
 
@@ -486,6 +499,7 @@ export async function DELETE(request: Request) {
       startDate: normalizedPastRange.startDate,
       endDate: normalizedPastRange.endDate,
       mode: "replace",
+      tenantId,
     })
   }
 

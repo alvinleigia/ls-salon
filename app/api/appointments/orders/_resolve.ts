@@ -56,6 +56,7 @@ type ResolvedOrderTax = {
 type ResolveOrderOptions = {
   enforceFutureStartAt?: boolean
   existingOrderId?: string
+  tenantId?: string
 }
 
 const sumPercent = (values: number[]) =>
@@ -156,6 +157,11 @@ export const resolveOrderData = async (
   input: AppointmentOrderCreateInput,
   options: ResolveOrderOptions = {}
 ) => {
+  const tenantId = options.tenantId
+  if (!tenantId) {
+    throw new Error("Tenant context is required for order resolution.")
+  }
+
   const appointmentStartAt = new Date(input.appointmentStartAt)
   if (Number.isNaN(appointmentStartAt.getTime())) {
     throw new Error("Invalid appointment start date/time.")
@@ -181,6 +187,7 @@ export const resolveOrderData = async (
       }),
       prisma.service.findMany({
         where: {
+          tenantId,
           id: { in: [...new Set(input.lines.map((line) => line.serviceId))] },
         },
         select: {
@@ -196,6 +203,7 @@ export const resolveOrderData = async (
       (input.productLines?.length ?? 0) > 0
         ? prisma.inventoryProduct.findMany({
             where: {
+              tenantId,
               id: { in: [...new Set((input.productLines ?? []).map((line) => line.productId))] },
             },
             select: {
@@ -210,6 +218,7 @@ export const resolveOrderData = async (
       prisma.staffProfile.findMany({
         where: {
           userId: { in: [...new Set(input.lines.map((line) => line.staffId))] },
+          user: { tenantId },
         },
         select: {
           id: true,
@@ -220,6 +229,7 @@ export const resolveOrderData = async (
       normalizedCouponCodes.length
         ? prisma.coupon.findMany({
             where: {
+              tenantId,
               code: { in: normalizedCouponCodes },
               isActive: true,
               OR: [{ validFrom: null }, { validFrom: { lte: appointmentDate } }],
@@ -244,6 +254,7 @@ export const resolveOrderData = async (
             where: {
               code: { in: normalizedCouponCodes },
               order: {
+                tenantId,
                 customerId: input.customerId,
                 status: { not: "CANCELED" },
                 ...(options.existingOrderId ? { id: { not: options.existingOrderId } } : {}),
@@ -254,13 +265,17 @@ export const resolveOrderData = async (
         : Promise.resolve([]),
       normalizedTaxIds.length
         ? prisma.tax.findMany({
-            where: { id: { in: normalizedTaxIds }, isActive: true },
+            where: { tenantId, id: { in: normalizedTaxIds }, isActive: true },
             select: { id: true, name: true, percent: true },
           })
         : Promise.resolve([]),
     ])
+  const customerTenant = await prisma.user.findFirst({
+    where: { id: input.customerId, tenantId },
+    select: { id: true },
+  })
 
-  if (!customer || customer.role !== "CUSTOMER") {
+  if (!customer || !customerTenant || customer.role !== "CUSTOMER") {
     throw new Error("Selected customer is invalid.")
   }
   if (customer.status !== "ACTIVE") {

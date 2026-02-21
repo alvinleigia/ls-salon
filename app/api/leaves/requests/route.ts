@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -13,6 +12,7 @@ import {
 import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import type { Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import { createLeaveRequestSchema } from "@/lib/validation"
 import type { ListResponse } from "@/types/api"
 import type { LeaveRequestRow } from "@/types/leaves"
@@ -46,13 +46,18 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role as Role | undefined
-  const sessionUserId = (session?.user as { id?: string })?.id
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId } = tenantSession.context
+  const role = tenantSession.context.role as Role | undefined
+  const sessionUserId = tenantSession.context.sessionUserId
   const isAdmin = role === "ADMIN"
   const isManager = role === "MANAGER"
   const isStaff = role === "STAFF"
-  if (!session?.user || (!isAdmin && !isManager && !isStaff)) {
+  if (!isAdmin && !isManager && !isStaff) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -76,8 +81,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    let actorStaffProfile = await prisma.staffProfile.findUnique({
-      where: { userId: sessionUserId },
+    let actorStaffProfile = await prisma.staffProfile.findFirst({
+      where: { userId: sessionUserId, user: { tenantId } },
       select: { id: true },
     })
     if ((isStaff || isManager) && !actorStaffProfile) {
@@ -106,8 +111,8 @@ export async function GET(request: Request) {
       }
       staffProfileFilterId = actorStaffProfile.id
     } else if (staffUserId) {
-      const selectedStaffProfile = await prisma.staffProfile.findUnique({
-        where: { userId: staffUserId },
+      const selectedStaffProfile = await prisma.staffProfile.findFirst({
+        where: { userId: staffUserId, user: { tenantId } },
         select: { id: true },
       })
       if (!selectedStaffProfile) {
@@ -119,6 +124,7 @@ export async function GET(request: Request) {
     }
 
     const where: Prisma.LeaveRequestWhereInput = {
+      tenantId,
       ...(isManager && !mineOnly
         ? {
             staffProfile: {
@@ -175,12 +181,17 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role as Role | undefined
-  const sessionUserId = (session?.user as { id?: string })?.id
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId } = tenantSession.context
+  const role = tenantSession.context.role as Role | undefined
+  const sessionUserId = tenantSession.context.sessionUserId
   const isManager = role === "MANAGER"
   const isStaff = role === "STAFF"
-  if (!session?.user || (!isManager && !isStaff)) {
+  if (!isManager && !isStaff) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -191,8 +202,8 @@ export async function POST(request: Request) {
     return withRequestId(response, logContext.requestId)
   }
 
-  const staffProfile = await prisma.staffProfile.findUnique({
-    where: { userId: sessionUserId },
+  const staffProfile = await prisma.staffProfile.findFirst({
+    where: { userId: sessionUserId, user: { tenantId } },
     select: { id: true },
   })
   const resolvedStaffProfile =
@@ -222,6 +233,7 @@ export async function POST(request: Request) {
     const item = await prisma.$transaction(async (tx) => {
       const validated = await validateCreateLeaveRequestRules({
         tx,
+        tenantId,
         staffProfileId: resolvedStaffProfile.id,
         leaveDefinitionId: parsed.data.leaveDefinitionId,
         startDate: parsed.data.startDate,
@@ -230,6 +242,7 @@ export async function POST(request: Request) {
 
       const created = await tx.leaveRequest.create({
         data: {
+          tenantId,
           staffProfileId: resolvedStaffProfile.id,
           leaveDefinitionId: parsed.data.leaveDefinitionId,
           startDate: validated.startDate,
@@ -240,8 +253,8 @@ export async function POST(request: Request) {
         },
       })
 
-      return tx.leaveRequest.findUniqueOrThrow({
-        where: { id: created.id },
+      return tx.leaveRequest.findFirstOrThrow({
+        where: { id: created.id, tenantId },
         select: leaveRequestSelect,
       })
     })

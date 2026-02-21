@@ -12,13 +12,9 @@ import { prisma } from "@/lib/prisma"
 import { forgotPasswordSchema } from "@/lib/validation"
 import { mailer, mailFrom } from "@/lib/mailer"
 import { resetPasswordEmail } from "@/lib/emails/reset-password"
+import { resolveTenantFromRequest } from "@/lib/tenancy"
 
 export const runtime = "nodejs"
-
-const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ||
-  process.env.APP_URL ||
-  "http://localhost:3000"
 
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000
 const RATE_LIMIT_MAX = 5
@@ -59,6 +55,13 @@ export async function POST(request: Request) {
   }
 
   try {
+    const tenant = await resolveTenantFromRequest(request)
+    if (!tenant) {
+      const response = NextResponse.json({ error: "Tenant not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "tenant_not_found" })
+      return withRequestId(response, logContext.requestId)
+    }
+
     const { email } = parsed.data
     const ip = getClientIp(request)
     const rateKey = `${ip}:${email.toLowerCase()}`
@@ -71,7 +74,7 @@ export async function POST(request: Request) {
       return withRequestId(response, logContext.requestId)
     }
 
-    const user = await prisma.user.findUnique({ where: { email } })
+    const user = await prisma.user.findFirst({ where: { email, tenantId: tenant.id } })
     if (!user) {
       const response = NextResponse.json({ ok: true })
       logApiRequestSuccess(logContext, 200, { result: "masked_user_not_found" })
@@ -100,7 +103,7 @@ export async function POST(request: Request) {
       },
     })
 
-    const resetUrl = `${APP_URL}/auth/reset-password?token=${rawToken}`
+    const resetUrl = new URL(`/auth/reset-password?token=${rawToken}`, request.url).toString()
     const emailTemplate = resetPasswordEmail({ resetUrl })
 
     await mailer.sendMail({

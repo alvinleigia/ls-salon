@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -14,8 +13,8 @@ import { appSettingsSchema } from "@/lib/validation"
 import { toISODate } from "@/lib/date"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { getEmailDeliveryStatus } from "@/lib/mailer"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
-const SETTINGS_ID = "global"
 const DEFAULT_PERIOD = {
   kind: "WORK" as const,
   startTime: "09:00",
@@ -141,26 +140,30 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
   }
 
   try {
-    const settings = await prisma.appSetting.findUnique({
-      where: { id: SETTINGS_ID },
+    const settings = await prisma.appSetting.findFirst({
+      where: { tenantId },
       include: includeWorkingHours,
     })
 
     if (settings) {
       if (settings.workingDays.length === 0) {
-        await seedWorkingHours(SETTINGS_ID)
-        const seeded = await prisma.appSetting.findUnique({
-          where: { id: SETTINGS_ID },
+        await seedWorkingHours(settings.id)
+        const seeded = await prisma.appSetting.findFirst({
+          where: { tenantId },
           include: includeWorkingHours,
         })
         if (seeded) {
@@ -187,12 +190,12 @@ export async function GET(request: Request) {
     }
 
     const created = await prisma.appSetting.create({
-      data: { id: SETTINGS_ID },
+      data: { tenantId },
     })
 
-    await seedWorkingHours(SETTINGS_ID)
-    const seeded = await prisma.appSetting.findUnique({
-      where: { id: SETTINGS_ID },
+    await seedWorkingHours(created.id)
+    const seeded = await prisma.appSetting.findFirst({
+      where: { tenantId },
       include: includeWorkingHours,
     })
 
@@ -222,10 +225,14 @@ export async function PATCH(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -251,20 +258,33 @@ export async function PATCH(request: Request) {
   try {
     const { workingHours, overrides, ...baseSettings } = parsed.data
 
-    await prisma.appSetting.upsert({
-      where: { id: SETTINGS_ID },
-      update: baseSettings,
-      create: { id: SETTINGS_ID, ...baseSettings },
+    const existingSettings = await prisma.appSetting.findFirst({
+      where: { tenantId },
+      select: { id: true },
     })
+    const settingId = existingSettings?.id ??
+      (
+        await prisma.appSetting.create({
+          data: { tenantId, ...baseSettings },
+          select: { id: true },
+        })
+      ).id
+
+    if (existingSettings?.id) {
+      await prisma.appSetting.update({
+        where: { id: existingSettings.id },
+        data: baseSettings,
+      })
+    }
 
     if (workingHours) {
       await prisma.$transaction(async (tx) => {
         for (const day of workingHours) {
           const dayRecord = await tx.appSettingDay.upsert({
-            where: { settingId_day: { settingId: SETTINGS_ID, day: day.day } },
+            where: { settingId_day: { settingId, day: day.day } },
             update: { isOpen: day.isOpen },
             create: {
-              settingId: SETTINGS_ID,
+              settingId,
               day: day.day,
               isOpen: day.isOpen,
             },
@@ -288,7 +308,7 @@ export async function PATCH(request: Request) {
     if (overrides) {
       await prisma.$transaction(async (tx) => {
         const existing = await tx.appSettingOverride.findMany({
-          where: { settingId: SETTINGS_ID },
+          where: { settingId },
           select: { id: true, date: true },
         })
         const nextDates = new Set(
@@ -310,11 +330,11 @@ export async function PATCH(request: Request) {
           const overrideDate = new Date(override.date)
           const overrideRecord = await tx.appSettingOverride.upsert({
             where: {
-              settingId_date: { settingId: SETTINGS_ID, date: overrideDate },
+              settingId_date: { settingId, date: overrideDate },
             },
             update: { isOpen: override.isOpen },
             create: {
-              settingId: SETTINGS_ID,
+              settingId,
               date: overrideDate,
               isOpen: override.isOpen,
             },
@@ -337,8 +357,8 @@ export async function PATCH(request: Request) {
       })
     }
 
-    const settings = await prisma.appSetting.findUnique({
-      where: { id: SETTINGS_ID },
+    const settings = await prisma.appSetting.findFirst({
+      where: { tenantId },
       include: includeWorkingHours,
     })
 

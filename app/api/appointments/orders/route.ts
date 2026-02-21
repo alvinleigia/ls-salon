@@ -2,7 +2,6 @@ import { AppointmentStatus, Prisma } from "@prisma/client"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -15,6 +14,7 @@ import {
   appointmentOrderCreateSchema,
 } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import type { ListResponse } from "@/types/api"
 import type { AppointmentOrderRow } from "@/types/appointments"
 import {
@@ -39,24 +39,27 @@ const listSchema = z.object({
   customerId: z.string().trim().optional(),
 })
 
-const ensureAuthorized = async () => {
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+const ensureAuthorized = async (request: Request) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    return { error: tenantSession.error }
   }
-  return null
+  if (!canManageUsers(tenantSession.context.role as Role)) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
+  }
+  return { context: tenantSession.context }
 }
 
 export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   const url = new URL(request.url)
   const parsed = listSchema.safeParse(Object.fromEntries(url.searchParams.entries()))
@@ -71,7 +74,7 @@ export async function GET(request: Request) {
 
   try {
     const { page, pageSize, status, customerId } = parsed.data
-    const where: Prisma.AppointmentOrderWhereInput = {}
+    const where: Prisma.AppointmentOrderWhereInput = { tenantId }
     if (status) where.status = status
     if (customerId) where.customerId = customerId
 
@@ -109,11 +112,12 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   const payload = await request.json()
   const parsed = appointmentOrderCreateSchema.safeParse(payload)
@@ -127,7 +131,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const resolved = await resolveOrderData(parsed.data, { enforceFutureStartAt: true })
+    const resolved = await resolveOrderData(parsed.data, {
+      enforceFutureStartAt: true,
+      tenantId,
+    })
     const scheduledLines =
       resolved.status === "CONFIRMED"
         ? await scheduleConfirmedOrderLines(resolved.lines, resolved.customerId)
@@ -136,6 +143,7 @@ export async function POST(request: Request) {
     const order = await prisma.$transaction(async (tx) => {
       const created = await tx.appointmentOrder.create({
         data: {
+          tenantId,
           customerId: resolved.customerId,
           appointmentDate: resolved.appointmentDate,
           appointmentStartAt: resolved.appointmentStartAt,
@@ -215,6 +223,7 @@ export async function POST(request: Request) {
               const createdLine = createdLineBySortOrder.get(line.sortOrder)
               if (!createdLine) return []
               return [{
+                tenantId,
                 staffProfileId: line.staffProfileId,
                 customerId: created.customerId,
                 serviceId: line.serviceId,
@@ -240,6 +249,7 @@ export async function POST(request: Request) {
         tx,
         deltaByProduct: stockDelta,
         orderId: created.id,
+        tenantId,
       })
 
       return created

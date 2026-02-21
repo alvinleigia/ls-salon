@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { AppointmentStatus, Prisma } from "@prisma/client"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -14,6 +13,7 @@ import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import { prisma } from "@/lib/prisma"
 import { appointmentCreateSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import type { ListResponse } from "@/types/api"
 import type { AppointmentRow } from "@/types/appointments"
 import { checkStaffAppointmentAvailability } from "./_availability"
@@ -60,10 +60,14 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -84,7 +88,7 @@ export async function GET(request: Request) {
   const { page, pageSize, q, staffId, customerId, status, startDate, endDate, sort, order } =
     parsed.data
 
-  const where: Prisma.AppointmentWhereInput = {}
+  const where: Prisma.AppointmentWhereInput = { tenantId }
 
   if (staffId) {
     where.staffProfile = { userId: staffId }
@@ -182,11 +186,14 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  const sessionUserId = (session?.user as { id?: string })?.id
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role, sessionUserId } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -218,16 +225,16 @@ export async function POST(request: Request) {
     }
 
   const [customer, service, staffProfile] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: data.customerId },
+    prisma.user.findFirst({
+      where: { id: data.customerId, tenantId },
       select: { id: true, role: true, status: true, name: true, email: true },
     }),
-    prisma.service.findUnique({
-      where: { id: data.serviceId },
+    prisma.service.findFirst({
+      where: { id: data.serviceId, tenantId },
       select: { id: true, name: true, durationMinutes: true, status: true },
     }),
     prisma.staffProfile.findFirst({
-      where: { userId: data.staffId, user: { role: "STAFF" } },
+      where: { userId: data.staffId, user: { role: "STAFF", tenantId } },
       select: { id: true, user: { select: { id: true, name: true, email: true, status: true } } },
     }),
   ])
@@ -273,7 +280,12 @@ export async function POST(request: Request) {
   const endAt = new Date(startAt)
   endAt.setMinutes(endAt.getMinutes() + service.durationMinutes)
 
-  const availability = await checkStaffAppointmentAvailability(staffProfile.id, startAt, endAt)
+  const availability = await checkStaffAppointmentAvailability(
+    staffProfile.id,
+    startAt,
+    endAt,
+    tenantId
+  )
   if (!availability.ok) {
     const response = NextResponse.json({ error: availability.reason }, { status: 409 })
     logApiRequestSuccess(logContext, 409, { reason: "staff_unavailable" })
@@ -284,6 +296,7 @@ export async function POST(request: Request) {
     prisma.appointment.findFirst({
       where: {
         staffProfileId: staffProfile.id,
+        tenantId,
         status: { in: ACTIVE_APPOINTMENT_STATUSES },
         startAt: { lt: endAt },
         endAt: { gt: startAt },
@@ -293,6 +306,7 @@ export async function POST(request: Request) {
     prisma.appointment.findFirst({
       where: {
         customerId: customer.id,
+        tenantId,
         status: { in: ACTIVE_APPOINTMENT_STATUSES },
         startAt: { lt: endAt },
         endAt: { gt: startAt },
@@ -321,6 +335,7 @@ export async function POST(request: Request) {
   const appointment = await prisma.appointment.create({
     data: {
       customerId: customer.id,
+      tenantId,
       serviceId: service.id,
       staffProfileId: staffProfile.id,
       startAt,

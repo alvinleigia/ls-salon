@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -12,6 +11,7 @@ import {
 } from "@/lib/api-logging"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import type { ListResponse } from "@/types/api"
 import type { AuditLogReportRow } from "@/types/reports"
 
@@ -53,13 +53,17 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  if (!canManageUsers(tenantSession.context.role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
   }
+  const { tenantId } = tenantSession.context
 
   try {
     const parsed = querySchema.safeParse(
@@ -78,6 +82,7 @@ export async function GET(request: Request) {
       parsed.data
 
     const where: Prisma.AuditLogWhereInput = {
+      tenantId,
       ...(event ? { event: { contains: event, mode: Prisma.QueryMode.insensitive } } : {}),
       ...(entityType ? { entityType: { contains: entityType, mode: Prisma.QueryMode.insensitive } } : {}),
       ...(actorUserId ? { actorUserId } : {}),

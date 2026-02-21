@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { AppointmentStatus } from "@prisma/client"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -13,6 +12,7 @@ import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import { appointmentUpdateSchema } from "@/lib/validation"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import type { AppointmentRow } from "@/types/appointments"
 import { checkStaffAppointmentAvailability } from "../_availability"
 
@@ -63,11 +63,14 @@ export async function GET(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  const sessionUserId = (session?.user as { id?: string })?.id
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -75,8 +78,8 @@ export async function GET(
 
   try {
     const { id } = await params
-    const appointment = await prisma.appointment.findUnique({
-      where: { id },
+    const appointment = await prisma.appointment.findFirst({
+      where: { id, tenantId },
       include: appointmentInclude,
     })
 
@@ -103,11 +106,14 @@ export async function PATCH(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  const sessionUserId = (session?.user as { id?: string })?.id
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role, sessionUserId } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -127,8 +133,8 @@ export async function PATCH(
     }
 
     const data = parsed.data
-    const current = await prisma.appointment.findUnique({
-      where: { id },
+    const current = await prisma.appointment.findFirst({
+      where: { id, tenantId },
       include: { service: { select: { id: true, durationMinutes: true, priceCents: true } } },
     })
 
@@ -140,20 +146,20 @@ export async function PATCH(
 
     const [customer, service, staffProfile] = await Promise.all([
       data.customerId
-        ? prisma.user.findUnique({
-            where: { id: data.customerId },
+        ? prisma.user.findFirst({
+            where: { id: data.customerId, tenantId },
             select: { id: true, role: true, status: true },
           })
         : Promise.resolve(null),
       data.serviceId
-        ? prisma.service.findUnique({
-            where: { id: data.serviceId },
+        ? prisma.service.findFirst({
+            where: { id: data.serviceId, tenantId },
             select: { id: true, status: true, durationMinutes: true },
           })
         : Promise.resolve(null),
       data.staffId
         ? prisma.staffProfile.findFirst({
-            where: { userId: data.staffId, user: { role: "STAFF" } },
+            where: { userId: data.staffId, user: { role: "STAFF", tenantId } },
             select: { id: true, user: { select: { id: true, status: true } } },
           })
         : Promise.resolve(null),
@@ -231,7 +237,8 @@ export async function PATCH(
       const availability = await checkStaffAppointmentAvailability(
         nextStaffProfileId,
         nextStartAt,
-        nextEndAt
+        nextEndAt,
+        tenantId
       )
       if (!availability.ok) {
         const response = NextResponse.json({ error: availability.reason }, { status: 409 })
@@ -243,6 +250,7 @@ export async function PATCH(
         prisma.appointment.findFirst({
           where: {
             id: { not: current.id },
+            tenantId,
             staffProfileId: nextStaffProfileId,
             status: { in: ACTIVE_APPOINTMENT_STATUSES },
             startAt: { lt: nextEndAt },
@@ -253,6 +261,7 @@ export async function PATCH(
         prisma.appointment.findFirst({
           where: {
             id: { not: current.id },
+            tenantId,
             customerId: nextCustomerId,
             status: { in: ACTIVE_APPOINTMENT_STATUSES },
             startAt: { lt: nextEndAt },
@@ -280,8 +289,8 @@ export async function PATCH(
       }
     }
 
-    const appointment = await prisma.appointment.update({
-      where: { id },
+    const appointment = await prisma.appointment.updateManyAndReturn({
+      where: { id, tenantId },
       data: {
         ...(customer ? { customerId: customer.id } : {}),
         ...(service ? { serviceId: service.id } : {}),
@@ -291,10 +300,16 @@ export async function PATCH(
       },
       include: appointmentInclude,
     })
+    const updatedAppointment = appointment[0]
+    if (!updatedAppointment) {
+      const response = NextResponse.json({ error: "Appointment not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found", appointmentId: id })
+      return withRequestId(response, logContext.requestId)
+    }
     await recordDomainAuditEventSafe(prisma, {
       event: "appointment.updated",
       entityType: "Appointment",
-      entityId: appointment.id,
+      entityId: updatedAppointment.id,
       actorUserId: sessionUserId ?? null,
       actorRole: role ?? null,
       requestId: logContext.requestId,
@@ -307,16 +322,16 @@ export async function PATCH(
         staffProfileId: current.staffProfileId,
       },
       after: {
-        status: appointment.status,
-        startAt: appointment.startAt.toISOString(),
-        endAt: appointment.endAt.toISOString(),
-        customerId: appointment.customerId,
-        serviceId: appointment.serviceId,
-        staffProfileId: appointment.staffProfileId,
+        status: updatedAppointment.status,
+        startAt: updatedAppointment.startAt.toISOString(),
+        endAt: updatedAppointment.endAt.toISOString(),
+        customerId: updatedAppointment.customerId,
+        serviceId: updatedAppointment.serviceId,
+        staffProfileId: updatedAppointment.staffProfileId,
       },
     })
 
-    const response = NextResponse.json({ appointment: serializeAppointment(appointment) })
+    const response = NextResponse.json({ appointment: serializeAppointment(updatedAppointment) })
     logApiRequestSuccess(logContext, 200, { appointmentId: id })
     return withRequestId(response, logContext.requestId)
   } catch (error) {
@@ -333,11 +348,14 @@ export async function DELETE(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  const sessionUserId = (session?.user as { id?: string })?.id
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role, sessionUserId } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -345,8 +363,8 @@ export async function DELETE(
 
   try {
     const { id } = await params
-    const appointment = await prisma.appointment.findUnique({
-      where: { id },
+    const appointment = await prisma.appointment.findFirst({
+      where: { id, tenantId },
       select: { id: true, status: true },
     })
 
@@ -362,8 +380,8 @@ export async function DELETE(
       return withRequestId(response, logContext.requestId)
     }
 
-    await prisma.appointment.update({
-      where: { id },
+    await prisma.appointment.updateMany({
+      where: { id, tenantId },
       data: { status: AppointmentStatus.CANCELED },
     })
     await recordDomainAuditEventSafe(prisma, {

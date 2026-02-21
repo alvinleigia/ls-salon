@@ -4,7 +4,8 @@ declare module "next-auth" {
   interface Session {
     user: {
       id?: string
-      role?: "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
+      tenantId?: string
+      role?: "OWNER" | "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
       name?: string | null
       email?: string | null
       image?: string | null
@@ -12,6 +13,7 @@ declare module "next-auth" {
   }
 
   interface User {
-    role?: "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
+    tenantId?: string
+    role?: "OWNER" | "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
   }
 }

@@ -5,6 +5,7 @@ type DbClient = PrismaClient | Prisma.TransactionClient
 
 type ValidateCreateLeaveRequestRulesInput = {
   tx: DbClient
+  tenantId?: string
   staffProfileId: string
   leaveDefinitionId: string
   startDate: string
@@ -48,7 +49,7 @@ type LeaveRequestWithRelations = {
       id: string
       name: string | null
       email: string
-      role: "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
+      role: "OWNER" | "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
     }
   }
   reviewedByUser: {
@@ -137,7 +138,8 @@ const isWeekOffForSchedule = (
 const getScheduleForDate = async (
   tx: DbClient,
   staffProfileId: string,
-  date: Date
+  date: Date,
+  tenantId?: string
 ) => {
   const assignment = await tx.staffScheduleAssignment.findFirst({
     where: {
@@ -159,7 +161,7 @@ const getScheduleForDate = async (
   if (assignment?.schedule) return assignment.schedule
 
   const fallback = await tx.shiftSchedule.findFirst({
-    where: { isDefault: true },
+    where: { isDefault: true, ...(tenantId ? { tenantId } : {}) },
     orderBy: [{ updatedAt: "desc" }],
     select: {
       weekOffDay1: true,
@@ -172,6 +174,7 @@ const getScheduleForDate = async (
 
 export const validateCreateLeaveRequestRules = async ({
   tx,
+  tenantId,
   staffProfileId,
   leaveDefinitionId,
   startDate,
@@ -208,6 +211,7 @@ export const validateCreateLeaveRequestRules = async ({
 
   const eligibleGroup = await tx.leaveGroup.findFirst({
     where: {
+      ...(tenantId ? { tenantId } : {}),
       status: "ACTIVE",
       leaves: {
         some: {
@@ -233,7 +237,7 @@ export const validateCreateLeaveRequestRules = async ({
   }
 
   const leaveDefinition = await tx.leaveDefinition.findUnique({
-    where: { id: leaveDefinitionId },
+    where: { id: leaveDefinitionId, ...(tenantId ? { tenantId } : {}) },
     select: {
       id: true,
       allowedUsers: true,
@@ -350,10 +354,11 @@ export const validateCreateLeaveRequestRules = async ({
   const [beforeDate, afterDate] = edgeDates
 
   const [beforeSchedule, afterSchedule, holidayOverrides] = await Promise.all([
-    getScheduleForDate(tx, staffProfileId, beforeDate),
-    getScheduleForDate(tx, staffProfileId, afterDate),
+    getScheduleForDate(tx, staffProfileId, beforeDate, tenantId),
+    getScheduleForDate(tx, staffProfileId, afterDate, tenantId),
     tx.appSettingOverride.findMany({
       where: {
+        ...(tenantId ? { setting: { tenantId } } : {}),
         date: { in: edgeDates },
         isOpen: false,
       },
@@ -440,7 +445,8 @@ type LeaveApprovalConflict = {
 
 export const findLeaveApprovalConflicts = async (
   tx: DbClient,
-  requests: LeaveApprovalConflictInput[]
+  requests: LeaveApprovalConflictInput[],
+  tenantId?: string
 ): Promise<LeaveApprovalConflict[]> => {
   const conflicts: LeaveApprovalConflict[] = []
   for (const request of requests) {
@@ -449,6 +455,7 @@ export const findLeaveApprovalConflicts = async (
     const [conflictCount, conflictingAppointments] = await Promise.all([
       tx.appointment.count({
         where: {
+          ...(tenantId ? { tenantId } : {}),
           staffProfileId: request.staffProfileId,
           status: { in: [...ACTIVE_APPOINTMENT_STATUSES] },
           startAt: { lt: rangeEndExclusive },
@@ -457,6 +464,7 @@ export const findLeaveApprovalConflicts = async (
       }),
       tx.appointment.findMany({
         where: {
+          ...(tenantId ? { tenantId } : {}),
           staffProfileId: request.staffProfileId,
           status: { in: [...ACTIVE_APPOINTMENT_STATUSES] },
           startAt: { lt: rangeEndExclusive },
@@ -589,6 +597,7 @@ export const serializeLeaveRequest = (item: LeaveRequestWithRelations): LeaveReq
 
 type BuildLeaveRequestRuleChecksInput = {
   tx: DbClient
+  tenantId?: string
   staffProfileId: string
   staffGender: "MALE" | "FEMALE" | "NON_BINARY" | "OTHER" | "PREFER_NOT_TO_SAY" | null
   leaveDefinition: {
@@ -612,6 +621,7 @@ const passFail = (passed: boolean): string => (passed ? "Pass" : "Fail")
 
 export const buildLeaveRequestRuleChecks = async ({
   tx,
+  tenantId,
   staffProfileId,
   staffGender,
   leaveDefinition,
@@ -674,10 +684,11 @@ export const buildLeaveRequestRuleChecks = async ({
   const edgeDates = [addDays(startDate, -1), addDays(endDate, 1)]
   const [beforeDate, afterDate] = edgeDates
   const [beforeSchedule, afterSchedule, holidayOverrides] = await Promise.all([
-    getScheduleForDate(tx, staffProfileId, beforeDate),
-    getScheduleForDate(tx, staffProfileId, afterDate),
+    getScheduleForDate(tx, staffProfileId, beforeDate, tenantId),
+    getScheduleForDate(tx, staffProfileId, afterDate, tenantId),
     tx.appSettingOverride.findMany({
       where: {
+        ...(tenantId ? { setting: { tenantId } } : {}),
         date: { in: edgeDates },
         isOpen: false,
       },

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
+import { Prisma } from "@prisma/client"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -10,16 +10,19 @@ import {
 } from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import { taxUpdateSchema } from "@/lib/validation"
 import type { TaxRow } from "@/types/scheduling"
 
-const ensureAuthorized = async () => {
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+const ensureAuthorized = async (request: Request) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    return { error: tenantSession.error }
   }
-  return null
+  if (!canManageUsers(tenantSession.context.role as Role)) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
+  }
+  return { context: tenantSession.context }
 }
 
 const serializeTax = (tax: {
@@ -47,11 +50,12 @@ export async function PATCH(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   const { id } = await params
   const payload = await request.json().catch(() => null)
@@ -72,8 +76,17 @@ export async function PATCH(
 
   try {
     const data = parsed.data
+    const existing = await prisma.tax.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    })
+    if (!existing) {
+      const response = NextResponse.json({ error: "Tax not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found", taxId: id })
+      return withRequestId(response, logContext.requestId)
+    }
     const tax = await prisma.tax.update({
-      where: { id },
+      where: { id: existing.id },
       data: {
         ...(data.name !== undefined ? { name: data.name.trim() } : {}),
         ...(data.percent !== undefined ? { percent: data.percent } : {}),
@@ -86,6 +99,11 @@ export async function PATCH(
     logApiRequestSuccess(logContext, 200, { taxId: id })
     return withRequestId(response, logContext.requestId)
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const response = NextResponse.json({ error: "Tax name already exists." }, { status: 409 })
+      logApiRequestSuccess(logContext, 409, { reason: "name_conflict", taxId: id })
+      return withRequestId(response, logContext.requestId)
+    }
     logApiRequestError(logContext, error, 500, { taxId: id })
     const response = NextResponse.json({ error: "Unable to update tax." }, { status: 500 })
     return withRequestId(response, logContext.requestId)
@@ -99,17 +117,18 @@ export async function DELETE(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   const { id } = await params
 
   try {
     const inUse = await prisma.appointmentOrderTax.findFirst({
-      where: { taxId: id },
+      where: { taxId: id, order: { tenantId } },
       select: { id: true },
     })
     if (inUse) {
@@ -121,7 +140,12 @@ export async function DELETE(
       return withRequestId(response, logContext.requestId)
     }
 
-    await prisma.tax.delete({ where: { id } })
+    const deleted = await prisma.tax.deleteMany({ where: { id, tenantId } })
+    if (deleted.count === 0) {
+      const response = NextResponse.json({ error: "Tax not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found", taxId: id })
+      return withRequestId(response, logContext.requestId)
+    }
     const response = NextResponse.json({ ok: true })
     logApiRequestSuccess(logContext, 200, { taxId: id, result: "deleted" })
     return withRequestId(response, logContext.requestId)

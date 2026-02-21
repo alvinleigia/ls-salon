@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   type ApiLogContext,
   createApiLogContext,
@@ -12,16 +11,21 @@ import {
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import { updateInventoryProductSchema } from "@/lib/validation"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
-const ensureAuthorized = async (logContext: ApiLogContext) => {
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+const ensureAuthorized = async (request: Request, logContext: ApiLogContext) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    const response = tenantSession.error
+    logApiRequestSuccess(logContext, response.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(response, logContext.requestId)
+  }
+  if (!canManageUsers(tenantSession.context.role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
   }
-  return null
+  return tenantSession.context
 }
 
 const serializeProduct = (item: {
@@ -70,8 +74,9 @@ export async function PATCH(
 ) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
-  const unauthorized = await ensureAuthorized(logContext)
-  if (unauthorized) return unauthorized
+  const authorized = await ensureAuthorized(request, logContext)
+  if ("status" in authorized) return authorized
+  const { tenantId } = authorized
 
   try {
     const { id } = await params
@@ -89,7 +94,7 @@ export async function PATCH(
     const data = parsed.data
     if (data.sku?.trim()) {
       const existing = await prisma.inventoryProduct.findUnique({
-        where: { sku: data.sku.trim() },
+        where: { tenantId_sku: { tenantId, sku: data.sku.trim() } },
         select: { id: true },
       })
       if (existing && existing.id !== id) {
@@ -111,9 +116,48 @@ export async function PATCH(
       }
     }
 
+    if (data.categoryId) {
+      const category = await prisma.inventoryCategory.findFirst({
+        where: { id: data.categoryId, tenantId },
+        select: { id: true },
+      })
+      if (!category) {
+        const response = NextResponse.json({ error: "Category not found." }, { status: 404 })
+        logApiRequestSuccess(logContext, 404, { reason: "category_not_found" })
+        return withRequestId(response, logContext.requestId)
+      }
+    }
+    if (data.supplierLinks) {
+      const supplierCount = await prisma.supplier.count({
+        where: { tenantId, id: { in: data.supplierLinks.map((link) => link.supplierId) } },
+      })
+      if (supplierCount !== data.supplierLinks.length) {
+        const response = NextResponse.json(
+          { error: "One or more suppliers do not belong to this tenant." },
+          { status: 400 }
+        )
+        logApiRequestSuccess(logContext, 400, { reason: "supplier_tenant_mismatch" })
+        return withRequestId(response, logContext.requestId)
+      }
+    }
+    if (data.taxIds?.length) {
+      const uniqueTaxIds = [...new Set(data.taxIds)]
+      const taxCount = await prisma.tax.count({
+        where: { tenantId, id: { in: uniqueTaxIds }, isActive: true },
+      })
+      if (taxCount !== uniqueTaxIds.length) {
+        const response = NextResponse.json(
+          { error: "One or more taxes were not found in this tenant." },
+          { status: 400 }
+        )
+        logApiRequestSuccess(logContext, 400, { reason: "invalid_tax_ids" })
+        return withRequestId(response, logContext.requestId)
+      }
+    }
+
     const item = await prisma.$transaction(async (tx) => {
-      await tx.inventoryProduct.update({
-        where: { id },
+      const updated = await tx.inventoryProduct.updateMany({
+        where: { id, tenantId },
         data: {
           ...(data.sku?.trim() ? { sku: data.sku.trim() } : {}),
           ...(data.name?.trim() ? { name: data.name.trim() } : {}),
@@ -133,6 +177,7 @@ export async function PATCH(
           ...(typeof data.isPhysical === "boolean" ? { isPhysical: data.isPhysical } : {}),
         },
       })
+      if (!updated.count) return null
 
       if (data.taxIds) {
         await tx.inventoryProductTax.deleteMany({ where: { productId: id } })
@@ -163,8 +208,8 @@ export async function PATCH(
         }
       }
 
-      return tx.inventoryProduct.findUnique({
-        where: { id },
+      return tx.inventoryProduct.findFirst({
+        where: { id, tenantId },
         select: {
           id: true,
           sku: true,
@@ -213,25 +258,26 @@ export async function DELETE(
 ) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
-  const unauthorized = await ensureAuthorized(logContext)
-  if (unauthorized) return unauthorized
+  const authorized = await ensureAuthorized(request, logContext)
+  if ("status" in authorized) return authorized
+  const { tenantId } = authorized
 
   try {
     const { id } = await params
     const linkedPurchases = await prisma.purchaseOrderItem.count({
-      where: { productId: id },
+      where: { productId: id, order: { tenantId } },
     })
     const hasStockMovements = await prisma.inventoryStockMovement.count({
-      where: { productId: id },
+      where: { productId: id, tenantId },
     })
 
     if (linkedPurchases > 0 || hasStockMovements > 0) {
-      await prisma.inventoryProduct.update({
-        where: { id },
+      await prisma.inventoryProduct.updateMany({
+        where: { id, tenantId },
         data: { status: "INACTIVE" },
       })
     } else {
-      await prisma.inventoryProduct.delete({ where: { id } })
+      await prisma.inventoryProduct.deleteMany({ where: { id, tenantId } })
     }
 
     const response = NextResponse.json({ ok: true })

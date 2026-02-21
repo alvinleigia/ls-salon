@@ -108,7 +108,11 @@ const getZonedDateParts = (value: Date, timeZone: string): ZonedDateParts => {
   }
 }
 
-const resolveTemplateForDate = async (staffProfileId: string, dateKey: string) => {
+const resolveTemplateForDate = async (
+  staffProfileId: string,
+  dateKey: string,
+  tenantId?: string
+) => {
   const dateValue = new Date(`${dateKey}T00:00:00.000Z`)
 
   const override = await prisma.staffShiftOverride.findUnique({
@@ -129,6 +133,7 @@ const resolveTemplateForDate = async (staffProfileId: string, dateKey: string) =
   const assignment = await prisma.staffScheduleAssignment.findFirst({
     where: {
       staffProfileId,
+      ...(tenantId ? { staffProfile: { user: { tenantId } } } : {}),
       startDate: { lte: dateValue },
       OR: [{ endDate: null }, { endDate: { gte: dateValue } }],
     },
@@ -150,7 +155,7 @@ const resolveTemplateForDate = async (staffProfileId: string, dateKey: string) =
   const schedule =
     assignment?.schedule ??
     (await prisma.shiftSchedule.findFirst({
-      where: { isDefault: true },
+      where: { ...(tenantId ? { tenantId } : {}), isDefault: true },
       orderBy: { updatedAt: "desc" },
       include: {
         blocks: {
@@ -183,10 +188,11 @@ const resolveTemplateForDate = async (staffProfileId: string, dateKey: string) =
 export const checkStaffAppointmentAvailability = async (
   staffProfileId: string,
   startAt: Date,
-  endAt: Date
+  endAt: Date,
+  tenantId?: string
 ): Promise<AvailabilityCheckResult> => {
-  const setting = await prisma.appSetting.findUnique({
-    where: { id: "global" },
+  const setting = await prisma.appSetting.findFirst({
+    where: tenantId ? { tenantId } : {},
     select: { timeZone: true },
   })
   const timeZone = setting?.timeZone || "America/New_York"
@@ -205,6 +211,7 @@ export const checkStaffAppointmentAvailability = async (
   const approvedLeave = await prisma.leaveRequest.findFirst({
     where: {
       staffProfileId,
+      ...(tenantId ? { staffProfile: { user: { tenantId } } } : {}),
       status: "APPROVED",
       startDate: { lte: dateValue },
       endDate: { gte: dateValue },
@@ -221,7 +228,7 @@ export const checkStaffAppointmentAvailability = async (
     }
   }
 
-  const { template, reason } = await resolveTemplateForDate(staffProfileId, dateKey)
+  const { template, reason } = await resolveTemplateForDate(staffProfileId, dateKey, tenantId)
   if (!template) {
     return { ok: false, reason }
   }

@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -12,6 +11,7 @@ import {
 } from "@/lib/api-logging"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import {
   createLeaveGroupSchema,
   leaveGroupAssignmentModeSchema,
@@ -42,9 +42,13 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -65,6 +69,7 @@ export async function GET(request: Request) {
 
     const { page, pageSize, q, status, assignmentMode, sort, order } = parsed.data
     const where: Prisma.LeaveGroupWhereInput = {
+      tenantId,
       ...(status ? { status } : {}),
       ...(assignmentMode ? { assignmentMode } : {}),
       ...(q
@@ -110,9 +115,13 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -134,7 +143,7 @@ export async function POST(request: Request) {
     const name = parsed.data.name.trim()
     const description = parsed.data.description?.trim() || null
     const existing = await prisma.leaveGroup.findFirst({
-      where: { OR: [{ code }, { name }] },
+      where: { tenantId, OR: [{ code }, { name }] },
       select: { id: true, code: true },
     })
     if (existing) {
@@ -149,6 +158,7 @@ export async function POST(request: Request) {
     const item = await prisma.$transaction(async (tx) => {
       const group = await tx.leaveGroup.create({
         data: {
+          tenantId,
           code,
           name,
           description,
@@ -157,15 +167,16 @@ export async function POST(request: Request) {
           sortOrder: parsed.data.sortOrder,
         },
       })
-      await replaceGroupLeaves(tx, group.id, parsed.data.leaveDefinitionIds)
+      await replaceGroupLeaves(tx, group.id, parsed.data.leaveDefinitionIds, tenantId)
       await replaceGroupStaffAssignments(
         tx,
         group.id,
         parsed.data.assignmentMode,
-        parsed.data.staffIds
+        parsed.data.staffIds,
+        tenantId
       )
-      return tx.leaveGroup.findUniqueOrThrow({
-        where: { id: group.id },
+      return tx.leaveGroup.findFirstOrThrow({
+        where: { id: group.id, tenantId },
         select: leaveGroupSelect,
       })
     })

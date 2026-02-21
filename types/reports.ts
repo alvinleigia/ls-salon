@@ -25,7 +25,7 @@ export type AuditLogReportRow = {
   entityType: string
   entityId: string | null
   actorUserId: string | null
-  actorRole: "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER" | null
+  actorRole: "OWNER" | "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER" | null
   actorName: string | null
   actorEmail: string | null
   requestId: string | null

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -16,6 +15,7 @@ import {
   serviceCategoryStatusSchema,
 } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 const listSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -30,10 +30,14 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -59,6 +63,7 @@ export async function GET(request: Request) {
     const trimmedSearch = q?.trim()
 
     const where = {
+      tenantId,
       ...(trimmedSearch
         ? {
             OR: [
@@ -104,10 +109,14 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -132,8 +141,8 @@ export async function POST(request: Request) {
   const { name, description, status, sortOrder } = parsed.data
 
   try {
-    const existing = await prisma.serviceCategory.findUnique({
-      where: { name: name.trim() },
+    const existing = await prisma.serviceCategory.findFirst({
+      where: { tenantId, name: name.trim() },
       select: { id: true },
     })
     if (existing) {
@@ -147,6 +156,7 @@ export async function POST(request: Request) {
 
     const item = await prisma.serviceCategory.create({
       data: {
+        tenantId,
         name: name.trim(),
         description: description?.trim() || undefined,
         status: status ?? "ACTIVE",

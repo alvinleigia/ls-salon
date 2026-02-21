@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { acceptInviteSchema } from "@/lib/validation"
+import { resolveTenantFromRequest } from "@/lib/tenancy"
 
 export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
@@ -34,8 +35,14 @@ export async function POST(request: Request) {
 
   try {
     const { token, name, password } = parsed.data
+    const tenant = await resolveTenantFromRequest(request)
+    if (!tenant) {
+      const response = NextResponse.json({ error: "Tenant not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "tenant_not_found" })
+      return withRequestId(response, logContext.requestId)
+    }
 
-    const invite = await prisma.invitation.findUnique({ where: { token } })
+    const invite = await prisma.invitation.findFirst({ where: { token, tenantId: tenant.id } })
     if (!invite || invite.acceptedAt || invite.expiresAt < new Date()) {
       const response = NextResponse.json(
         { error: "Invite is invalid or expired." },
@@ -47,10 +54,12 @@ export async function POST(request: Request) {
 
     const passwordHash = await bcrypt.hash(password, 10)
 
-    const existing = await prisma.user.findUnique({ where: { email: invite.email } })
+    const existing = await prisma.user.findFirst({
+      where: { email: invite.email, tenantId: tenant.id },
+    })
     if (existing) {
       await prisma.user.update({
-        where: { email: invite.email },
+        where: { id: existing.id },
         data: {
           name: name || existing.name,
           passwordHash,
@@ -60,6 +69,7 @@ export async function POST(request: Request) {
     } else {
       await prisma.user.create({
         data: {
+          tenantId: tenant.id,
           name: name || undefined,
           email: invite.email,
           passwordHash,

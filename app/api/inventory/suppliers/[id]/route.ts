@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   type ApiLogContext,
   createApiLogContext,
@@ -12,16 +11,21 @@ import {
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { updateSupplierSchema } from "@/lib/validation"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
-const ensureAuthorized = async (logContext: ApiLogContext) => {
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+const ensureAuthorized = async (request: Request, logContext: ApiLogContext) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    const response = tenantSession.error
+    logApiRequestSuccess(logContext, response.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(response, logContext.requestId)
+  }
+  if (!canManageUsers(tenantSession.context.role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
   }
-  return null
+  return tenantSession.context
 }
 
 export async function PATCH(
@@ -30,8 +34,9 @@ export async function PATCH(
 ) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
-  const unauthorized = await ensureAuthorized(logContext)
-  if (unauthorized) return unauthorized
+  const authorized = await ensureAuthorized(request, logContext)
+  if ("status" in authorized) return authorized
+  const { tenantId } = authorized
 
   try {
     const { id } = await params
@@ -47,8 +52,8 @@ export async function PATCH(
     }
 
     const data = parsed.data
-    const supplier = await prisma.supplier.update({
-      where: { id },
+    const supplier = await prisma.supplier.updateManyAndReturn({
+      where: { id, tenantId },
       data: {
         ...(data.name?.trim() ? { name: data.name.trim() } : {}),
         ...(data.contactPerson !== undefined
@@ -97,10 +102,15 @@ export async function PATCH(
       },
     })
 
+    if (!supplier[0]) {
+      const response = NextResponse.json({ error: "Supplier not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found", supplierId: id })
+      return withRequestId(response, logContext.requestId)
+    }
     const response = NextResponse.json({
       item: {
-        ...supplier,
-        createdAt: supplier.createdAt.toISOString(),
+        ...supplier[0],
+        createdAt: supplier[0].createdAt.toISOString(),
       },
     })
     logApiRequestSuccess(logContext, 200, { supplierId: id })
@@ -118,25 +128,26 @@ export async function DELETE(
 ) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
-  const unauthorized = await ensureAuthorized(logContext)
-  if (unauthorized) return unauthorized
+  const authorized = await ensureAuthorized(request, logContext)
+  if ("status" in authorized) return authorized
+  const { tenantId } = authorized
 
   try {
     const { id } = await params
     const linkedProducts = await prisma.inventoryProductSupplier.count({
-      where: { supplierId: id },
+      where: { supplierId: id, product: { tenantId } },
     })
     const linkedPurchases = await prisma.purchaseOrder.count({
-      where: { supplierId: id },
+      where: { supplierId: id, tenantId },
     })
 
     if (linkedProducts > 0 || linkedPurchases > 0) {
-      await prisma.supplier.update({
-        where: { id },
+      await prisma.supplier.updateMany({
+        where: { id, tenantId },
         data: { status: "INACTIVE" },
       })
     } else {
-      await prisma.supplier.delete({ where: { id } })
+      await prisma.supplier.deleteMany({ where: { id, tenantId } })
     }
 
     const response = NextResponse.json({ ok: true })

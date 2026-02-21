@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -12,16 +11,20 @@ import {
 import { prisma } from "@/lib/prisma"
 import { shiftTemplateSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import type { ListResponse } from "@/types/api"
 
 export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -43,7 +46,7 @@ export async function GET(request: Request) {
     const page = hasPagination ? Math.max(1, pageParam) : 1
     const pageSize = hasPagination ? Math.max(1, pageSizeParam) : undefined
 
-    const where: Prisma.ShiftTemplateWhereInput = {}
+    const where: Prisma.ShiftTemplateWhereInput = { tenantId }
 
     if (!includeInactive) {
       if (status === "INACTIVE") {
@@ -112,10 +115,13 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -141,6 +147,7 @@ export async function POST(request: Request) {
     const data = parsed.data
     const template = await prisma.shiftTemplate.create({
       data: {
+        tenantId,
         name: data.name,
         description: data.description || null,
         color: data.color || null,

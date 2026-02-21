@@ -16,6 +16,26 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Use helpers from `lib/permissions.ts` in both server and client.
 - Server always checks `auth()` + helper.
 - UI should only hide/disable; server is source of truth.
+- Tenant provisioning/lifecycle actions must use `canManageTenants` and remain restricted to platform owner/admin users.
+
+## Multi-tenant SaaS
+- Tenant context is derived from host/subdomain (`lib/tenancy.ts`); API routes should use `requireTenantSession` (`lib/tenant-auth.ts`) for tenant-safe authorization.
+- All tenant-domain reads/writes must filter by `tenantId`; avoid cross-tenant lookups even for internal helper queries.
+- Keep one shared database with strict tenant scoping in Prisma queries and model uniqueness constraints (`@@unique([tenantId, ...])` where applicable).
+- Platform operations (tenant provisioning, status lifecycle, owner reset) are centralized under `/api/tenants*` and must validate platform-tenant scope (`PLATFORM_ADMIN_TENANT_SLUG`).
+- Tenant management UI lives under `/settings/tenants` and is only visible/accessible for platform owner/admin users.
+- Tenant lifecycle transitions are status-based (`ACTIVE`, `SUSPENDED`, `ARCHIVED`); never hard-delete tenants through admin flows.
+- Owner credential recovery should use reset-token flow (`PasswordResetToken`) and tenant-aware reset URLs (subdomain/root-domain aware).
+- Platform tenant records (slug matching `PLATFORM_ADMIN_TENANT_SLUG`) must be protected from accidental lifecycle mutations.
+
+## Audit logging
+- Domain-changing APIs should write audit rows via `recordDomainAuditEventSafe` (`lib/domain-audit.ts`).
+- Include `tenantId`, `event`, `entityType`, `entityId`, `actorUserId`, `actorRole`, and `requestId` whenever available.
+- Include `before`/`after` snapshots for status transitions and key mutable fields.
+- Required tenant-admin audit events:
+  - `tenant.created`
+  - `tenant.status.updated`
+  - `tenant.owner.reset_sent`
 
 ## Delete policy (global)
 - Default: **restrict delete** if the record is referenced by other records.

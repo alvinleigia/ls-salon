@@ -100,7 +100,8 @@ export const serializeLeaveDefinition = (
 export const replaceNonClubbableRules = async (
   tx: DbClient,
   leaveDefinitionId: string,
-  nonClubbableWithIds: string[]
+  nonClubbableWithIds: string[],
+  tenantId?: string
 ) => {
   const uniqueIds = Array.from(
     new Set(
@@ -112,7 +113,7 @@ export const replaceNonClubbableRules = async (
 
   if (uniqueIds.length > 0) {
     const existingCount = await tx.leaveDefinition.count({
-      where: { id: { in: uniqueIds } },
+      where: { id: { in: uniqueIds }, ...(tenantId ? { tenantId } : {}) },
     })
     if (existingCount !== uniqueIds.length) {
       throw new Error("One or more non-clubbable leave definitions were not found.")

@@ -20,6 +20,7 @@ type BuildRosterHistoryParams = {
   staffProfileIds: string[]
   startDate: string
   endDate: string
+  tenantId?: string
 }
 
 type SyncMode = "insert-missing" | "replace"
@@ -221,7 +222,10 @@ const buildRosterHistoryRows = async (
       orderBy: { startDate: "asc" },
     }),
     tx.shiftSchedule.findFirst({
-      where: { isDefault: true },
+      where: {
+        isDefault: true,
+        ...(params.tenantId ? { tenantId: params.tenantId } : {}),
+      },
       include: {
         blocks: {
           orderBy: { sortOrder: "asc" },
@@ -491,7 +495,7 @@ export const syncRosterHistoryRange = async (
 
 export const captureRosterHistoryUpToYesterday = async (
   tx: DbClient,
-  params: { staffProfileIds: string[]; startDate?: string | null; timeZone?: string | null }
+  params: { staffProfileIds: string[]; startDate?: string | null; timeZone?: string | null; tenantId?: string }
 ) => {
   const yesterday = getYesterday(params.timeZone)
   const endDate = toDateKey(yesterday)
@@ -506,6 +510,7 @@ export const captureRosterHistoryUpToYesterday = async (
     startDate: toDateKey(parsedStart),
     endDate,
     mode: "insert-missing",
+    tenantId: params.tenantId,
   })
 }
 

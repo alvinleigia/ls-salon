@@ -18,16 +18,28 @@ const ADMIN_PASSWORD = "password123"
 
 async function main() {
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10)
+  const tenant = await prisma.tenant.upsert({
+    where: { slug: "default" },
+    update: { status: "ACTIVE" },
+    create: {
+      slug: "default",
+      name: "Default Tenant",
+      status: "ACTIVE",
+    },
+    select: { id: true },
+  })
 
   await prisma.user.upsert({
     where: { email: ADMIN_EMAIL },
     update: {
+      tenantId: tenant.id,
       name: ADMIN_NAME,
       role: Role.ADMIN,
       status: UserStatus.ACTIVE,
       passwordHash,
     },
     create: {
+      tenantId: tenant.id,
       name: ADMIN_NAME,
       email: ADMIN_EMAIL,
       role: Role.ADMIN,

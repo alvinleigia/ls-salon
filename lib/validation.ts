@@ -2,7 +2,7 @@ import { z } from "zod"
 import { INVENTORY_UNIT_OPTIONS } from "@/lib/constants/inventory"
 import { getStateOptionsByCountry } from "@/lib/constants/countries"
 
-export const roleSchema = z.enum(["ADMIN", "MANAGER", "STAFF", "CUSTOMER"])
+export const roleSchema = z.enum(["OWNER", "ADMIN", "MANAGER", "STAFF", "CUSTOMER"])
 export const genderSchema = z.enum([
   "MALE",
   "FEMALE",
@@ -1081,3 +1081,23 @@ export type ReviewLeaveRequestInput = z.infer<typeof reviewLeaveRequestSchema>
 export type BulkReviewLeaveRequestsInput = z.infer<typeof bulkReviewLeaveRequestsSchema>
 export type CancelLeaveRequestInput = z.infer<typeof cancelLeaveRequestSchema>
 export type RevokeLeaveRequestInput = z.infer<typeof revokeLeaveRequestSchema>
+
+export const createTenantSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  slug: z
+    .string()
+    .trim()
+    .min(2)
+    .max(63)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  ownerName: z.string().trim().min(1).max(100),
+  ownerEmail: z.string().trim().email(),
+  ownerPassword: z.string().trim().min(8).max(100),
+})
+
+export const updateTenantStatusSchema = z.object({
+  status: z.enum(["ACTIVE", "SUSPENDED", "ARCHIVED"]),
+})
+
+export type CreateTenantInput = z.infer<typeof createTenantSchema>
+export type UpdateTenantStatusInput = z.infer<typeof updateTenantStatusSchema>

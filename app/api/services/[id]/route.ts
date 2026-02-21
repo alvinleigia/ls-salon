@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -11,6 +10,7 @@ import {
 import { prisma } from "@/lib/prisma"
 import { updateServiceSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 export async function PATCH(
   request: Request,
@@ -20,10 +20,14 @@ export async function PATCH(
   logApiRequestStart(logContext, request)
 
   const { id } = await params
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed", serviceId: id })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized", serviceId: id })
     return withRequestId(response, logContext.requestId)
@@ -57,9 +61,48 @@ export async function PATCH(
   }
 
   try {
+    if (data.categoryId) {
+      const category = await prisma.serviceCategory.findFirst({
+        where: { id: data.categoryId, tenantId },
+        select: { id: true },
+      })
+      if (!category) {
+        const response = NextResponse.json({ error: "Service category not found." }, { status: 404 })
+        logApiRequestSuccess(logContext, 404, { reason: "category_not_found", serviceId: id })
+        return withRequestId(response, logContext.requestId)
+      }
+    }
+    if (data.packageItemIds?.length) {
+      const packageItemsCount = await prisma.service.count({
+        where: { tenantId, id: { in: data.packageItemIds } },
+      })
+      if (packageItemsCount !== data.packageItemIds.length) {
+        const response = NextResponse.json(
+          { error: "One or more package services were not found in this tenant." },
+          { status: 400 }
+        )
+        logApiRequestSuccess(logContext, 400, { reason: "invalid_package_item_ids", serviceId: id })
+        return withRequestId(response, logContext.requestId)
+      }
+    }
+    if (data.taxIds?.length) {
+      const uniqueTaxIds = [...new Set(data.taxIds)]
+      const taxCount = await prisma.tax.count({
+        where: { tenantId, id: { in: uniqueTaxIds }, isActive: true },
+      })
+      if (taxCount !== uniqueTaxIds.length) {
+        const response = NextResponse.json(
+          { error: "One or more taxes were not found in this tenant." },
+          { status: 400 }
+        )
+        logApiRequestSuccess(logContext, 400, { reason: "invalid_tax_ids", serviceId: id })
+        return withRequestId(response, logContext.requestId)
+      }
+    }
+
     const item = await prisma.$transaction(async (tx) => {
-      const updated = await tx.service.update({
-        where: { id },
+      const updated = await tx.service.updateMany({
+        where: { id, tenantId },
         data: {
           ...(data.name?.trim() ? { name: data.name.trim() } : {}),
           ...(data.description?.trim()
@@ -87,9 +130,14 @@ export async function PATCH(
             : {}),
         },
       })
+      if (!updated.count) {
+        return null
+      }
 
       if (data.packageItemIds) {
-        await tx.servicePackageItem.deleteMany({ where: { packageId: id } })
+        await tx.servicePackageItem.deleteMany({
+          where: { packageId: id, package: { tenantId } },
+        })
         if (data.packageItemIds.length > 0) {
           await tx.servicePackageItem.createMany({
             data: data.packageItemIds.map((itemServiceId, index) => ({
@@ -101,8 +149,8 @@ export async function PATCH(
         }
       }
 
-      return tx.service.findUnique({
-        where: { id: updated.id },
+      return tx.service.findFirst({
+        where: { id, tenantId },
         select: {
           id: true,
           name: true,
@@ -147,10 +195,14 @@ export async function DELETE(
   logApiRequestStart(logContext, request)
 
   const { id } = await params
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed", serviceId: id })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized", serviceId: id })
     return withRequestId(response, logContext.requestId)
@@ -159,17 +211,18 @@ export async function DELETE(
   try {
     const associations = await prisma.servicePackageItem.count({
       where: {
+        package: { tenantId },
         OR: [{ packageId: id }, { itemServiceId: id }],
       },
     })
 
     if (associations > 0) {
-      await prisma.service.update({
-        where: { id },
+      await prisma.service.updateMany({
+        where: { id, tenantId },
         data: { status: "INACTIVE" },
       })
     } else {
-      await prisma.service.delete({ where: { id } })
+      await prisma.service.deleteMany({ where: { id, tenantId } })
     }
 
     const response = NextResponse.json({ ok: true })

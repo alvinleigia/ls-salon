@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -16,6 +15,7 @@ import {
   createPurchaseOrderSchema,
   purchaseOrderStatusSchema,
 } from "@/lib/validation"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 const listSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -27,13 +27,13 @@ const listSchema = z.object({
   supplierId: z.string().trim().optional(),
 })
 
-const ensureAuthorized = async () => {
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+const ensureAuthorized = async (request: Request) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) return { error: tenantSession.error }
+  if (!canManageUsers(tenantSession.context.role as Role)) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
   }
-  return null
+  return { context: tenantSession.context }
 }
 
 const toDateOnly = (value: string) => new Date(`${value}T00:00:00.000Z`)
@@ -78,11 +78,12 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   const url = new URL(request.url)
   const parsed = listSchema.safeParse(Object.fromEntries(url.searchParams.entries()))
@@ -102,6 +103,7 @@ export async function GET(request: Request) {
       ? { [sort]: order ?? "desc" }
       : { createdAt: "desc" as const }
     const where: Prisma.PurchaseOrderWhereInput = {
+      tenantId,
       ...(q
         ? {
             OR: [
@@ -169,11 +171,12 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_tenant_failed" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const { tenantId } = authorized.context
 
   const body = await request.json().catch(() => null)
   if (!body) {
@@ -195,13 +198,16 @@ export async function POST(request: Request) {
     const data = parsed.data
     const today = new Date().toISOString().slice(0, 10).replaceAll("-", "")
     const runningCount = await prisma.purchaseOrder.count({
-      where: { createdAt: { gte: new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`) } },
+      where: {
+        tenantId,
+        createdAt: { gte: new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`) },
+      },
     })
     const orderNumber = `PO-${today}-${String(runningCount + 1).padStart(4, "0")}`
 
     const productIds = [...new Set(data.items.map((item) => item.productId))]
     const products = await prisma.inventoryProduct.findMany({
-      where: { id: { in: productIds } },
+      where: { tenantId, id: { in: productIds } },
       select: {
         id: true,
         taxes: { select: { tax: { select: { percent: true } } } },
@@ -213,6 +219,24 @@ export async function POST(request: Request) {
         product.taxes.reduce((sum, item) => sum + Math.max(0, item.tax.percent), 0),
       ])
     )
+
+    const supplier = await prisma.supplier.findFirst({
+      where: { id: data.supplierId, tenantId },
+      select: { id: true },
+    })
+    if (!supplier) {
+      const response = NextResponse.json({ error: "Supplier not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "supplier_not_found" })
+      return withRequestId(response, logContext.requestId)
+    }
+    if (products.length !== productIds.length) {
+      const response = NextResponse.json(
+        { error: "One or more products do not belong to this tenant." },
+        { status: 400 }
+      )
+      logApiRequestSuccess(logContext, 400, { reason: "product_tenant_mismatch" })
+      return withRequestId(response, logContext.requestId)
+    }
 
     const linePayload = data.items.map((item) => {
       const quantity = Math.max(1, item.quantity)
@@ -241,6 +265,7 @@ export async function POST(request: Request) {
     const created = await prisma.$transaction(async (tx) => {
       const order = await tx.purchaseOrder.create({
       data: {
+        tenantId,
         orderNumber,
         supplierId: data.supplierId,
         status: initialStatus,
@@ -306,6 +331,7 @@ export async function POST(request: Request) {
         )
         await tx.inventoryStockMovement.createMany({
           data: order.items.map((item) => ({
+            tenantId,
             productId: item.productId,
             orderItemId: item.id,
             type: "PURCHASE_RECEIPT",

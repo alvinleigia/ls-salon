@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -12,6 +11,7 @@ import {
 } from "@/lib/api-logging"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import {
   createLeaveDefinitionSchema,
   leaveDefinitionAllowedUsersSchema,
@@ -43,9 +43,13 @@ export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -66,6 +70,7 @@ export async function GET(request: Request) {
 
     const { page, pageSize, q, status, leaveType, allowedUsers, sort, order } = parsed.data
     const where: Prisma.LeaveDefinitionWhereInput = {
+      tenantId,
       ...(status ? { status } : {}),
       ...(leaveType ? { leaveType } : {}),
       ...(allowedUsers ? { allowedUsers } : {}),
@@ -111,9 +116,13 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -134,7 +143,7 @@ export async function POST(request: Request) {
     const code = parsed.data.code.trim().toUpperCase()
     const name = parsed.data.name.trim()
     const existing = await prisma.leaveDefinition.findFirst({
-      where: { OR: [{ code }, { name }] },
+      where: { tenantId, OR: [{ code }, { name }] },
       select: { id: true, code: true, name: true },
     })
     if (existing) {
@@ -154,6 +163,7 @@ export async function POST(request: Request) {
     const item = await prisma.$transaction(async (tx) => {
       const created = await tx.leaveDefinition.create({
         data: {
+          tenantId,
           code,
           name,
           leaveType: parsed.data.leaveType,
@@ -174,9 +184,9 @@ export async function POST(request: Request) {
           sortOrder: parsed.data.sortOrder,
         },
       })
-      await replaceNonClubbableRules(tx, created.id, parsed.data.nonClubbableWithIds)
-      return tx.leaveDefinition.findUniqueOrThrow({
-        where: { id: created.id },
+      await replaceNonClubbableRules(tx, created.id, parsed.data.nonClubbableWithIds, tenantId)
+      return tx.leaveDefinition.findFirstOrThrow({
+        where: { id: created.id, tenantId },
         select: leaveDefinitionSelect,
       })
     })

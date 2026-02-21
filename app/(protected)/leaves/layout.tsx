@@ -13,7 +13,7 @@ export default async function LeavesLayout({
   if (!session?.user) {
     redirect("/auth/signin")
   }
-  if (role !== "ADMIN" && role !== "MANAGER" && role !== "STAFF") {
+  if (role !== "OWNER" && role !== "ADMIN" && role !== "MANAGER" && role !== "STAFF") {
     redirect("/dashboard")
   }
 

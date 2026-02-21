@@ -8,6 +8,7 @@ import { useTheme } from "next-themes"
 import {
   CalendarClockIcon,
   BarChart3Icon,
+  Building2Icon,
   ClockIcon,
   PackageIcon,
   LayoutDashboardIcon,
@@ -47,7 +48,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { canInvite, canManageUsers, type Role } from "@/lib/permissions"
+import { canInvite, canManageTenants, canManageUsers, type Role } from "@/lib/permissions"
 
 const navItems = [
   { title: "Dashboard", href: "/", icon: LayoutDashboardIcon },
@@ -105,7 +106,7 @@ export function AppSidebar() {
                     data-active={pathname.startsWith("/leaves")}
                   >
                     <Link
-                      href={role === "ADMIN" ? "/leaves/approvals" : "/leaves/requests"}
+                      href={role === "OWNER" || role === "ADMIN" ? "/leaves/approvals" : "/leaves/requests"}
                       className="flex w-full items-center"
                     >
                       <CalendarClockIcon className="h-4 w-4" />
@@ -526,6 +527,19 @@ export function AppSidebar() {
                         </Link>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
+                    {canManageTenants(role ?? null) ? (
+                      <SidebarMenuSubItem>
+                        <SidebarMenuSubButton
+                          asChild
+                          isActive={pathname === "/settings/tenants"}
+                        >
+                          <Link href="/settings/tenants">
+                            <Building2Icon className="h-4 w-4" />
+                            <span>Tenants</span>
+                          </Link>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    ) : null}
                   </SidebarMenuSub>
                 </SidebarMenuItem>
               ) : null}

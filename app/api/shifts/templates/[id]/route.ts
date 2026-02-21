@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -11,6 +10,7 @@ import {
 import { prisma } from "@/lib/prisma"
 import { shiftTemplateSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 export async function PATCH(
   request: Request,
@@ -20,10 +20,13 @@ export async function PATCH(
   logApiRequestStart(logContext, request)
 
   const { id } = await params
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed", templateId: id })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized", templateId: id })
     return withRequestId(response, logContext.requestId)
@@ -48,8 +51,8 @@ export async function PATCH(
   try {
     const data = parsed.data
     const template = await prisma.$transaction(async (tx) => {
-      const updated = await tx.shiftTemplate.update({
-        where: { id },
+      const updated = await tx.shiftTemplate.updateMany({
+        where: { id, tenantId },
         data: {
           name: data.name,
           description: data.description || null,
@@ -59,7 +62,10 @@ export async function PATCH(
           endTime: data.endTime,
         },
       })
-      await tx.shiftTemplateBreak.deleteMany({ where: { templateId: id } })
+      if (!updated.count) {
+        return null
+      }
+      await tx.shiftTemplateBreak.deleteMany({ where: { templateId: id, template: { tenantId } } })
       if (data.breaks.length) {
         await tx.shiftTemplateBreak.createMany({
           data: data.breaks.map((period, index) => ({
@@ -70,11 +76,16 @@ export async function PATCH(
           })),
         })
       }
-      return updated
+      return { id }
     })
+    if (!template) {
+      const response = NextResponse.json({ error: "Shift template not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found", templateId: id })
+      return withRequestId(response, logContext.requestId)
+    }
 
-    const withBreaks = await prisma.shiftTemplate.findUnique({
-      where: { id: template.id },
+    const withBreaks = await prisma.shiftTemplate.findFirst({
+      where: { id: template.id, tenantId },
       include: { breaks: { orderBy: { sortOrder: "asc" } } },
     })
 
@@ -96,10 +107,13 @@ export async function DELETE(
   logApiRequestStart(logContext, request)
 
   const { id } = await params
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed", templateId: id })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized", templateId: id })
     return withRequestId(response, logContext.requestId)
@@ -107,8 +121,8 @@ export async function DELETE(
 
   try {
     const [scheduleBlocks, overrides] = await Promise.all([
-      prisma.shiftScheduleBlock.count({ where: { templateId: id } }),
-      prisma.staffShiftOverride.count({ where: { templateId: id } }),
+      prisma.shiftScheduleBlock.count({ where: { templateId: id, schedule: { tenantId } } }),
+      prisma.staffShiftOverride.count({ where: { templateId: id, staffProfile: { user: { tenantId } } } }),
     ])
     if (scheduleBlocks > 0 || overrides > 0) {
       const response = NextResponse.json(
@@ -119,7 +133,12 @@ export async function DELETE(
       return withRequestId(response, logContext.requestId)
     }
 
-    await prisma.shiftTemplate.delete({ where: { id } })
+    const deleted = await prisma.shiftTemplate.deleteMany({ where: { id, tenantId } })
+    if (!deleted.count) {
+      const response = NextResponse.json({ error: "Shift template not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "not_found", templateId: id })
+      return withRequestId(response, logContext.requestId)
+    }
     const response = NextResponse.json({ ok: true })
     logApiRequestSuccess(logContext, 200, { templateId: id, result: "deleted" })
     return withRequestId(response, logContext.requestId)

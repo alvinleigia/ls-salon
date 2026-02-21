@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -10,6 +9,7 @@ import {
 } from "@/lib/api-logging"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import {
   normalizeHistoryRangeToPast,
   syncRosterHistoryRange,
@@ -27,11 +27,15 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role as Role | undefined
-  const sessionUserId = (session?.user as { id?: string })?.id
-  const sessionUserEmail = (session?.user as { email?: string })?.email?.trim().toLowerCase()
-  if (!session?.user || !canManageUsers(role ?? null)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId } = tenantSession.context
+  const role = tenantSession.context.role as Role | undefined
+  const sessionUserId = tenantSession.context.sessionUserId
+  if (!canManageUsers(role ?? null)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -41,18 +45,11 @@ export async function POST(request: Request) {
     logApiRequestSuccess(logContext, 401, { reason: "missing_session_user_id" })
     return withRequestId(response, logContext.requestId)
   }
-  const reviewerById = await prisma.user.findUnique({
-    where: { id: sessionUserId },
+  const reviewerById = await prisma.user.findFirst({
+    where: { id: sessionUserId, tenantId },
     select: { id: true },
   })
-  const reviewer =
-    reviewerById ??
-    (sessionUserEmail
-      ? await prisma.user.findUnique({
-          where: { email: sessionUserEmail },
-          select: { id: true },
-        })
-      : null)
+  const reviewer = reviewerById
   if (!reviewer) {
     const response = NextResponse.json(
       { error: "Session user not found. Please sign in again." },
@@ -77,7 +74,7 @@ export async function POST(request: Request) {
     const { requestIds, status, reviewerComment } = parsed.data
     const now = new Date()
     const currentItems = await prisma.leaveRequest.findMany({
-      where: { id: { in: requestIds } },
+      where: { tenantId, id: { in: requestIds } },
       select: {
         id: true,
         staffProfileId: true,
@@ -125,7 +122,8 @@ export async function POST(request: Request) {
             staffProfileId: item.staffProfileId,
             startDate: item.startDate,
             endDate: item.endDate,
-          }))
+          })),
+        tenantId
       )
       if (conflicts.length > 0) {
         const response = NextResponse.json(
@@ -142,7 +140,7 @@ export async function POST(request: Request) {
     }
 
     await prisma.leaveRequest.updateMany({
-      where: { id: { in: pendingIds }, status: "PENDING" },
+      where: { tenantId, id: { in: pendingIds }, status: "PENDING" },
       data: {
         status,
         reviewedByUserId: reviewer.id,
@@ -152,7 +150,7 @@ export async function POST(request: Request) {
     })
 
   const updatedItems = await prisma.leaveRequest.findMany({
-    where: { id: { in: pendingIds } },
+    where: { tenantId, id: { in: pendingIds } },
     select: leaveRequestSelect,
   })
   const serializedItems = updatedItems.map(serializeLeaveRequest)
@@ -167,6 +165,7 @@ export async function POST(request: Request) {
       startDate: normalizedPastRange.startDate,
       endDate: normalizedPastRange.endDate,
       mode: "replace",
+      tenantId,
     })
   }
   for (const item of serializedItems) {

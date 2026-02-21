@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   type ApiLogContext,
   createApiLogContext,
@@ -12,16 +11,21 @@ import {
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { updatePurchaseOrderSchema } from "@/lib/validation"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
-const ensureAuthorized = async (logContext: ApiLogContext) => {
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+const ensureAuthorized = async (request: Request, logContext: ApiLogContext) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    const response = tenantSession.error
+    logApiRequestSuccess(logContext, response.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(response, logContext.requestId)
+  }
+  if (!canManageUsers(tenantSession.context.role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
   }
-  return null
+  return tenantSession.context
 }
 
 const toDateOnly = (value: string) => new Date(`${value}T00:00:00.000Z`)
@@ -32,8 +36,9 @@ export async function PATCH(
 ) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
-  const unauthorized = await ensureAuthorized(logContext)
-  if (unauthorized) return unauthorized
+  const authorized = await ensureAuthorized(request, logContext)
+  if ("status" in authorized) return authorized
+  const { tenantId } = authorized
 
   try {
     const { id } = await params
@@ -54,6 +59,7 @@ export async function PATCH(
       where: { id },
       select: {
         id: true,
+        tenantId: true,
         orderNumber: true,
         status: true,
         items: {
@@ -68,7 +74,7 @@ export async function PATCH(
       },
     })
 
-    if (!existing) {
+    if (!existing || existing.tenantId !== tenantId) {
       throw new Error("NOT_FOUND")
     }
 
@@ -136,6 +142,7 @@ export async function PATCH(
           })
           await tx.inventoryStockMovement.create({
             data: {
+              tenantId,
               productId: item.productId,
               orderItemId: item.id,
               type: "PURCHASE_RECEIPT",
