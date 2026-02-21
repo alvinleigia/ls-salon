@@ -50,9 +50,7 @@ export default function SignInPage() {
                 return;
               }
 
-              if (result?.url) {
-                window.location.href = result.url;
-              }
+              window.location.href = "/dashboard";
             }}
           >
             <FormField id="email" label="Email">

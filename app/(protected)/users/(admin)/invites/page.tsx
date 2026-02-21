@@ -152,8 +152,8 @@ export default function InvitesPage() {
   }
 
   const copyInviteLink = React.useCallback(async (invite: InviteRow) => {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
-    const link = `${appUrl}/auth/invite?token=${invite.token}`
+    const origin = window.location.origin
+    const link = `${origin}/auth/invite?token=${invite.token}`
     await navigator.clipboard.writeText(link)
     toast.success("Invite link copied.")
   }, [])

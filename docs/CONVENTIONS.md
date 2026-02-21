@@ -27,6 +27,10 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Tenant lifecycle transitions are status-based (`ACTIVE`, `SUSPENDED`, `ARCHIVED`); never hard-delete tenants through admin flows.
 - Owner credential recovery should use reset-token flow (`PasswordResetToken`) and tenant-aware reset URLs (subdomain/root-domain aware).
 - Platform tenant records (slug matching `PLATFORM_ADMIN_TENANT_SLUG`) must be protected from accidental lifecycle mutations.
+- URL generation/redirects in multi-tenant flows must be host-aware:
+  - client-side links: use `window.location.origin`.
+  - API-generated links: derive from `request.url` / request headers.
+  - avoid fixed-origin env vars (for example `APP_URL`, `NEXT_PUBLIC_APP_URL`) for tenant-domain links.
 
 ## Audit logging
 - Domain-changing APIs should write audit rows via `recordDomainAuditEventSafe` (`lib/domain-audit.ts`).
