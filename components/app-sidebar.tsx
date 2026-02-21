@@ -205,6 +205,17 @@ export function AppSidebar() {
                         </Link>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        asChild
+                        isActive={pathname === "/reports/audit-logs"}
+                      >
+                        <Link href="/reports/audit-logs">
+                          <BarChart3Icon className="h-4 w-4" />
+                          <span>Audit logs</span>
+                        </Link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
                   </SidebarMenuSub>
                 </SidebarMenuItem>
               ) : null}

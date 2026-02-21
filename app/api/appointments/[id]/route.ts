@@ -9,6 +9,7 @@ import {
   logApiRequestSuccess,
   withRequestId,
 } from "@/lib/api-logging"
+import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import { appointmentUpdateSchema } from "@/lib/validation"
@@ -64,6 +65,7 @@ export async function GET(
 
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
+  const sessionUserId = (session?.user as { id?: string })?.id
 
   if (!session?.user || !canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -103,6 +105,7 @@ export async function PATCH(
 
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
+  const sessionUserId = (session?.user as { id?: string })?.id
 
   if (!session?.user || !canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -288,6 +291,30 @@ export async function PATCH(
       },
       include: appointmentInclude,
     })
+    await recordDomainAuditEventSafe(prisma, {
+      event: "appointment.updated",
+      entityType: "Appointment",
+      entityId: appointment.id,
+      actorUserId: sessionUserId ?? null,
+      actorRole: role ?? null,
+      requestId: logContext.requestId,
+      before: {
+        status: current.status,
+        startAt: current.startAt.toISOString(),
+        endAt: current.endAt.toISOString(),
+        customerId: current.customerId,
+        serviceId: current.serviceId,
+        staffProfileId: current.staffProfileId,
+      },
+      after: {
+        status: appointment.status,
+        startAt: appointment.startAt.toISOString(),
+        endAt: appointment.endAt.toISOString(),
+        customerId: appointment.customerId,
+        serviceId: appointment.serviceId,
+        staffProfileId: appointment.staffProfileId,
+      },
+    })
 
     const response = NextResponse.json({ appointment: serializeAppointment(appointment) })
     logApiRequestSuccess(logContext, 200, { appointmentId: id })
@@ -308,6 +335,7 @@ export async function DELETE(
 
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
+  const sessionUserId = (session?.user as { id?: string })?.id
 
   if (!session?.user || !canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -337,6 +365,20 @@ export async function DELETE(
     await prisma.appointment.update({
       where: { id },
       data: { status: AppointmentStatus.CANCELED },
+    })
+    await recordDomainAuditEventSafe(prisma, {
+      event: "appointment.canceled",
+      entityType: "Appointment",
+      entityId: id,
+      actorUserId: sessionUserId ?? null,
+      actorRole: role ?? null,
+      requestId: logContext.requestId,
+      before: {
+        status: appointment.status,
+      },
+      after: {
+        status: AppointmentStatus.CANCELED,
+      },
     })
 
     const response = NextResponse.json({ ok: true })

@@ -14,6 +14,7 @@ import {
   normalizeHistoryRangeToPast,
   syncRosterHistoryRange,
 } from "@/lib/roster-history"
+import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import { cancelLeaveRequestSchema } from "@/lib/validation"
 import { notifyLeaveCanceled } from "../../../_notifications"
 import {
@@ -134,6 +135,22 @@ export async function PATCH(
       startDateIso: serialized.startDate.slice(0, 10),
       endDateIso: serialized.endDate.slice(0, 10),
       daysCount: serialized.daysCount,
+    })
+    await recordDomainAuditEventSafe(prisma, {
+      event: "leave.request.canceled",
+      entityType: "LeaveRequest",
+      entityId: serialized.id,
+      actorUserId: sessionUserId,
+      actorRole: role ?? null,
+      requestId: logContext.requestId,
+      before: {
+        status: current.status,
+      },
+      after: {
+        status: serialized.status,
+        canceledAt: serialized.canceledAt,
+        cancelReason: serialized.cancelReason,
+      },
     })
 
     const response = NextResponse.json({ item: serialized })

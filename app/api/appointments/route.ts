@@ -10,6 +10,7 @@ import {
   logApiRequestSuccess,
   withRequestId,
 } from "@/lib/api-logging"
+import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import { prisma } from "@/lib/prisma"
 import { appointmentCreateSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
@@ -183,6 +184,7 @@ export async function POST(request: Request) {
 
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
+  const sessionUserId = (session?.user as { id?: string })?.id
 
   if (!session?.user || !canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -342,6 +344,24 @@ export async function POST(request: Request) {
       },
     },
   })
+    await recordDomainAuditEventSafe(prisma, {
+      event: "appointment.created",
+      entityType: "Appointment",
+      entityId: appointment.id,
+      actorUserId: sessionUserId ?? null,
+      actorRole: role ?? null,
+      requestId: logContext.requestId,
+      metadata: {
+        customerId: appointment.customerId,
+        staffProfileId: appointment.staffProfileId,
+        serviceId: appointment.serviceId,
+      },
+      after: {
+        status: appointment.status,
+        startAt: appointment.startAt.toISOString(),
+        endAt: appointment.endAt.toISOString(),
+      },
+    })
 
     const response = NextResponse.json({ appointment: serializeAppointment(appointment) }, { status: 201 })
     logApiRequestSuccess(logContext, 201, { appointmentId: appointment.id })

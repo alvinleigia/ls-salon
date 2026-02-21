@@ -10,6 +10,7 @@ import {
   logApiRequestSuccess,
   withRequestId,
 } from "@/lib/api-logging"
+import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import type { Role } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import { createLeaveRequestSchema } from "@/lib/validation"
@@ -253,6 +254,25 @@ export async function POST(request: Request) {
       startDateIso: serialized.startDate.slice(0, 10),
       endDateIso: serialized.endDate.slice(0, 10),
       daysCount: serialized.daysCount,
+    })
+    await recordDomainAuditEventSafe(prisma, {
+      event: "leave.request.submitted",
+      entityType: "LeaveRequest",
+      entityId: serialized.id,
+      actorUserId: sessionUserId,
+      actorRole: role ?? null,
+      requestId: logContext.requestId,
+      metadata: {
+        leaveDefinitionId: serialized.leaveDefinition.id,
+        leaveDefinitionCode: serialized.leaveDefinition.code,
+        daysCount: serialized.daysCount,
+      },
+      after: {
+        status: serialized.status,
+        startDate: serialized.startDate,
+        endDate: serialized.endDate,
+        reason: serialized.reason,
+      },
     })
 
     const response = NextResponse.json({ item: serialized }, { status: 201 })

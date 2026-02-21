@@ -14,6 +14,7 @@ import {
   normalizeHistoryRangeToPast,
   syncRosterHistoryRange,
 } from "@/lib/roster-history"
+import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import { bulkReviewLeaveRequestsSchema } from "@/lib/validation"
 import { notifyLeaveReviewed } from "../../_notifications"
 import {
@@ -181,6 +182,19 @@ export async function POST(request: Request) {
       daysCount: item.daysCount,
     })
   }
+  await recordDomainAuditEventSafe(prisma, {
+    event: "leave.request.bulk_reviewed",
+    entityType: "LeaveRequest",
+    actorUserId: reviewer.id,
+    actorRole: role ?? null,
+    requestId: logContext.requestId,
+    metadata: {
+      status,
+      updatedCount: serializedItems.length,
+      skippedCount: skippedIds.length,
+      requestIds: pendingIds,
+    },
+  })
 
     const response = NextResponse.json({
       items: serializedItems,

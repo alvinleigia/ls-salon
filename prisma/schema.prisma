@@ -214,48 +214,70 @@ enum StockMovementType {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String    @unique
-  emailVerified DateTime?
-  image         String?
-  phone         String?
-  passwordHash  String?
-  role          Role      @default(CUSTOMER)
-  dateOfBirth   DateTime?
-  gender        Gender?
-  status        UserStatus @default(ACTIVE)
-  lastLoginAt   DateTime?
-  marketingOptIn Boolean   @default(false)
-  addressLine1  String?
-  addressLine2  String?
-  city          String?
-  state         String?
-  postalCode    String?
-  country       String?
-  accounts      Account[]
-  sessions      Session[]
-  invitations   Invitation[] @relation("UserInvitations")
-  passwordResetTokens PasswordResetToken[]
-  eligibleServices StaffServiceEligibility[]
-  staffProfile  StaffProfile?
-  appointments  Appointment[] @relation("CustomerAppointments")
-  appointmentOrders AppointmentOrder[]
-  reviewedLeaveRequests LeaveRequest[] @relation("LeaveRequestReviewedBy")
-  revokedLeaveRequests LeaveRequest[] @relation("LeaveRequestRevokedBy")
-  managedStaffProfiles StaffProfile[] @relation("StaffProfileManager")
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                    String                    @id @default(cuid())
+  name                  String?
+  email                 String                    @unique
+  emailVerified         DateTime?
+  image                 String?
+  phone                 String?
+  passwordHash          String?
+  role                  Role                      @default(CUSTOMER)
+  dateOfBirth           DateTime?
+  gender                Gender?
+  status                UserStatus                @default(ACTIVE)
+  lastLoginAt           DateTime?
+  marketingOptIn        Boolean                   @default(false)
+  addressLine1          String?
+  addressLine2          String?
+  city                  String?
+  state                 String?
+  postalCode            String?
+  country               String?
+  accounts              Account[]
+  sessions              Session[]
+  invitations           Invitation[]              @relation("UserInvitations")
+  passwordResetTokens   PasswordResetToken[]
+  eligibleServices      StaffServiceEligibility[]
+  staffProfile          StaffProfile?
+  appointments          Appointment[]             @relation("CustomerAppointments")
+  appointmentOrders     AppointmentOrder[]
+  reviewedLeaveRequests LeaveRequest[]            @relation("LeaveRequestReviewedBy")
+  revokedLeaveRequests  LeaveRequest[]            @relation("LeaveRequestRevokedBy")
+  managedStaffProfiles  StaffProfile[]            @relation("StaffProfileManager")
+  auditLogs             AuditLog[]                @relation("AuditLogActor")
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  event       String
+  entityType  String
+  entityId    String?
+  actorUserId String?
+  actorRole   Role?
+  requestId   String?
+  metadata    Json?
+  before      Json?
+  after       Json?
+  createdAt   DateTime @default(now())
+  actorUser   User?    @relation("AuditLogActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([event])
+  @@index([entityType, entityId])
+  @@index([actorUserId])
+  @@index([requestId])
+  @@index([createdAt])
 }
 
 model ServiceCategory {
-  id          String                 @id @default(cuid())
-  name        String                 @unique
+  id          String                @id @default(cuid())
+  name        String                @unique
   description String?
-  status      ServiceCategoryStatus  @default(ACTIVE)
-  sortOrder   Int                    @default(0)
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
+  status      ServiceCategoryStatus @default(ACTIVE)
+  sortOrder   Int                   @default(0)
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
   services    Service[]
 
   @@index([status])
@@ -263,31 +285,31 @@ model ServiceCategory {
 }
 
 model LeaveDefinition {
-  id                 String                     @id @default(cuid())
-  code               String                     @unique
-  name               String
-  leaveType          LeaveDefinitionType
-  allowedUsers       LeaveDefinitionAllowedUsers @default(ALL)
-  minDaysPerRequest  Int                        @default(1)
-  maxDaysPerRequest  Int                        @default(30)
-  allowWithOtherLeaves Boolean                  @default(true)
-  priorEntryAllowed  Boolean                    @default(false)
-  noticeDays         Int                        @default(0)
-  allowCarryForward  Boolean                    @default(false)
-  weekOffSingleSideAllowed Boolean              @default(true)
-  weekOffBothSideAllowed Boolean                @default(true)
-  holidaySingleSideAllowed Boolean              @default(true)
-  holidayBothSideAllowed Boolean                @default(true)
-  maxConsecutiveDays Int                        @default(30)
-  maxPendingRequests Int                        @default(3)
-  status             LeaveDefinitionStatus      @default(ACTIVE)
-  sortOrder          Int                        @default(0)
-  createdAt          DateTime                   @default(now())
-  updatedAt          DateTime                   @updatedAt
-  nonClubbableWithFrom LeaveDefinitionNonClubbable[] @relation("LeaveDefinitionNonClubbableFrom")
-  nonClubbableWithTo LeaveDefinitionNonClubbable[] @relation("LeaveDefinitionNonClubbableTo")
-  leaveGroups        LeaveGroupLeave[]
-  leaveRequests      LeaveRequest[]
+  id                       String                        @id @default(cuid())
+  code                     String                        @unique
+  name                     String
+  leaveType                LeaveDefinitionType
+  allowedUsers             LeaveDefinitionAllowedUsers   @default(ALL)
+  minDaysPerRequest        Int                           @default(1)
+  maxDaysPerRequest        Int                           @default(30)
+  allowWithOtherLeaves     Boolean                       @default(true)
+  priorEntryAllowed        Boolean                       @default(false)
+  noticeDays               Int                           @default(0)
+  allowCarryForward        Boolean                       @default(false)
+  weekOffSingleSideAllowed Boolean                       @default(true)
+  weekOffBothSideAllowed   Boolean                       @default(true)
+  holidaySingleSideAllowed Boolean                       @default(true)
+  holidayBothSideAllowed   Boolean                       @default(true)
+  maxConsecutiveDays       Int                           @default(30)
+  maxPendingRequests       Int                           @default(3)
+  status                   LeaveDefinitionStatus         @default(ACTIVE)
+  sortOrder                Int                           @default(0)
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
+  nonClubbableWithFrom     LeaveDefinitionNonClubbable[] @relation("LeaveDefinitionNonClubbableFrom")
+  nonClubbableWithTo       LeaveDefinitionNonClubbable[] @relation("LeaveDefinitionNonClubbableTo")
+  leaveGroups              LeaveGroupLeave[]
+  leaveRequests            LeaveRequest[]
 
   @@unique([name])
   @@index([status])
@@ -296,16 +318,16 @@ model LeaveDefinition {
 }
 
 model LeaveGroup {
-  id             String                   @id @default(cuid())
-  code           String                   @unique
-  name           String
-  description    String?
-  assignmentMode LeaveGroupAssignmentMode @default(ALL_STAFF)
-  status         LeaveGroupStatus         @default(ACTIVE)
-  sortOrder      Int                      @default(0)
-  createdAt      DateTime                 @default(now())
-  updatedAt      DateTime                 @updatedAt
-  leaves         LeaveGroupLeave[]
+  id               String                      @id @default(cuid())
+  code             String                      @unique
+  name             String
+  description      String?
+  assignmentMode   LeaveGroupAssignmentMode    @default(ALL_STAFF)
+  status           LeaveGroupStatus            @default(ACTIVE)
+  sortOrder        Int                         @default(0)
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+  leaves           LeaveGroupLeave[]
   staffAssignments LeaveGroupStaffAssignment[]
 
   @@unique([name])
@@ -328,11 +350,11 @@ model LeaveGroupLeave {
 }
 
 model LeaveGroupStaffAssignment {
-  id             String      @id @default(cuid())
+  id             String       @id @default(cuid())
   leaveGroupId   String
   staffProfileId String
-  createdAt      DateTime    @default(now())
-  leaveGroup     LeaveGroup  @relation(fields: [leaveGroupId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  leaveGroup     LeaveGroup   @relation(fields: [leaveGroupId], references: [id], onDelete: Cascade)
   staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
 
   @@unique([leaveGroupId, staffProfileId])
@@ -354,28 +376,28 @@ model LeaveDefinitionNonClubbable {
 }
 
 model LeaveRequest {
-  id               String             @id @default(cuid())
-  staffProfileId   String
+  id                String                  @id @default(cuid())
+  staffProfileId    String
   leaveDefinitionId String
-  startDate        DateTime           @db.Date
-  endDate          DateTime           @db.Date
-  daysCount        Float
-  reason           String?
-  status           LeaveRequestStatus @default(PENDING)
-  reviewedByUserId String?
-  reviewedAt       DateTime?
-  reviewerComment  String?
-  canceledAt       DateTime?
-  cancelReason     String?
-  revokedAt        DateTime?
-  revokedByUserId  String?
-  revokeReason     String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  staffProfile     StaffProfile       @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
-  leaveDefinition  LeaveDefinition    @relation(fields: [leaveDefinitionId], references: [id], onDelete: Restrict)
-  reviewedByUser   User?              @relation("LeaveRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
-  revokedByUser    User?              @relation("LeaveRequestRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  startDate         DateTime                @db.Date
+  endDate           DateTime                @db.Date
+  daysCount         Float
+  reason            String?
+  status            LeaveRequestStatus      @default(PENDING)
+  reviewedByUserId  String?
+  reviewedAt        DateTime?
+  reviewerComment   String?
+  canceledAt        DateTime?
+  cancelReason      String?
+  revokedAt         DateTime?
+  revokedByUserId   String?
+  revokeReason      String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  staffProfile      StaffProfile            @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  leaveDefinition   LeaveDefinition         @relation(fields: [leaveDefinitionId], references: [id], onDelete: Restrict)
+  reviewedByUser    User?                   @relation("LeaveRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  revokedByUser     User?                   @relation("LeaveRequestRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
   rosterHistoryDays StaffRosterHistoryDay[]
 
   @@index([staffProfileId])
@@ -389,24 +411,24 @@ model LeaveRequest {
 }
 
 model Service {
-  id              String        @id @default(cuid())
-  name            String
-  description     String?
-  durationMinutes Int
-  priceCents      Int
-  status          ServiceStatus @default(ACTIVE)
-  type            ServiceType   @default(STANDARD)
-  taxMode         TaxMode       @default(EXCLUSIVE)
-  categoryId      String
-  category        ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  packageItems    ServicePackageItem[] @relation("PackageItems")
-  includedIn      ServicePackageItem[] @relation("PackageItemService")
-  defaultTaxes    ServiceTax[]
-  eligibleStaff   StaffServiceEligibility[]
-  appointments    Appointment[]
+  id                    String                    @id @default(cuid())
+  name                  String
+  description           String?
+  durationMinutes       Int
+  priceCents            Int
+  status                ServiceStatus             @default(ACTIVE)
+  type                  ServiceType               @default(STANDARD)
+  taxMode               TaxMode                   @default(EXCLUSIVE)
+  categoryId            String
+  category              ServiceCategory           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  packageItems          ServicePackageItem[]      @relation("PackageItems")
+  includedIn            ServicePackageItem[]      @relation("PackageItemService")
+  defaultTaxes          ServiceTax[]
+  eligibleStaff         StaffServiceEligibility[]
+  appointments          Appointment[]
   appointmentOrderLines AppointmentOrderLine[]
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
 
   @@index([status])
   @@index([categoryId])
@@ -414,20 +436,20 @@ model Service {
 }
 
 model Appointment {
-  id             String            @id @default(cuid())
+  id             String                @id @default(cuid())
   staffProfileId String
   customerId     String
   serviceId      String
   orderLineId    String?
   startAt        DateTime
   endAt          DateTime
-  status         AppointmentStatus @default(SCHEDULED)
+  status         AppointmentStatus     @default(SCHEDULED)
   orderLine      AppointmentOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
-  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
-  customer       User         @relation("CustomerAppointments", fields: [customerId], references: [id], onDelete: Restrict)
-  service        Service      @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  staffProfile   StaffProfile          @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  customer       User                  @relation("CustomerAppointments", fields: [customerId], references: [id], onDelete: Restrict)
+  service        Service               @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
 
   @@index([staffProfileId])
   @@index([customerId])
@@ -439,25 +461,25 @@ model Appointment {
 }
 
 model AppointmentOrder {
-  id                   String   @id @default(cuid())
-  customerId           String
-  appointmentDate      DateTime @db.Date
-  appointmentStartAt   DateTime
-  status               AppointmentOrderStatus @default(DRAFT)
-  customerNote         String?
-  internalNote         String?
-  subtotalCents        Int      @default(0)
-  lineDiscountCents    Int      @default(0)
-  couponDiscountCents  Int      @default(0)
-  taxCents             Int      @default(0)
-  totalCents           Int      @default(0)
-  customer             User     @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  lines                AppointmentOrderLine[]
-  productLines         AppointmentOrderProductLine[]
-  coupons              AppointmentOrderCoupon[]
-  taxes                AppointmentOrderTax[]
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id                  String                        @id @default(cuid())
+  customerId          String
+  appointmentDate     DateTime                      @db.Date
+  appointmentStartAt  DateTime
+  status              AppointmentOrderStatus        @default(DRAFT)
+  customerNote        String?
+  internalNote        String?
+  subtotalCents       Int                           @default(0)
+  lineDiscountCents   Int                           @default(0)
+  couponDiscountCents Int                           @default(0)
+  taxCents            Int                           @default(0)
+  totalCents          Int                           @default(0)
+  customer            User                          @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  lines               AppointmentOrderLine[]
+  productLines        AppointmentOrderProductLine[]
+  coupons             AppointmentOrderCoupon[]
+  taxes               AppointmentOrderTax[]
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
 
   @@index([customerId])
   @@index([appointmentDate])
@@ -466,31 +488,31 @@ model AppointmentOrder {
 }
 
 model AppointmentOrderLine {
-  id                String   @id @default(cuid())
+  id                String           @id @default(cuid())
   orderId           String
-  sortOrder         Int      @default(0)
+  sortOrder         Int              @default(0)
   serviceId         String
   staffProfileId    String
-  quantity          Int      @default(1)
+  quantity          Int              @default(1)
   durationMinutes   Int
   unitPriceCents    Int
-  discountType      DiscountType @default(NONE)
-  discountValue     Float    @default(0)
-  taxMode           TaxMode  @default(EXCLUSIVE)
-  taxIds            String[] @default([])
-  lineSubtotalCents Int      @default(0)
-  lineDiscountCents Int      @default(0)
-  lineTaxCents      Int      @default(0)
-  lineTotalCents    Int      @default(0)
+  discountType      DiscountType     @default(NONE)
+  discountValue     Float            @default(0)
+  taxMode           TaxMode          @default(EXCLUSIVE)
+  taxIds            String[]         @default([])
+  lineSubtotalCents Int              @default(0)
+  lineDiscountCents Int              @default(0)
+  lineTaxCents      Int              @default(0)
+  lineTotalCents    Int              @default(0)
   startAt           DateTime
   endAt             DateTime
   note              String?
   order             AppointmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  service           Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-  staffProfile      StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Restrict)
+  service           Service          @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  staffProfile      StaffProfile     @relation(fields: [staffProfileId], references: [id], onDelete: Restrict)
   appointments      Appointment[]
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   @@index([orderId])
   @@index([serviceId])
@@ -500,52 +522,52 @@ model AppointmentOrderLine {
 }
 
 model AppointmentOrderProductLine {
-  id                String   @id @default(cuid())
+  id                String           @id @default(cuid())
   orderId           String
-  sortOrder         Int      @default(0)
+  sortOrder         Int              @default(0)
   productId         String
-  quantity          Int      @default(1)
+  quantity          Int              @default(1)
   unitPriceCents    Int
-  discountType      DiscountType @default(NONE)
-  discountValue     Float    @default(0)
-  taxMode           TaxMode  @default(EXCLUSIVE)
-  taxIds            String[] @default([])
-  lineSubtotalCents Int      @default(0)
-  lineDiscountCents Int      @default(0)
-  lineTaxCents      Int      @default(0)
-  lineTotalCents    Int      @default(0)
+  discountType      DiscountType     @default(NONE)
+  discountValue     Float            @default(0)
+  taxMode           TaxMode          @default(EXCLUSIVE)
+  taxIds            String[]         @default([])
+  lineSubtotalCents Int              @default(0)
+  lineDiscountCents Int              @default(0)
+  lineTaxCents      Int              @default(0)
+  lineTotalCents    Int              @default(0)
   note              String?
   order             AppointmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product           InventoryProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   @@index([orderId])
   @@index([productId])
 }
 
 model AppointmentOrderCoupon {
-  id            String   @id @default(cuid())
-  orderId        String
+  id            String           @id @default(cuid())
+  orderId       String
   code          String
-  discountType  DiscountType @default(NONE)
-  discountValue Float    @default(0)
-  discountCents Int      @default(0)
+  discountType  DiscountType     @default(NONE)
+  discountValue Float            @default(0)
+  discountCents Int              @default(0)
   order         AppointmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  createdAt     DateTime @default(now())
+  createdAt     DateTime         @default(now())
 
   @@index([orderId])
   @@index([code])
 }
 
 model ServicePackageItem {
-  id             String   @id @default(cuid())
-  packageId      String
-  itemServiceId  String
-  sortOrder      Int      @default(0)
-  package        Service  @relation("PackageItems", fields: [packageId], references: [id], onDelete: Cascade)
-  itemService    Service  @relation("PackageItemService", fields: [itemServiceId], references: [id], onDelete: Restrict)
-  createdAt      DateTime @default(now())
+  id            String   @id @default(cuid())
+  packageId     String
+  itemServiceId String
+  sortOrder     Int      @default(0)
+  package       Service  @relation("PackageItems", fields: [packageId], references: [id], onDelete: Cascade)
+  itemService   Service  @relation("PackageItemService", fields: [itemServiceId], references: [id], onDelete: Restrict)
+  createdAt     DateTime @default(now())
 
   @@unique([packageId, itemServiceId])
   @@index([packageId])
@@ -553,57 +575,57 @@ model ServicePackageItem {
 }
 
 model AppSetting {
-  id         String   @id @default("global")
-  locale     String   @default("en-US")
-  currency   String   @default("USD")
-  timeZone   String   @default("America/New_York")
-  dateFormat String   @default("MM/dd/yyyy")
-  timeFormat TimeFormat @default(H24)
-  firstDayOfWeek Weekday @default(SUNDAY)
-  emailNotificationsEnabled Boolean @default(false)
-  currencySymbolPlacement CurrencySymbolPlacement @default(BEFORE)
-  numberFormat NumberFormatStyle @default(US_UK)
-  updatedAt  DateTime @updatedAt
-  workingDays AppSettingDay[]
-  overrides  AppSettingOverride[]
+  id                        String                  @id @default("global")
+  locale                    String                  @default("en-US")
+  currency                  String                  @default("USD")
+  timeZone                  String                  @default("America/New_York")
+  dateFormat                String                  @default("MM/dd/yyyy")
+  timeFormat                TimeFormat              @default(H24)
+  firstDayOfWeek            Weekday                 @default(SUNDAY)
+  emailNotificationsEnabled Boolean                 @default(false)
+  currencySymbolPlacement   CurrencySymbolPlacement @default(BEFORE)
+  numberFormat              NumberFormatStyle       @default(US_UK)
+  updatedAt                 DateTime                @updatedAt
+  workingDays               AppSettingDay[]
+  overrides                 AppSettingOverride[]
 }
 
 model Coupon {
-  id            String   @id @default(cuid())
-  code          String   @unique
-  name          String?
-  discountType  DiscountType @default(NONE)
-  discountValue Float    @default(0)
-  appliesTo     CouponAppliesTo @default(ORDER)
-  allowedServiceIds String[] @default([])
-  allowedCategoryIds String[] @default([])
-  allowedProductIds String[] @default([])
-  minSubtotalCents Int @default(0)
-  stackingMode  CouponStackingMode @default(STACKABLE)
-  isActive      Boolean  @default(true)
-  validFrom     DateTime? @db.Date
-  validTo       DateTime? @db.Date
-  maxUses       Int?
+  id                 String             @id @default(cuid())
+  code               String             @unique
+  name               String?
+  discountType       DiscountType       @default(NONE)
+  discountValue      Float              @default(0)
+  appliesTo          CouponAppliesTo    @default(ORDER)
+  allowedServiceIds  String[]           @default([])
+  allowedCategoryIds String[]           @default([])
+  allowedProductIds  String[]           @default([])
+  minSubtotalCents   Int                @default(0)
+  stackingMode       CouponStackingMode @default(STACKABLE)
+  isActive           Boolean            @default(true)
+  validFrom          DateTime?          @db.Date
+  validTo            DateTime?          @db.Date
+  maxUses            Int?
   maxUsesPerCustomer Int?
-  usedCount     Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  usedCount          Int                @default(0)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   @@index([isActive])
   @@index([code])
 }
 
 model Tax {
-  id          String   @id @default(cuid())
-  name        String
-  percent     Float
-  isActive    Boolean  @default(true)
-  sortOrder   Int      @default(0)
-  services    ServiceTax[]
+  id                String                @id @default(cuid())
+  name              String
+  percent           Float
+  isActive          Boolean               @default(true)
+  sortOrder         Int                   @default(0)
+  services          ServiceTax[]
   inventoryProducts InventoryProductTax[]
-  orders      AppointmentOrderTax[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  orders            AppointmentOrderTax[]
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
 
   @@unique([name])
   @@index([isActive])
@@ -611,60 +633,60 @@ model Tax {
 }
 
 model ServiceTax {
-  serviceId   String
-  taxId       String
-  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  tax         Tax      @relation(fields: [taxId], references: [id], onDelete: Restrict)
-  createdAt   DateTime @default(now())
+  serviceId String
+  taxId     String
+  service   Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  tax       Tax      @relation(fields: [taxId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
 
   @@id([serviceId, taxId])
   @@index([taxId])
 }
 
 model AppointmentOrderTax {
-  id          String   @id @default(cuid())
-  orderId     String
-  taxId       String?
-  name        String
-  percent     Float
-  taxCents    Int      @default(0)
-  order       AppointmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  tax         Tax?     @relation(fields: [taxId], references: [id], onDelete: SetNull)
-  createdAt   DateTime @default(now())
+  id        String           @id @default(cuid())
+  orderId   String
+  taxId     String?
+  name      String
+  percent   Float
+  taxCents  Int              @default(0)
+  order     AppointmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tax       Tax?             @relation(fields: [taxId], references: [id], onDelete: SetNull)
+  createdAt DateTime         @default(now())
 
   @@index([orderId])
   @@index([taxId])
 }
 
 model AppSettingDay {
-  id        String   @id @default(cuid())
+  id        String             @id @default(cuid())
   settingId String
   day       Weekday
-  isOpen    Boolean  @default(true)
-  setting   AppSetting @relation(fields: [settingId], references: [id], onDelete: Cascade)
+  isOpen    Boolean            @default(true)
+  setting   AppSetting         @relation(fields: [settingId], references: [id], onDelete: Cascade)
   periods   AppSettingPeriod[]
 
   @@unique([settingId, day])
 }
 
 model AppSettingPeriod {
-  id        String   @id @default(cuid())
+  id        String               @id @default(cuid())
   dayId     String
   kind      AppSettingPeriodType
   startTime String
   endTime   String
-  sortOrder Int      @default(0)
-  day       AppSettingDay @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  sortOrder Int                  @default(0)
+  day       AppSettingDay        @relation(fields: [dayId], references: [id], onDelete: Cascade)
 
   @@index([dayId])
 }
 
 model AppSettingOverride {
-  id        String   @id @default(cuid())
+  id        String                     @id @default(cuid())
   settingId String
-  date      DateTime @db.Date
-  isOpen    Boolean  @default(true)
-  setting   AppSetting @relation(fields: [settingId], references: [id], onDelete: Cascade)
+  date      DateTime                   @db.Date
+  isOpen    Boolean                    @default(true)
+  setting   AppSetting                 @relation(fields: [settingId], references: [id], onDelete: Cascade)
   periods   AppSettingOverridePeriod[]
 
   @@unique([settingId, date])
@@ -673,13 +695,13 @@ model AppSettingOverride {
 }
 
 model AppSettingOverridePeriod {
-  id        String   @id @default(cuid())
+  id         String               @id @default(cuid())
   overrideId String
-  kind      AppSettingPeriodType
-  startTime String
-  endTime   String
-  sortOrder Int      @default(0)
-  override  AppSettingOverride @relation(fields: [overrideId], references: [id], onDelete: Cascade)
+  kind       AppSettingPeriodType
+  startTime  String
+  endTime    String
+  sortOrder  Int                  @default(0)
+  override   AppSettingOverride   @relation(fields: [overrideId], references: [id], onDelete: Cascade)
 
   @@index([overrideId])
 }
@@ -698,22 +720,22 @@ model StaffServiceEligibility {
 }
 
 model StaffProfile {
-  id                 String   @id @default(cuid())
-  userId             String   @unique
-  managerUserId      String?
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  manager            User?    @relation("StaffProfileManager", fields: [managerUserId], references: [id], onDelete: SetNull)
-  appointments       Appointment[]
+  id                    String                      @id @default(cuid())
+  userId                String                      @unique
+  managerUserId         String?
+  user                  User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  manager               User?                       @relation("StaffProfileManager", fields: [managerUserId], references: [id], onDelete: SetNull)
+  appointments          Appointment[]
   appointmentOrderLines AppointmentOrderLine[]
-  certifications     StaffCertification[]
-  documents          StaffDocument[]
-  scheduleAssignments StaffScheduleAssignment[]
-  shiftOverrides     StaffShiftOverride[]
+  certifications        StaffCertification[]
+  documents             StaffDocument[]
+  scheduleAssignments   StaffScheduleAssignment[]
+  shiftOverrides        StaffShiftOverride[]
   leaveGroupAssignments LeaveGroupStaffAssignment[]
-  leaveRequests      LeaveRequest[]
-  rosterHistoryDays  StaffRosterHistoryDay[]
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  leaveRequests         LeaveRequest[]
+  rosterHistoryDays     StaffRosterHistoryDay[]
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime                    @updatedAt
 
   @@index([managerUserId])
 }
@@ -745,84 +767,84 @@ model StaffRosterHistoryDay {
 }
 
 model StaffCertification {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   staffProfileId String
   title          String
   issuer         String?
-  issuedAt       DateTime? @db.Date
-  expiresAt      DateTime? @db.Date
+  issuedAt       DateTime?    @db.Date
+  expiresAt      DateTime?    @db.Date
   staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
 
   @@index([staffProfileId])
 }
 
 model StaffDocument {
-  id             String   @id @default(cuid())
+  id             String            @id @default(cuid())
   staffProfileId String
   type           StaffDocumentType
   number         String?
   imageUrl       String
-  validFrom      DateTime? @db.Date
-  validTo        DateTime? @db.Date
-  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
-  createdAt      DateTime @default(now())
+  validFrom      DateTime?         @db.Date
+  validTo        DateTime?         @db.Date
+  staffProfile   StaffProfile      @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  createdAt      DateTime          @default(now())
 
   @@index([staffProfileId])
 }
 
 model ShiftTemplate {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  color       String?
-  isActive    Boolean  @default(true)
-  startTime   String
-  endTime     String
-  breaks      ShiftTemplateBreak[]
-  schedules   ShiftScheduleBlock[]
-  overrides   StaffShiftOverride[]
+  id                String                  @id @default(cuid())
+  name              String
+  description       String?
+  color             String?
+  isActive          Boolean                 @default(true)
+  startTime         String
+  endTime           String
+  breaks            ShiftTemplateBreak[]
+  schedules         ShiftScheduleBlock[]
+  overrides         StaffShiftOverride[]
   rosterHistoryDays StaffRosterHistoryDay[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
 
   @@index([isActive])
   @@index([createdAt])
 }
 
 model ShiftTemplateBreak {
-  id         String   @id @default(cuid())
+  id         String        @id @default(cuid())
   templateId String
   startTime  String
   endTime    String
-  sortOrder  Int      @default(0)
+  sortOrder  Int           @default(0)
   template   ShiftTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
 
   @@index([templateId])
 }
 
 model ShiftSchedule {
-  id             String   @id @default(cuid())
-  name           String?
-  isDefault      Boolean  @default(false)
-  startDate      DateTime @db.Date
-  weekOffDay1    Weekday
-  weekOffDay2    Weekday?
-  weekOff2Weeks  Int[]
-  blocks         ShiftScheduleBlock[]
-  assignments    StaffScheduleAssignment[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String                    @id @default(cuid())
+  name          String?
+  isDefault     Boolean                   @default(false)
+  startDate     DateTime                  @db.Date
+  weekOffDay1   Weekday
+  weekOffDay2   Weekday?
+  weekOff2Weeks Int[]
+  blocks        ShiftScheduleBlock[]
+  assignments   StaffScheduleAssignment[]
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
 
   @@index([startDate])
 }
 
 model ShiftScheduleBlock {
-  id         String   @id @default(cuid())
+  id         String        @id @default(cuid())
   scheduleId String
   templateId String
   repeatDays Int
-  sortOrder  Int      @default(0)
+  sortOrder  Int           @default(0)
   schedule   ShiftSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
   template   ShiftTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
 
@@ -831,15 +853,15 @@ model ShiftScheduleBlock {
 }
 
 model StaffScheduleAssignment {
-  id             String   @id @default(cuid())
+  id             String        @id @default(cuid())
   staffProfileId String
   scheduleId     String
-  startDate      DateTime @db.Date
-  endDate        DateTime? @db.Date
-  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  startDate      DateTime      @db.Date
+  endDate        DateTime?     @db.Date
+  staffProfile   StaffProfile  @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
   schedule       ShiftSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   @@index([staffProfileId])
   @@index([scheduleId])
@@ -848,14 +870,14 @@ model StaffScheduleAssignment {
 }
 
 model StaffShiftOverride {
-  id             String   @id @default(cuid())
+  id             String         @id @default(cuid())
   staffProfileId String
-  date           DateTime @db.Date
+  date           DateTime       @db.Date
   templateId     String?
-  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  staffProfile   StaffProfile   @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
   template       ShiftTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   @@unique([staffProfileId, date])
   @@index([staffProfileId])
@@ -898,26 +920,26 @@ model VerificationToken {
 }
 
 model Invitation {
-  id          String      @id @default(cuid())
+  id          String    @id @default(cuid())
   email       String
-  token       String      @unique
-  role        Role        @default(CUSTOMER)
+  token       String    @unique
+  role        Role      @default(CUSTOMER)
   expiresAt   DateTime
-  acceptedAt DateTime?
+  acceptedAt  DateTime?
   invitedById String?
-  invitedBy   User?       @relation("UserInvitations", fields: [invitedById], references: [id], onDelete: SetNull)
-  createdAt   DateTime    @default(now())
+  invitedBy   User?     @relation("UserInvitations", fields: [invitedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
 
   @@index([email])
 }
 
 model PasswordResetToken {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
-  tokenHash String   @unique
+  tokenHash String    @unique
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -926,68 +948,68 @@ model PasswordResetToken {
 }
 
 model InventoryCategory {
-  id          String   @id @default(cuid())
-  name        String   @unique
+  id          String                  @id @default(cuid())
+  name        String                  @unique
   description String?
   status      InventoryCategoryStatus @default(ACTIVE)
-  sortOrder   Int      @default(0)
+  sortOrder   Int                     @default(0)
   products    InventoryProduct[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
 
   @@index([status])
   @@index([sortOrder])
 }
 
 model Supplier {
-  id            String   @id @default(cuid())
-  name          String
-  contactPerson String?
-  email         String?
-  phone         String?
-  isTaxRegistered Boolean @default(false)
-  taxRegistrationType TaxRegistrationType?
+  id                    String                     @id @default(cuid())
+  name                  String
+  contactPerson         String?
+  email                 String?
+  phone                 String?
+  isTaxRegistered       Boolean                    @default(false)
+  taxRegistrationType   TaxRegistrationType?
   taxRegistrationNumber String?
-  leadTimeDays  Int      @default(0)
-  addressLine1  String?
-  addressLine2  String?
-  city          String?
-  state         String?
-  postalCode    String?
-  country       String?
-  notes         String?
-  status        SupplierStatus @default(ACTIVE)
-  products      InventoryProductSupplier[]
-  purchaseOrders PurchaseOrder[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  leadTimeDays          Int                        @default(0)
+  addressLine1          String?
+  addressLine2          String?
+  city                  String?
+  state                 String?
+  postalCode            String?
+  country               String?
+  notes                 String?
+  status                SupplierStatus             @default(ACTIVE)
+  products              InventoryProductSupplier[]
+  purchaseOrders        PurchaseOrder[]
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
 
   @@index([name])
   @@index([status])
 }
 
 model InventoryProduct {
-  id             String   @id @default(cuid())
-  sku            String   @unique
-  name           String
-  description    String?
-  unit           String   @default("unit")
-  categoryId     String
-  status         InventoryProductStatus @default(ACTIVE)
-  costPriceCents Int      @default(0)
-  mrpCents       Int      @default(0)
-  reorderPoint   Int      @default(0)
-  reorderQty     Int      @default(0)
-  onHandQty      Int      @default(0)
-  isPhysical     Boolean  @default(true)
-  category       InventoryCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  suppliers      InventoryProductSupplier[]
-  taxes          InventoryProductTax[]
-  purchaseItems  PurchaseOrderItem[]
+  id                           String                        @id @default(cuid())
+  sku                          String                        @unique
+  name                         String
+  description                  String?
+  unit                         String                        @default("unit")
+  categoryId                   String
+  status                       InventoryProductStatus        @default(ACTIVE)
+  costPriceCents               Int                           @default(0)
+  mrpCents                     Int                           @default(0)
+  reorderPoint                 Int                           @default(0)
+  reorderQty                   Int                           @default(0)
+  onHandQty                    Int                           @default(0)
+  isPhysical                   Boolean                       @default(true)
+  category                     InventoryCategory             @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  suppliers                    InventoryProductSupplier[]
+  taxes                        InventoryProductTax[]
+  purchaseItems                PurchaseOrderItem[]
   appointmentOrderProductLines AppointmentOrderProductLine[]
-  stockMovements InventoryStockMovement[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  stockMovements               InventoryStockMovement[]
+  createdAt                    DateTime                      @default(now())
+  updatedAt                    DateTime                      @updatedAt
 
   @@index([name])
   @@index([status])
@@ -1000,14 +1022,14 @@ model InventoryProductSupplier {
   supplierId        String
   supplierSku       String?
   supplierCostCents Int?
-  minOrderQty       Int      @default(1)
+  minOrderQty       Int              @default(1)
   leadTimeDays      Int?
-  isPreferred       Boolean  @default(false)
+  isPreferred       Boolean          @default(false)
   lastPurchasedAt   DateTime?
   product           InventoryProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
-  supplier          Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  supplier          Supplier         @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   @@id([productId, supplierId])
   @@index([supplierId])
@@ -1018,29 +1040,29 @@ model InventoryProductTax {
   productId String
   taxId     String
   product   InventoryProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
-  tax       Tax      @relation(fields: [taxId], references: [id], onDelete: Restrict)
-  createdAt DateTime @default(now())
+  tax       Tax              @relation(fields: [taxId], references: [id], onDelete: Restrict)
+  createdAt DateTime         @default(now())
 
   @@id([productId, taxId])
   @@index([taxId])
 }
 
 model PurchaseOrder {
-  id           String   @id @default(cuid())
-  orderNumber  String   @unique
-  supplierId   String
-  status       PurchaseOrderStatus @default(DRAFT)
-  orderDate    DateTime @db.Date
-  expectedDate DateTime? @db.Date
-  notes        String?
-  subtotalCents Int     @default(0)
-  taxCents     Int      @default(0)
-  totalCents   Int      @default(0)
-  receivedAt   DateTime?
-  supplier     Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  items        PurchaseOrderItem[]
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String              @id @default(cuid())
+  orderNumber   String              @unique
+  supplierId    String
+  status        PurchaseOrderStatus @default(DRAFT)
+  orderDate     DateTime            @db.Date
+  expectedDate  DateTime?           @db.Date
+  notes         String?
+  subtotalCents Int                 @default(0)
+  taxCents      Int                 @default(0)
+  totalCents    Int                 @default(0)
+  receivedAt    DateTime?
+  supplier      Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  items         PurchaseOrderItem[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
 
   @@index([supplierId])
   @@index([status])
@@ -1048,38 +1070,38 @@ model PurchaseOrder {
 }
 
 model PurchaseOrderItem {
-  id            String   @id @default(cuid())
-  orderId       String
-  productId     String
-  quantity      Int
-  receivedQty   Int      @default(0)
-  unitCostCents Int
-  taxPercent    Float    @default(0)
-  lineSubtotalCents Int  @default(0)
-  lineTaxCents  Int      @default(0)
-  lineTotalCents Int     @default(0)
-  order         PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product       InventoryProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
-  stockMovements InventoryStockMovement[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                String                   @id @default(cuid())
+  orderId           String
+  productId         String
+  quantity          Int
+  receivedQty       Int                      @default(0)
+  unitCostCents     Int
+  taxPercent        Float                    @default(0)
+  lineSubtotalCents Int                      @default(0)
+  lineTaxCents      Int                      @default(0)
+  lineTotalCents    Int                      @default(0)
+  order             PurchaseOrder            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product           InventoryProduct         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  stockMovements    InventoryStockMovement[]
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
 
   @@index([orderId])
   @@index([productId])
 }
 
 model InventoryStockMovement {
-  id           String   @id @default(cuid())
-  productId    String
-  orderItemId  String?
-  type         StockMovementType
+  id            String             @id @default(cuid())
+  productId     String
+  orderItemId   String?
+  type          StockMovementType
   quantityDelta Int
   unitCostCents Int?
-  note         String?
-  occurredAt   DateTime @default(now())
-  product      InventoryProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
-  orderItem    PurchaseOrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
-  createdAt    DateTime @default(now())
+  note          String?
+  occurredAt    DateTime           @default(now())
+  product       InventoryProduct   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  orderItem     PurchaseOrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  createdAt     DateTime           @default(now())
 
   @@index([productId])
   @@index([orderItemId])

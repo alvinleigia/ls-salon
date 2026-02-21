@@ -9,6 +9,7 @@ import {
   logApiRequestSuccess,
   withRequestId,
 } from "@/lib/api-logging"
+import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import { checkStaffAppointmentAvailability } from "@/app/api/appointments/_availability"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
@@ -32,6 +33,7 @@ export async function POST(request: Request) {
 
   const session = await auth()
   const role = (session?.user as { role?: string })?.role
+  const sessionUserId = (session?.user as { id?: string })?.id
 
   if (!session?.user || !canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -64,6 +66,20 @@ export async function POST(request: Request) {
       where: { id: { in: appointmentIds } },
       data: { status: AppointmentStatus.CANCELED },
     })
+      await recordDomainAuditEventSafe(prisma, {
+        event: "appointment.bulk_canceled",
+        entityType: "Appointment",
+        actorUserId: sessionUserId ?? null,
+        actorRole: role ?? null,
+        requestId: logContext.requestId,
+        metadata: {
+          appointmentIds,
+          updatedCount: result.count,
+        },
+        after: {
+          status: AppointmentStatus.CANCELED,
+        },
+      })
       const response = NextResponse.json({ updatedCount: result.count })
       logApiRequestSuccess(logContext, 200, { action: body.action, updatedCount: result.count })
       return withRequestId(response, logContext.requestId)
@@ -88,6 +104,19 @@ export async function POST(request: Request) {
       where: { id: { in: appointmentIds } },
       data: { staffProfileId: staffProfile.id },
     })
+      await recordDomainAuditEventSafe(prisma, {
+        event: "appointment.bulk_reassigned",
+        entityType: "Appointment",
+        actorUserId: sessionUserId ?? null,
+        actorRole: role ?? null,
+        requestId: logContext.requestId,
+        metadata: {
+          appointmentIds,
+          targetStaffId: body.targetStaffId,
+          targetStaffProfileId: staffProfile.id,
+          updatedCount: result.count,
+        },
+      })
       const response = NextResponse.json({ updatedCount: result.count })
       logApiRequestSuccess(logContext, 200, { action: body.action, updatedCount: result.count })
       return withRequestId(response, logContext.requestId)
@@ -190,6 +219,19 @@ export async function POST(request: Request) {
     })
 
     await prisma.$transaction(updates)
+      await recordDomainAuditEventSafe(prisma, {
+        event: "appointment.bulk_rescheduled",
+        entityType: "Appointment",
+        actorUserId: sessionUserId ?? null,
+        actorRole: role ?? null,
+        requestId: logContext.requestId,
+        metadata: {
+          appointmentIds,
+          updatedCount: updates.length,
+          rescheduleDate: body.rescheduleDate,
+          rescheduleTime: body.rescheduleTime,
+        },
+      })
       const response = NextResponse.json({ updatedCount: updates.length })
       logApiRequestSuccess(logContext, 200, { action: body.action, updatedCount: updates.length })
       return withRequestId(response, logContext.requestId)

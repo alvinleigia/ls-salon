@@ -14,6 +14,7 @@ import {
   normalizeHistoryRangeToPast,
   syncRosterHistoryRange,
 } from "@/lib/roster-history"
+import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import { reviewLeaveRequestSchema } from "@/lib/validation"
 import { notifyLeaveReviewed } from "../../../_notifications"
 import {
@@ -175,6 +176,24 @@ export async function PATCH(
       startDateIso: serialized.startDate.slice(0, 10),
       endDateIso: serialized.endDate.slice(0, 10),
       daysCount: serialized.daysCount,
+    })
+    await recordDomainAuditEventSafe(prisma, {
+      event: "leave.request.reviewed",
+      entityType: "LeaveRequest",
+      entityId: serialized.id,
+      actorUserId: reviewer.id,
+      actorRole: role ?? null,
+      requestId: logContext.requestId,
+      metadata: {
+        reviewerComment: parsed.data.reviewerComment?.trim() || null,
+      },
+      before: {
+        status: current.status,
+      },
+      after: {
+        status: serialized.status,
+        reviewedAt: serialized.reviewedAt,
+      },
     })
 
     const response = NextResponse.json({ item: serialized })
