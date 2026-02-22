@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 import { AppointmentStatus } from "@prisma/client"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -12,6 +11,7 @@ import {
 } from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import type { AppointmentAvailabilityResult } from "@/types/appointments"
 import { checkStaffAppointmentAvailability } from "../_availability"
 
@@ -33,10 +33,14 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "unauthorized_or_invalid_tenant" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -70,16 +74,16 @@ export async function POST(request: Request) {
 
   const [staffProfile, service, customer] = await Promise.all([
     prisma.staffProfile.findFirst({
-      where: { userId: staffId, user: { role: "STAFF", status: "ACTIVE" } },
+      where: { userId: staffId, user: { tenantId, role: "STAFF", status: "ACTIVE" } },
       select: { id: true },
     }),
-    prisma.service.findUnique({
-      where: { id: serviceId },
+    prisma.service.findFirst({
+      where: { id: serviceId, tenantId },
       select: { id: true, durationMinutes: true, status: true },
     }),
     customerId
-      ? prisma.user.findUnique({
-          where: { id: customerId },
+      ? prisma.user.findFirst({
+          where: { id: customerId, tenantId },
           select: { id: true, role: true, status: true },
         })
       : Promise.resolve(null),
@@ -109,7 +113,8 @@ export async function POST(request: Request) {
   const staffShiftAvailability = await checkStaffAppointmentAvailability(
     staffProfile.id,
     startAt,
-    endAt
+    endAt,
+    tenantId
   )
   if (!staffShiftAvailability.ok) {
     const result: AppointmentAvailabilityResult = {
@@ -124,6 +129,7 @@ export async function POST(request: Request) {
   const staffConflict = await prisma.appointment.findFirst({
     where: {
       id: appointmentId ? { not: appointmentId } : undefined,
+      tenantId,
       staffProfileId: staffProfile.id,
       status: { in: ACTIVE_APPOINTMENT_STATUSES },
       startAt: { lt: endAt },
@@ -144,6 +150,7 @@ export async function POST(request: Request) {
     const customerConflict = await prisma.appointment.findFirst({
       where: {
         id: appointmentId ? { not: appointmentId } : undefined,
+        tenantId,
         customerId,
         status: { in: ACTIVE_APPOINTMENT_STATUSES },
         startAt: { lt: endAt },

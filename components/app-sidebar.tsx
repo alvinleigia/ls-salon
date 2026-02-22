@@ -65,7 +65,7 @@ export function AppSidebar() {
   const tenantSlug = React.useMemo(() => {
     if (typeof window === "undefined") return null
     const hostname = window.location.hostname.toLowerCase()
-    if (hostname === "localhost") return "default"
+    if (hostname === "localhost") return platformTenantSlug
     if (hostname.endsWith(".localhost")) {
       const slug = hostname.slice(0, -".localhost".length)
       return slug || null

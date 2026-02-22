@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -10,6 +9,7 @@ import {
 } from "@/lib/api-logging"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import { buildAppointmentOrderInvoicePdf } from "@/lib/invoice"
 import { appointmentOrderInclude, serializeAppointmentOrder } from "../../_helpers"
 
@@ -22,9 +22,13 @@ export async function GET(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  if (!session?.user || !canManageUsers(role as Role)) {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "unauthorized_or_invalid_tenant" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -32,8 +36,8 @@ export async function GET(
 
   try {
     const { id } = await params
-    const order = await prisma.appointmentOrder.findUnique({
-      where: { id },
+    const order = await prisma.appointmentOrder.findFirst({
+      where: { id, tenantId },
       include: appointmentOrderInclude,
     })
     if (!order) {
@@ -43,7 +47,7 @@ export async function GET(
     }
 
   const settings = await prisma.appSetting.findUnique({
-    where: { id: "global" },
+    where: { tenantId },
     select: {
       locale: true,
       currency: true,

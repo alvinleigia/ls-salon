@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 
 import { AppointmentStatus } from "@prisma/client"
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -13,6 +12,7 @@ import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import { checkStaffAppointmentAvailability } from "@/app/api/appointments/_availability"
 import { prisma } from "@/lib/prisma"
 import { canManageUsers, type Role } from "@/lib/permissions"
+import { requireTenantSession } from "@/lib/tenant-auth"
 import { appointmentResolveSchema } from "@/lib/validation"
 import type { ResolveAppointmentsInput } from "@/types/appointments"
 
@@ -31,11 +31,14 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const session = await auth()
-  const role = (session?.user as { role?: string })?.role
-  const sessionUserId = (session?.user as { id?: string })?.id
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "unauthorized_or_invalid_tenant" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role, sessionUserId } = tenantSession.context
 
-  if (!session?.user || !canManageUsers(role as Role)) {
+  if (!canManageUsers(role as Role)) {
     const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
     return withRequestId(response, logContext.requestId)
@@ -63,7 +66,7 @@ export async function POST(request: Request) {
 
   if (body.action === "cancel") {
     const result = await prisma.appointment.updateMany({
-      where: { id: { in: appointmentIds } },
+      where: { id: { in: appointmentIds }, tenantId },
       data: { status: AppointmentStatus.CANCELED },
     })
       await recordDomainAuditEventSafe(prisma, {
@@ -92,7 +95,7 @@ export async function POST(request: Request) {
       return withRequestId(response, logContext.requestId)
     }
     const staffProfile = await prisma.staffProfile.findFirst({
-      where: { userId: body.targetStaffId },
+      where: { userId: body.targetStaffId, user: { tenantId, role: "STAFF", status: "ACTIVE" } },
       select: { id: true },
     })
     if (!staffProfile) {
@@ -101,7 +104,7 @@ export async function POST(request: Request) {
       return withRequestId(response, logContext.requestId)
     }
     const result = await prisma.appointment.updateMany({
-      where: { id: { in: appointmentIds } },
+      where: { id: { in: appointmentIds }, tenantId },
       data: { staffProfileId: staffProfile.id },
     })
       await recordDomainAuditEventSafe(prisma, {
@@ -136,7 +139,7 @@ export async function POST(request: Request) {
     }
 
     const appointments = await prisma.appointment.findMany({
-      where: { id: { in: appointmentIds } },
+      where: { id: { in: appointmentIds }, tenantId },
       select: { id: true, startAt: true, endAt: true, staffProfileId: true },
       orderBy: { startAt: "asc" },
     })
@@ -177,7 +180,8 @@ export async function POST(request: Request) {
       const availability = await checkStaffAppointmentAvailability(
         move.staffProfileId,
         move.startAt,
-        move.endAt
+        move.endAt,
+        tenantId
       )
       if (!availability.ok) {
         const response = NextResponse.json(
@@ -192,6 +196,7 @@ export async function POST(request: Request) {
       const conflict = await prisma.appointment.findFirst({
         where: {
           id: { notIn: appointmentIds },
+          tenantId,
           staffProfileId: move.staffProfileId,
           status: { in: ACTIVE_APPOINTMENT_STATUSES },
           startAt: { lt: move.endAt },
@@ -211,14 +216,15 @@ export async function POST(request: Request) {
       }
     }
 
-    const updates = plannedMoves.map((move) => {
-      return prisma.appointment.update({
-        where: { id: move.id },
-        data: { startAt: move.startAt, endAt: move.endAt },
-      })
-    })
-
-    await prisma.$transaction(updates)
+    const updates = await prisma.$transaction(
+      plannedMoves.map((move) =>
+        prisma.appointment.updateMany({
+          where: { id: move.id, tenantId },
+          data: { startAt: move.startAt, endAt: move.endAt },
+        })
+      )
+    )
+    const updatedCount = updates.reduce((total, result) => total + result.count, 0)
       await recordDomainAuditEventSafe(prisma, {
         event: "appointment.bulk_rescheduled",
         entityType: "Appointment",
@@ -227,13 +233,13 @@ export async function POST(request: Request) {
         requestId: logContext.requestId,
         metadata: {
           appointmentIds,
-          updatedCount: updates.length,
+          updatedCount,
           rescheduleDate: body.rescheduleDate,
           rescheduleTime: body.rescheduleTime,
         },
       })
-      const response = NextResponse.json({ updatedCount: updates.length })
-      logApiRequestSuccess(logContext, 200, { action: body.action, updatedCount: updates.length })
+      const response = NextResponse.json({ updatedCount })
+      logApiRequestSuccess(logContext, 200, { action: body.action, updatedCount })
       return withRequestId(response, logContext.requestId)
   }
 
