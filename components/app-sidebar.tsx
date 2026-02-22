@@ -6,15 +6,16 @@ import { usePathname } from "next/navigation"
 import { signOut, useSession } from "next-auth/react"
 import { useTheme } from "next-themes"
 import {
-  CalendarClockIcon,
   BarChart3Icon,
   Building2Icon,
+  CalendarClockIcon,
+  ChevronRightIcon,
   ClockIcon,
-  PackageIcon,
   LayoutDashboardIcon,
   LogOutIcon,
   MailIcon,
   MoonIcon,
+  PackageIcon,
   ScissorsIcon,
   SettingsIcon,
   SunIcon,
@@ -22,6 +23,8 @@ import {
   UserIcon,
   UsersIcon,
 } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Sidebar,
   SidebarContent,
@@ -49,10 +52,25 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { canInvite, canManageTenants, canManageUsers, type Role } from "@/lib/permissions"
+import { cn } from "@/lib/utils"
 
-const navItems = [
-  { title: "Dashboard", href: "/", icon: LayoutDashboardIcon },
-]
+type SubNavItem = {
+  title: string
+  href: string
+  icon: LucideIcon
+  isActive: (pathname: string) => boolean
+}
+
+type NavSection = {
+  key: string
+  title: string
+  href: string
+  icon: LucideIcon
+  isActive: (pathname: string) => boolean
+  items: SubNavItem[]
+}
+
+const navItems = [{ title: "Dashboard", href: "/", icon: LayoutDashboardIcon }]
 
 export function AppSidebar() {
   const { data: session } = useSession()
@@ -60,8 +78,10 @@ export function AppSidebar() {
   const pathname = usePathname()
   const user = session?.user
   const role = (user as { role?: Role })?.role
-  const platformTenantSlug =
-    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
+  const canManage = canManageUsers(role ?? null)
+
+  const platformTenantSlug = process.env.NEXT_PUBLIC_PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
+
   const tenantSlug = React.useMemo(() => {
     if (typeof window === "undefined") return null
     const hostname = window.location.hostname.toLowerCase()
@@ -71,10 +91,12 @@ export function AppSidebar() {
       return slug || null
     }
     return null
-  }, [pathname])
-  const isPlatformSuperAdmin =
-    role === "ADMIN" &&
-    tenantSlug === platformTenantSlug
+  }, [pathname, platformTenantSlug])
+
+  const isPlatformSuperAdmin = role === "ADMIN" && tenantSlug === platformTenantSlug
+  const [openSections, setOpenSections] = React.useState<Record<string, boolean>>({})
+  const [logoLoadFailed, setLogoLoadFailed] = React.useState(false)
+
   const name = user?.name?.trim() || user?.email?.trim() || "Guest"
   const initials = name
     .split(" ")
@@ -83,10 +105,236 @@ export function AppSidebar() {
     .map((part) => part[0]?.toUpperCase())
     .join("")
 
+  const sections = React.useMemo<NavSection[]>(() => {
+    const list: NavSection[] = []
+
+    if (!isPlatformSuperAdmin && (canManage || role === "STAFF")) {
+      const leavesItems: SubNavItem[] = []
+      if (role === "STAFF" || role === "MANAGER") {
+        leavesItems.push({
+          title: "Requests",
+          href: "/leaves/requests",
+          icon: CalendarClockIcon,
+          isActive: (current) => current.startsWith("/leaves/requests"),
+        })
+      }
+      if (canManage) {
+        leavesItems.push(
+          {
+            title: "Approvals",
+            href: "/leaves/approvals",
+            icon: UsersIcon,
+            isActive: (current) => current.startsWith("/leaves/approvals"),
+          },
+          {
+            title: "Definitions",
+            href: "/leaves",
+            icon: CalendarClockIcon,
+            isActive: (current) => current === "/leaves",
+          },
+          {
+            title: "Groups",
+            href: "/leaves/groups",
+            icon: UsersIcon,
+            isActive: (current) => current.startsWith("/leaves/groups"),
+          }
+        )
+      }
+
+      list.push({
+        key: "leaves",
+        title: "Leaves",
+        href: role === "ADMIN" ? "/leaves/approvals" : "/leaves/requests",
+        icon: CalendarClockIcon,
+        isActive: (current) => current.startsWith("/leaves"),
+        items: leavesItems,
+      })
+    }
+
+    if (!isPlatformSuperAdmin && canManage) {
+      list.push(
+        {
+          key: "reports",
+          title: "Reports",
+          href: "/reports/coupon-usage",
+          icon: BarChart3Icon,
+          isActive: (current) => current.startsWith("/reports"),
+          items: [
+            {
+              title: "Coupon usage",
+              href: "/reports/coupon-usage",
+              icon: TagIcon,
+              isActive: (current) => current === "/reports/coupon-usage",
+            },
+            {
+              title: "Audit logs",
+              href: "/reports/audit-logs",
+              icon: BarChart3Icon,
+              isActive: (current) => current === "/reports/audit-logs",
+            },
+          ],
+        },
+        {
+          key: "inventory",
+          title: "Inventory",
+          href: "/inventory",
+          icon: PackageIcon,
+          isActive: (current) => current.startsWith("/inventory"),
+          items: [
+            { title: "Products", href: "/inventory", icon: PackageIcon, isActive: (current) => current === "/inventory" },
+            {
+              title: "Categories",
+              href: "/inventory/categories",
+              icon: TagIcon,
+              isActive: (current) => current === "/inventory/categories",
+            },
+            {
+              title: "Suppliers",
+              href: "/inventory/suppliers",
+              icon: UsersIcon,
+              isActive: (current) => current === "/inventory/suppliers",
+            },
+            {
+              title: "Purchases",
+              href: "/inventory/purchases",
+              icon: CalendarClockIcon,
+              isActive: (current) => current === "/inventory/purchases",
+            },
+          ],
+        },
+        {
+          key: "appointments",
+          title: "Appointments",
+          href: "/appointments",
+          icon: CalendarClockIcon,
+          isActive: (current) => current.startsWith("/appointments"),
+          items: [
+            {
+              title: "View",
+              href: "/appointments",
+              icon: CalendarClockIcon,
+              isActive: (current) => current === "/appointments",
+            },
+            {
+              title: "Coupons",
+              href: "/appointments/coupons",
+              icon: TagIcon,
+              isActive: (current) => current === "/appointments/coupons",
+            },
+          ],
+        },
+        {
+          key: "services",
+          title: "Services",
+          href: "/services",
+          icon: ScissorsIcon,
+          isActive: (current) => current.startsWith("/services"),
+          items: [
+            { title: "Services", href: "/services", icon: ScissorsIcon, isActive: (current) => current === "/services" },
+            {
+              title: "Categories",
+              href: "/services/categories",
+              icon: TagIcon,
+              isActive: (current) => current === "/services/categories",
+            },
+          ],
+        },
+        {
+          key: "users",
+          title: "Users",
+          href: "/users",
+          icon: UsersIcon,
+          isActive: (current) => current === "/users" || current.startsWith("/users/"),
+          items: [
+            { title: "View", href: "/users", icon: UsersIcon, isActive: (current) => current === "/users" },
+            ...(canInvite(role ?? null)
+              ? [
+                  {
+                    title: "Invitees",
+                    href: "/users/invites",
+                    icon: MailIcon,
+                    isActive: (current: string) => current === "/users/invites",
+                  },
+                ]
+              : []),
+          ],
+        },
+        {
+          key: "shifts",
+          title: "Shifts",
+          href: "/shifts",
+          icon: ClockIcon,
+          isActive: (current) => current.startsWith("/shifts"),
+          items: [
+            { title: "Templates", href: "/shifts", icon: ClockIcon, isActive: (current) => current === "/shifts" },
+            {
+              title: "Schedules",
+              href: "/shifts/schedules",
+              icon: CalendarClockIcon,
+              isActive: (current) => current === "/shifts/schedules",
+            },
+            {
+              title: "Roster",
+              href: "/shifts/roster",
+              icon: CalendarClockIcon,
+              isActive: (current) => current === "/shifts/roster",
+            },
+          ],
+        }
+      )
+    }
+
+    if (canManage) {
+      list.push({
+        key: "settings",
+        title: "Settings",
+        href: isPlatformSuperAdmin ? "/settings/tenants" : "/settings",
+        icon: SettingsIcon,
+        isActive: (current) => current.startsWith("/settings"),
+        items: isPlatformSuperAdmin
+          ? canManageTenants(role ?? null)
+            ? [
+                {
+                  title: "Tenants",
+                  href: "/settings/tenants",
+                  icon: Building2Icon,
+                  isActive: (current) => current === "/settings/tenants",
+                },
+              ]
+            : []
+          : [
+              { title: "General", href: "/settings", icon: SettingsIcon, isActive: (current) => current === "/settings" },
+              { title: "Taxes", href: "/settings/taxes", icon: TagIcon, isActive: (current) => current === "/settings/taxes" },
+              { title: "Seeds", href: "/settings/seeds", icon: PackageIcon, isActive: (current) => current === "/settings/seeds" },
+            ],
+      })
+    }
+
+    return list
+  }, [canManage, isPlatformSuperAdmin, role])
+
+  const menuButtonClass = (active: boolean) =>
+    cn("transition-colors", active && "bg-sidebar-primary/20 text-sidebar-primary font-semibold")
+
+  const subButtonClass = (active: boolean) =>
+    cn("transition-colors", active && "bg-sidebar-primary/15 text-sidebar-primary font-semibold")
+
   return (
     <Sidebar>
       <SidebarHeader>
-        <div className="px-2 py-1 text-sm font-semibold">LS Salon</div>
+        <div className="flex justify-center">
+          {!logoLoadFailed ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src="/assets/images/logo.png"
+              alt="LS Salon"
+              className="h-auto w-[150px] max-w-full object-contain"
+              onError={() => setLogoLoadFailed(true)}
+            />
+          ) : (
+            <div className="text-sm font-semibold">LS Salon</div>
+          )}
+        </div>
       </SidebarHeader>
       <SidebarSeparator />
       <SidebarContent>
@@ -94,476 +342,70 @@ export function AppSidebar() {
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    asChild
-                    data-active={pathname === item.href}
-                  >
-                    <Link href={item.href} className="flex w-full items-center">
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
-                      <span
-                        className={`ml-auto h-2 w-2 rounded-full ${
-                          pathname === item.href
-                            ? "bg-sidebar-primary"
-                            : "bg-transparent"
-                        }`}
-                      />
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-              {!isPlatformSuperAdmin && (canManageUsers(role ?? null) || role === "STAFF") ? (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    data-active={pathname.startsWith("/leaves")}
-                  >
-                    <Link
-                      href={role === "ADMIN" ? "/leaves/approvals" : "/leaves/requests"}
-                      className="flex w-full items-center"
+              {navItems.map((item) => {
+                const active = pathname === item.href
+                return (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton asChild isActive={active} className={menuButtonClass(active)}>
+                      <Link href={item.href} className="flex w-full items-center">
+                        <item.icon className="h-4 w-4 text-zinc-300 dark:text-zinc-500" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
+
+              {sections.map((section) => {
+                const sectionActive = section.isActive(pathname)
+                const isOpen = sectionActive || openSections[section.key] === true
+
+                return (
+                  <SidebarMenuItem key={section.key}>
+                    <Collapsible
+                      open={isOpen}
+                      onOpenChange={(open) => setOpenSections((prev) => ({ ...prev, [section.key]: open }))}
                     >
-                      <CalendarClockIcon className="h-4 w-4" />
-                      <span>Leaves</span>
-                      <span
-                        className={`ml-auto h-2 w-2 rounded-full ${
-                          pathname.startsWith("/leaves")
-                            ? "bg-sidebar-primary"
-                            : "bg-transparent"
-                        }`}
-                      />
-                    </Link>
-                  </SidebarMenuButton>
-                  <SidebarMenuSub>
-                    {role === "STAFF" || role === "MANAGER" ? (
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton
-                          asChild
-                          isActive={pathname.startsWith("/leaves/requests")}
+                      <CollapsibleTrigger asChild>
+                        <SidebarMenuButton
+                          type="button"
+                          isActive={sectionActive}
+                          className={menuButtonClass(sectionActive)}
                         >
-                          <Link href="/leaves/requests">
-                            <CalendarClockIcon className="h-4 w-4" />
-                            <span>Requests</span>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    ) : null}
-                    {canManageUsers(role ?? null) ? (
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton
-                          asChild
-                          isActive={pathname.startsWith("/leaves/approvals")}
-                        >
-                          <Link href="/leaves/approvals">
-                            <UsersIcon className="h-4 w-4" />
-                            <span>Approvals</span>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    ) : null}
-                    {canManageUsers(role ?? null) ? (
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/leaves"}
-                      >
-                        <Link href="/leaves">
-                          <CalendarClockIcon className="h-4 w-4" />
-                          <span>Definitions</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    ) : null}
-                    {canManageUsers(role ?? null) ? (
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname.startsWith("/leaves/groups")}
-                      >
-                        <Link href="/leaves/groups">
-                          <UsersIcon className="h-4 w-4" />
-                          <span>Groups</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    ) : null}
-                  </SidebarMenuSub>
-                </SidebarMenuItem>
-              ) : null}
-              {!isPlatformSuperAdmin && canManageUsers(role ?? null) ? (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    data-active={pathname.startsWith("/reports")}
-                  >
-                    <Link href="/reports/coupon-usage" className="flex w-full items-center">
-                      <BarChart3Icon className="h-4 w-4" />
-                      <span>Reports</span>
-                      <span
-                        className={`ml-auto h-2 w-2 rounded-full ${
-                          pathname.startsWith("/reports")
-                            ? "bg-sidebar-primary"
-                            : "bg-transparent"
-                        }`}
-                      />
-                    </Link>
-                  </SidebarMenuButton>
-                  <SidebarMenuSub>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/reports/coupon-usage"}
-                      >
-                        <Link href="/reports/coupon-usage">
-                          <TagIcon className="h-4 w-4" />
-                          <span>Coupon usage</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/reports/audit-logs"}
-                      >
-                        <Link href="/reports/audit-logs">
-                          <BarChart3Icon className="h-4 w-4" />
-                          <span>Audit logs</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                  </SidebarMenuSub>
-                </SidebarMenuItem>
-              ) : null}
-              {!isPlatformSuperAdmin && canManageUsers(role ?? null) ? (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    data-active={pathname.startsWith("/inventory")}
-                  >
-                    <Link href="/inventory" className="flex w-full items-center">
-                      <PackageIcon className="h-4 w-4" />
-                      <span>Inventory</span>
-                      <span
-                        className={`ml-auto h-2 w-2 rounded-full ${
-                          pathname.startsWith("/inventory")
-                            ? "bg-sidebar-primary"
-                            : "bg-transparent"
-                        }`}
-                      />
-                    </Link>
-                  </SidebarMenuButton>
-                  <SidebarMenuSub>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/inventory"}
-                      >
-                        <Link href="/inventory">
-                          <PackageIcon className="h-4 w-4" />
-                          <span>Products</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/inventory/categories"}
-                      >
-                        <Link href="/inventory/categories">
-                          <TagIcon className="h-4 w-4" />
-                          <span>Categories</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/inventory/suppliers"}
-                      >
-                        <Link href="/inventory/suppliers">
-                          <UsersIcon className="h-4 w-4" />
-                          <span>Suppliers</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/inventory/purchases"}
-                      >
-                        <Link href="/inventory/purchases">
-                          <CalendarClockIcon className="h-4 w-4" />
-                          <span>Purchases</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                  </SidebarMenuSub>
-                </SidebarMenuItem>
-              ) : null}
-              {!isPlatformSuperAdmin && canManageUsers(role ?? null) ? (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    data-active={pathname.startsWith("/appointments")}
-                  >
-                    <Link href="/appointments" className="flex w-full items-center">
-                      <CalendarClockIcon className="h-4 w-4" />
-                      <span>Appointments</span>
-                      <span
-                        className={`ml-auto h-2 w-2 rounded-full ${
-                          pathname.startsWith("/appointments")
-                            ? "bg-sidebar-primary"
-                            : "bg-transparent"
-                        }`}
-                      />
-                    </Link>
-                  </SidebarMenuButton>
-                  <SidebarMenuSub>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/appointments"}
-                      >
-                        <Link href="/appointments">
-                          <CalendarClockIcon className="h-4 w-4" />
-                          <span>View</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/appointments/coupons"}
-                      >
-                        <Link href="/appointments/coupons">
-                          <TagIcon className="h-4 w-4" />
-                          <span>Coupons</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                  </SidebarMenuSub>
-                </SidebarMenuItem>
-              ) : null}
-              {!isPlatformSuperAdmin && canManageUsers(role ?? null) ? (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    data-active={pathname.startsWith("/services")}
-                  >
-                    <Link href="/services" className="flex w-full items-center">
-                      <ScissorsIcon className="h-4 w-4" />
-                      <span>Services</span>
-                      <span
-                        className={`ml-auto h-2 w-2 rounded-full ${
-                          pathname.startsWith("/services")
-                            ? "bg-sidebar-primary"
-                            : "bg-transparent"
-                        }`}
-                      />
-                    </Link>
-                  </SidebarMenuButton>
-                  <SidebarMenuSub>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/services"}
-                      >
-                        <Link href="/services">
-                          <ScissorsIcon className="h-4 w-4" />
-                          <span>Services</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/services/categories"}
-                      >
-                        <Link href="/services/categories">
-                          <TagIcon className="h-4 w-4" />
-                          <span>Categories</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                  </SidebarMenuSub>
-                </SidebarMenuItem>
-              ) : null}
-              {!isPlatformSuperAdmin && canManageUsers(role ?? null) ? (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    data-active={pathname === "/users"}
-                  >
-                    <Link href="/users" className="flex w-full items-center">
-                      <UsersIcon className="h-4 w-4" />
-                      <span>Users</span>
-                      <span
-                        className={`ml-auto h-2 w-2 rounded-full ${
-                          pathname === "/users"
-                            ? "bg-sidebar-primary"
-                            : "bg-transparent"
-                        }`}
-                      />
-                    </Link>
-                  </SidebarMenuButton>
-                  <SidebarMenuSub>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/users"}
-                      >
-                        <Link href="/users">
-                          <UsersIcon className="h-4 w-4" />
-                          <span>View</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    {canInvite(role ?? null) ? (
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton
-                          asChild
-                          isActive={pathname === "/users/invites"}
-                        >
-                          <Link href="/users/invites">
-                            <MailIcon className="h-4 w-4" />
-                            <span>Invitees</span>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    ) : null}
-                  </SidebarMenuSub>
-                </SidebarMenuItem>
-              ) : null}
-              {!isPlatformSuperAdmin && canManageUsers(role ?? null) ? (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    data-active={pathname.startsWith("/shifts")}
-                  >
-                    <Link href="/shifts" className="flex w-full items-center">
-                      <ClockIcon className="h-4 w-4" />
-                      <span>Shifts</span>
-                      <span
-                        className={`ml-auto h-2 w-2 rounded-full ${
-                          pathname.startsWith("/shifts")
-                            ? "bg-sidebar-primary"
-                            : "bg-transparent"
-                        }`}
-                      />
-                    </Link>
-                  </SidebarMenuButton>
-                  <SidebarMenuSub>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/shifts"}
-                      >
-                        <Link href="/shifts">
-                          <ClockIcon className="h-4 w-4" />
-                          <span>Templates</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/shifts/schedules"}
-                      >
-                        <Link href="/shifts/schedules">
-                          <CalendarClockIcon className="h-4 w-4" />
-                          <span>Schedules</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        asChild
-                        isActive={pathname === "/shifts/roster"}
-                      >
-                        <Link href="/shifts/roster">
-                          <CalendarClockIcon className="h-4 w-4" />
-                          <span>Roster</span>
-                        </Link>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                  </SidebarMenuSub>
-                </SidebarMenuItem>
-              ) : null}
-              {canManageUsers(role ?? null) ? (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    data-active={pathname.startsWith("/settings")}
-                  >
-                    <Link href={isPlatformSuperAdmin ? "/settings/tenants" : "/settings"} className="flex w-full items-center">
-                      <SettingsIcon className="h-4 w-4" />
-                      <span>Settings</span>
-                      <span
-                        className={`ml-auto h-2 w-2 rounded-full ${
-                          pathname.startsWith("/settings")
-                            ? "bg-sidebar-primary"
-                            : "bg-transparent"
-                        }`}
-                      />
-                    </Link>
-                  </SidebarMenuButton>
-                  <SidebarMenuSub>
-                    {!isPlatformSuperAdmin ? (
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton
-                          asChild
-                          isActive={pathname === "/settings"}
-                        >
-                          <Link href="/settings">
-                            <SettingsIcon className="h-4 w-4" />
-                            <span>General</span>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    ) : null}
-                    {!isPlatformSuperAdmin ? (
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton
-                          asChild
-                          isActive={pathname === "/settings/taxes"}
-                        >
-                          <Link href="/settings/taxes">
-                            <TagIcon className="h-4 w-4" />
-                            <span>Taxes</span>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    ) : null}
-                    {!isPlatformSuperAdmin ? (
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton
-                          asChild
-                          isActive={pathname === "/settings/seeds"}
-                        >
-                          <Link href="/settings/seeds">
-                            <PackageIcon className="h-4 w-4" />
-                            <span>Seeds</span>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    ) : null}
-                    {canManageTenants(role ?? null) && isPlatformSuperAdmin ? (
-                      <SidebarMenuSubItem>
-                        <SidebarMenuSubButton
-                          asChild
-                          isActive={pathname === "/settings/tenants"}
-                        >
-                          <Link href="/settings/tenants">
-                            <Building2Icon className="h-4 w-4" />
-                            <span>Tenants</span>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    ) : null}
-                  </SidebarMenuSub>
-                </SidebarMenuItem>
-              ) : null}
+                            <section.icon className="h-4 w-4 text-zinc-300 dark:text-zinc-500" />
+                          <span>{section.title}</span>
+                          <ChevronRightIcon
+                            className={cn("ml-auto h-4 w-4 transition-transform", isOpen && "rotate-90")}
+                          />
+                        </SidebarMenuButton>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <SidebarMenuSub>
+                          {section.items.map((item) => {
+                            const subActive = item.isActive(pathname)
+                            return (
+                              <SidebarMenuSubItem key={item.href}>
+                                <SidebarMenuSubButton asChild isActive={subActive} className={subButtonClass(subActive)}>
+                                  <Link href={item.href} className="flex w-full items-center">
+                                    <item.icon className="h-4 w-4 text-zinc-300 dark:text-zinc-500" />
+                                    <span>{item.title}</span>
+                                    <span
+                                      className={cn(
+                                        "ml-auto h-2 w-2 rounded-full",
+                                        subActive ? "bg-sidebar-primary" : "bg-transparent"
+                                      )}
+                                    />
+                                  </Link>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                            )
+                          })}
+                        </SidebarMenuSub>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </SidebarMenuItem>
+                )
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -578,11 +420,7 @@ export function AppSidebar() {
               <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-semibold text-muted-foreground">
                 {user?.image ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={user.image}
-                    alt={name}
-                    className="h-full w-full object-cover"
-                  />
+                  <img src={user.image} alt={name} className="h-full w-full object-cover" />
                 ) : initials ? (
                   <span>{initials}</span>
                 ) : (
@@ -591,21 +429,14 @@ export function AppSidebar() {
               </div>
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">{name}</div>
-                {user?.email ? (
-                  <div className="truncate text-xs text-muted-foreground">
-                    {user.email}
-                  </div>
-                ) : null}
+                {user?.email ? <div className="truncate text-xs text-muted-foreground">{user.email}</div> : null}
               </div>
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent side="right" align="end" className="w-48">
             <DropdownMenuLabel>Account</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuRadioGroup
-              value={theme ?? "system"}
-              onValueChange={(value) => setTheme(value)}
-            >
+            <DropdownMenuRadioGroup value={theme ?? "system"} onValueChange={(value) => setTheme(value)}>
               <DropdownMenuRadioItem value="light">
                 <SunIcon />
                 <span>Light</span>
@@ -629,10 +460,7 @@ export function AppSidebar() {
             <DropdownMenuItem
               className="justify-start"
               onSelect={() => {
-                const callbackUrl =
-                  typeof window !== "undefined"
-                    ? `${window.location.origin}/auth/signin`
-                    : "/auth/signin"
+                const callbackUrl = typeof window !== "undefined" ? `${window.location.origin}/auth/signin` : "/auth/signin"
                 void signOut({ callbackUrl })
               }}
             >
