@@ -18,8 +18,9 @@ import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import type { ListResponse } from "@/types/api"
 
 const PLATFORM_TENANT_SLUG = (
-  process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "default"
+  process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
 )
+const LEGACY_DEFAULT_TENANT_SLUG = "default"
 
 const listSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -70,17 +71,19 @@ export async function GET(request: Request) {
 
   try {
     const { page, pageSize, q, status } = parsed.data
-    const where: Prisma.TenantWhereInput = {
-      ...(status ? { status } : {}),
-      ...(q
-        ? {
-            OR: [
-              { name: { contains: q, mode: "insensitive" } },
-              { slug: { contains: q, mode: "insensitive" } },
-            ],
-          }
-        : {}),
+    const andConditions: Prisma.TenantWhereInput[] = [{
+      slug: { notIn: [PLATFORM_TENANT_SLUG, LEGACY_DEFAULT_TENANT_SLUG] },
+    }]
+    if (status) andConditions.push({ status })
+    if (q) {
+      andConditions.push({
+        OR: [
+          { name: { contains: q, mode: Prisma.QueryMode.insensitive } },
+          { slug: { contains: q, mode: Prisma.QueryMode.insensitive } },
+        ],
+      })
     }
+    const where: Prisma.TenantWhereInput = { AND: andConditions }
     const skip = (page - 1) * pageSize
 
     const [total, items] = await prisma.$transaction([

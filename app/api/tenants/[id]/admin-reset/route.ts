@@ -18,7 +18,7 @@ import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 export const runtime = "nodejs"
 
 const PLATFORM_TENANT_SLUG = (
-  process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "default"
+  process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
 )
 
 const ensureProvisioningAccess = async (request: Request) => {
@@ -190,4 +190,3 @@ export async function POST(
     return withRequestId(response, logContext.requestId)
   }
 }
-

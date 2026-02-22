@@ -8,7 +8,7 @@ export default async function Home() {
     const role = (session.user as { role?: string | null }).role ?? null
     const tenant = await resolveTenantFromServerHeaders()
     const platformTenantSlug =
-      process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "default"
+      process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
     if (
       role === "ADMIN" &&
       tenant?.slug === platformTenantSlug

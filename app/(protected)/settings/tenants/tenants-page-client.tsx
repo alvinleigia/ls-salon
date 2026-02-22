@@ -43,12 +43,30 @@ type TenantCreateFormValues = {
   adminPassword: string
 }
 
+type TenantAdminEditValues = {
+  id: string
+  name: string
+  email: string
+  phone: string
+  status: "ACTIVE" | "SUSPENDED" | "ARCHIVED"
+  password: string
+}
+
 const defaultFormValues: TenantCreateFormValues = {
   name: "",
   slug: "",
   adminName: "",
   adminEmail: "",
   adminPassword: "",
+}
+
+const defaultAdminEditValues: TenantAdminEditValues = {
+  id: "",
+  name: "",
+  email: "",
+  phone: "",
+  status: "ACTIVE",
+  password: "",
 }
 
 const formatDateTime = (value: string) => {
@@ -66,14 +84,32 @@ export default function TenantsPageClient() {
   const [statusFilter, setStatusFilter] = React.useState<"all" | TenantStatus>("all")
   const [pagination, setPagination] = React.useState<PaginationState>({ pageIndex: 0, pageSize: 10 })
   const [createOpen, setCreateOpen] = React.useState(false)
+  const [editAdminOpen, setEditAdminOpen] = React.useState(false)
+  const [resetAllOpen, setResetAllOpen] = React.useState(false)
+  const [resetAllConfirmation, setResetAllConfirmation] = React.useState("")
+  const [keepPlatformTenantOnReset, setKeepPlatformTenantOnReset] = React.useState(true)
+  const [resettingAll, setResettingAll] = React.useState(false)
   const [lifecycleUpdatingId, setLifecycleUpdatingId] = React.useState<string | null>(null)
   const [adminResettingId, setAdminResettingId] = React.useState<string | null>(null)
+  const [adminLoadingTenantId, setAdminLoadingTenantId] = React.useState<string | null>(null)
+  const [adminSavingTenantId, setAdminSavingTenantId] = React.useState<string | null>(null)
+  const [editingTenantId, setEditingTenantId] = React.useState<string | null>(null)
   const [pendingStatusChange, setPendingStatusChange] = React.useState<{
     tenant: TenantRow
     status: TenantStatus
   } | null>(null)
   const [formValues, setFormValues] = React.useState<TenantCreateFormValues>(defaultFormValues)
-  const { errors, setErrorsFromResponse, clearErrors } = useFormErrors()
+  const [adminEditValues, setAdminEditValues] = React.useState<TenantAdminEditValues>(defaultAdminEditValues)
+  const {
+    errors,
+    setErrorsFromResponse,
+    clearErrors,
+  } = useFormErrors()
+  const {
+    errors: adminErrors,
+    setErrorsFromResponse: setAdminErrorsFromResponse,
+    clearErrors: clearAdminErrors,
+  } = useFormErrors()
 
   const loadTenants = React.useCallback(async () => {
     setLoading(true)
@@ -181,6 +217,109 @@ export default function TenantsPageClient() {
     setAdminResettingId(null)
   }
 
+  const openEditAdmin = async (tenant: TenantRow) => {
+    setAdminLoadingTenantId(tenant.id)
+    clearAdminErrors()
+    const response = await fetch(`/api/tenants/${tenant.id}/admin`, { cache: "no-store" })
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string
+      admin?: {
+        id: string
+        name: string | null
+        email: string
+        phone: string | null
+        status: "ACTIVE" | "SUSPENDED" | "ARCHIVED"
+      }
+    }
+    if (!response.ok || !data.admin) {
+      toast.error(data.error ?? "Unable to load tenant admin.")
+      setAdminLoadingTenantId(null)
+      return
+    }
+
+    setEditingTenantId(tenant.id)
+    setAdminEditValues({
+      id: data.admin.id,
+      name: data.admin.name ?? "",
+      email: data.admin.email,
+      phone: data.admin.phone ?? "",
+      status: data.admin.status,
+      password: "",
+    })
+    setAdminLoadingTenantId(null)
+    setEditAdminOpen(true)
+  }
+
+  const saveAdminDetails = async () => {
+    if (!editingTenantId) return
+    setAdminSavingTenantId(editingTenantId)
+    clearAdminErrors()
+    const response = await fetch(`/api/tenants/${editingTenantId}/admin`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: adminEditValues.name,
+        email: adminEditValues.email,
+        phone: adminEditValues.phone,
+        status: adminEditValues.status,
+        password: adminEditValues.password,
+      }),
+    })
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string
+      details?: { fieldErrors?: Record<string, string[]> }
+    }
+    if (!response.ok) {
+      setAdminErrorsFromResponse(data)
+      toast.error(data.error ?? "Unable to update tenant admin.")
+      setAdminSavingTenantId(null)
+      return
+    }
+
+    toast.success("Tenant admin updated.")
+    setAdminSavingTenantId(null)
+    setEditAdminOpen(false)
+    setEditingTenantId(null)
+    setAdminEditValues(defaultAdminEditValues)
+    await loadTenants()
+  }
+
+  const resetAllTenants = async () => {
+    if (resetAllConfirmation !== "RESET") {
+      toast.error("Type RESET to continue.")
+      return
+    }
+    setResettingAll(true)
+    const response = await fetch("/api/tenants/reset-all", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confirmation: "RESET",
+        keepPlatformTenant: keepPlatformTenantOnReset,
+      }),
+    })
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string
+      deletedTenantCount?: number
+      deletedUserCount?: number
+      keptTenantSlugs?: string[]
+    }
+    if (!response.ok) {
+      toast.error(data.error ?? "Unable to reset tenant data.")
+      setResettingAll(false)
+      return
+    }
+
+    toast.success(
+      `Reset complete. Deleted ${data.deletedTenantCount ?? 0} tenant(s) and ${data.deletedUserCount ?? 0} user(s). Kept: ${(data.keptTenantSlugs ?? []).join(", ") || "none"}.`
+    )
+    setResettingAll(false)
+    setResetAllOpen(false)
+    setResetAllConfirmation("")
+    setKeepPlatformTenantOnReset(true)
+    await loadTenants()
+  }
+
   const columns = React.useMemo<ColumnDef<TenantRow>[]>(
     () => [
       {
@@ -219,7 +358,10 @@ export default function TenantsPageClient() {
         header: "",
         cell: ({ row }) => {
           const tenant = row.original
-          const canMutate = lifecycleUpdatingId !== tenant.id && adminResettingId !== tenant.id
+          const canMutate =
+            lifecycleUpdatingId !== tenant.id &&
+            adminResettingId !== tenant.id &&
+            adminLoadingTenantId !== tenant.id
           return (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -250,6 +392,9 @@ export default function TenantsPageClient() {
                     Archive
                   </DropdownMenuItem>
                 ) : null}
+                <DropdownMenuItem onSelect={() => void openEditAdmin(tenant)}>
+                  Edit admin details
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void sendAdminReset(tenant)}>
                   Send admin reset
                 </DropdownMenuItem>
@@ -259,7 +404,7 @@ export default function TenantsPageClient() {
         },
       },
     ],
-    [lifecycleUpdatingId, adminResettingId]
+    [adminLoadingTenantId, adminResettingId, lifecycleUpdatingId]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -319,6 +464,24 @@ export default function TenantsPageClient() {
       </DataTableToolbar>
       <DataTable table={table} loading={loading} emptyMessage="No tenants found." />
       <DataTablePagination table={table} totalRows={totalRows} />
+      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+        <h2 className="text-base font-semibold text-destructive">Danger zone</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Test-only hard reset: delete tenant data in bulk while preserving the platform admin login tenant.
+        </p>
+        <div className="mt-3">
+          <Button
+            variant="destructive"
+            onClick={() => {
+              setResetAllConfirmation("")
+              setKeepPlatformTenantOnReset(true)
+              setResetAllOpen(true)
+            }}
+          >
+            Reset all tenant data
+          </Button>
+        </div>
+      </div>
 
       <Dialog
         open={createOpen}
@@ -403,6 +566,99 @@ export default function TenantsPageClient() {
       </Dialog>
 
       <Dialog
+        open={editAdminOpen}
+        onOpenChange={(open) => {
+          setEditAdminOpen(open)
+          if (!open) {
+            setEditingTenantId(null)
+            setAdminEditValues(defaultAdminEditValues)
+            clearAdminErrors()
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit admin details</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <FormField id="tenant-admin-name" label="Admin name" error={adminErrors.name}>
+              <Input
+                id="tenant-admin-name"
+                value={adminEditValues.name}
+                onChange={(event) =>
+                  setAdminEditValues((prev) => ({ ...prev, name: event.target.value }))
+                }
+              />
+            </FormField>
+            <FormField id="tenant-admin-email" label="Admin email" error={adminErrors.email}>
+              <Input
+                id="tenant-admin-email"
+                type="email"
+                value={adminEditValues.email}
+                onChange={(event) =>
+                  setAdminEditValues((prev) => ({ ...prev, email: event.target.value }))
+                }
+              />
+            </FormField>
+            <FormField id="tenant-admin-phone" label="Phone" error={adminErrors.phone}>
+              <Input
+                id="tenant-admin-phone"
+                value={adminEditValues.phone}
+                onChange={(event) =>
+                  setAdminEditValues((prev) => ({ ...prev, phone: event.target.value }))
+                }
+              />
+            </FormField>
+            <FormField id="tenant-admin-status" label="Status" error={adminErrors.status}>
+              <select
+                id="tenant-admin-status"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                value={adminEditValues.status}
+                onChange={(event) =>
+                  setAdminEditValues((prev) => ({
+                    ...prev,
+                    status: event.target.value as "ACTIVE" | "SUSPENDED" | "ARCHIVED",
+                  }))
+                }
+              >
+                <option value="ACTIVE">Active</option>
+                <option value="SUSPENDED">Suspended</option>
+                <option value="ARCHIVED">Archived</option>
+              </select>
+            </FormField>
+            <FormField
+              id="tenant-admin-password"
+              label="New password (optional)"
+              error={adminErrors.password}
+            >
+              <Input
+                id="tenant-admin-password"
+                type="password"
+                value={adminEditValues.password}
+                onChange={(event) =>
+                  setAdminEditValues((prev) => ({ ...prev, password: event.target.value }))
+                }
+              />
+            </FormField>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditAdminOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void saveAdminDetails()}
+              loading={Boolean(
+                editingTenantId && adminSavingTenantId === editingTenantId
+              )}
+              loadingText="Saving..."
+            >
+              Save changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={Boolean(pendingStatusChange)}
         onOpenChange={(open) => {
           if (!open) setPendingStatusChange(null)
@@ -437,6 +693,58 @@ export default function TenantsPageClient() {
               loadingText="Updating..."
             >
               Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={resetAllOpen}
+        onOpenChange={(open) => {
+          setResetAllOpen(open)
+          if (!open) {
+            setResetAllConfirmation("")
+            setKeepPlatformTenantOnReset(true)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset all tenant data</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This permanently hard-deletes tenants and all related data. Super-admin login tenant is always preserved.
+          </p>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={keepPlatformTenantOnReset}
+              onChange={(event) => setKeepPlatformTenantOnReset(event.target.checked)}
+            />
+            Keep platform tenant too
+          </label>
+          <FormField
+            id="reset-all-confirmation"
+            label='Type "RESET" to confirm'
+          >
+            <Input
+              id="reset-all-confirmation"
+              value={resetAllConfirmation}
+              onChange={(event) => setResetAllConfirmation(event.target.value)}
+              placeholder="RESET"
+            />
+          </FormField>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResetAllOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void resetAllTenants()}
+              loading={resettingAll}
+              loadingText="Resetting..."
+            >
+              Reset data
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -20,7 +20,6 @@ import {
 import bcrypt from "bcryptjs"
 import { z } from "zod"
 
-import { auth } from "@/auth"
 import {
   createApiLogContext,
   logApiRequestError,
@@ -30,6 +29,7 @@ import {
 } from "@/lib/api-logging"
 import { canManageUsers } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
+import { requireTenantSession } from "@/lib/tenant-auth"
 
 export const dynamic = "force-dynamic"
 
@@ -420,18 +420,23 @@ const leaveGroupSeeds = [
   },
 ] as const
 
-const DEFAULT_TENANT_ID = "tenant_default"
-
-const ensureAuthorized = async () => {
-  const session = await auth()
-  const role = (session?.user as { role?: Role })?.role
-  if (!session?.user || !canManageUsers(role ?? null)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+const ensureAuthorized = async (request: Request) => {
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) return { error: tenantSession.error }
+  const role = tenantSession.context.role as Role | null
+  if (!canManageUsers(role ?? null)) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
   }
-  return null
+  return { context: tenantSession.context }
 }
 
-const seedTaxes = async () => {
+const seededEmailForTenant = (tenantSlug: string, baseEmail: string) => {
+  const [localPart, domainPart] = baseEmail.split("@")
+  if (!localPart || !domainPart) return `${tenantSlug}.${baseEmail}`
+  return `${localPart}.${tenantSlug}@${domainPart}`
+}
+
+const seedTaxes = async (tenantId: string) => {
   const taxes = [
     { name: "GST 18%", percent: 18, sortOrder: 1 },
     { name: "VAT 5%", percent: 5, sortOrder: 2 },
@@ -439,14 +444,14 @@ const seedTaxes = async () => {
   const created: string[] = []
   for (const tax of taxes) {
     const row = await prisma.tax.upsert({
-      where: { tenantId_name: { tenantId: DEFAULT_TENANT_ID, name: tax.name } },
+      where: { tenantId_name: { tenantId: tenantId, name: tax.name } },
       update: {
         percent: tax.percent,
         isActive: true,
         sortOrder: tax.sortOrder,
       },
       create: {
-        tenantId: DEFAULT_TENANT_ID,
+        tenantId: tenantId,
         name: tax.name,
         percent: tax.percent,
         isActive: true,
@@ -458,28 +463,37 @@ const seedTaxes = async () => {
   return { count: created.length }
 }
 
-const seedUsers = async () => {
+const seedUsers = async (tenantId: string, tenantSlug: string) => {
   const passwordHash = await bcrypt.hash("password123", 10)
   let touched = 0
   const managerIds: string[] = []
   const staffUserIds: string[] = []
   for (const user of seededUsers) {
-    const row = await prisma.user.upsert({
-      where: { email: user.email },
-      update: {
-        name: user.name,
-        role: user.role,
-        status: UserStatus.ACTIVE,
-        passwordHash,
-      },
-      create: {
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        status: UserStatus.ACTIVE,
-        passwordHash,
-      },
+    const email = seededEmailForTenant(tenantSlug, user.email)
+    const existing = await prisma.user.findFirst({
+      where: { tenantId, email },
+      select: { id: true },
     })
+    const row = existing
+      ? await prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            name: user.name,
+            role: user.role,
+            status: UserStatus.ACTIVE,
+            passwordHash,
+          },
+        })
+      : await prisma.user.create({
+          data: {
+            tenantId,
+            name: user.name,
+            email,
+            role: user.role,
+            status: UserStatus.ACTIVE,
+            passwordHash,
+          },
+        })
     touched += 1
     if (row.role === Role.MANAGER) managerIds.push(row.id)
     if (row.role === Role.STAFF) staffUserIds.push(row.id)
@@ -497,17 +511,17 @@ const seedUsers = async () => {
   return { count: touched }
 }
 
-const seedServiceCatalog = async () => {
+const seedServiceCatalog = async (tenantId: string, tenantSlug: string) => {
   const categoryByName = new Map<string, string>()
   for (const item of serviceCategorySeeds) {
     const category = await prisma.serviceCategory.upsert({
-      where: { tenantId_name: { tenantId: DEFAULT_TENANT_ID, name: item.name } },
+      where: { tenantId_name: { tenantId: tenantId, name: item.name } },
       update: {
         description: item.description,
         status: "ACTIVE",
       },
       create: {
-        tenantId: DEFAULT_TENANT_ID,
+        tenantId: tenantId,
         name: item.name,
         description: item.description,
         status: "ACTIVE",
@@ -519,7 +533,7 @@ const seedServiceCatalog = async () => {
   const taxByName = new Map(
     (
       await prisma.tax.findMany({
-        where: { tenantId: DEFAULT_TENANT_ID, name: { in: ["GST 18%", "VAT 5%"] } },
+        where: { tenantId: tenantId, name: { in: ["GST 18%", "VAT 5%"] } },
         select: { id: true, name: true },
       })
     ).map((tax) => [tax.name, tax.id])
@@ -531,7 +545,10 @@ const seedServiceCatalog = async () => {
   for (const item of serviceSeeds) {
     const categoryId = categoryByName.get(item.categoryName)
     if (!categoryId) continue
-    const existing = await prisma.service.findFirst({ where: { name: item.name } })
+    const existing = await prisma.service.findFirst({
+      where: { tenantId, name: item.name },
+      select: { id: true },
+    })
     const service = existing
       ? await prisma.service.update({
           where: { id: existing.id },
@@ -539,7 +556,7 @@ const seedServiceCatalog = async () => {
             description: item.description,
             durationMinutes: item.durationMinutes,
             priceCents: item.priceCents,
-            tenantId: DEFAULT_TENANT_ID,
+            tenantId: tenantId,
             categoryId,
             status: "ACTIVE",
             type: item.type,
@@ -548,7 +565,7 @@ const seedServiceCatalog = async () => {
         })
       : await prisma.service.create({
           data: {
-            tenantId: DEFAULT_TENANT_ID,
+            tenantId: tenantId,
             name: item.name,
             description: item.description,
             durationMinutes: item.durationMinutes,
@@ -602,8 +619,13 @@ const seedServiceCatalog = async () => {
 
   const staffUsers = await prisma.user.findMany({
     where: {
+      tenantId,
       role: Role.STAFF,
-      email: { in: seededUsers.filter((user) => user.role === Role.STAFF).map((user) => user.email) },
+      email: {
+        in: seededUsers
+          .filter((user) => user.role === Role.STAFF)
+          .map((user) => seededEmailForTenant(tenantSlug, user.email)),
+      },
     },
     select: { id: true },
   })
@@ -629,17 +651,17 @@ const seedServiceCatalog = async () => {
   return { count: touched }
 }
 
-const seedInventoryCatalog = async () => {
+const seedInventoryCatalog = async (tenantId: string) => {
   const categoryByName = new Map<string, string>()
   for (const item of inventoryCategorySeeds) {
     const category = await prisma.inventoryCategory.upsert({
-      where: { tenantId_name: { tenantId: DEFAULT_TENANT_ID, name: item.name } },
+      where: { tenantId_name: { tenantId: tenantId, name: item.name } },
       update: {
         description: item.description,
         status: InventoryCategoryStatus.ACTIVE,
       },
       create: {
-        tenantId: DEFAULT_TENANT_ID,
+        tenantId: tenantId,
         name: item.name,
         description: item.description,
         status: InventoryCategoryStatus.ACTIVE,
@@ -651,7 +673,7 @@ const seedInventoryCatalog = async () => {
   const supplierByName = new Map<string, string>()
   for (const item of supplierSeeds) {
     const existing = await prisma.supplier.findFirst({
-      where: { tenantId: DEFAULT_TENANT_ID, name: item.name },
+      where: { tenantId: tenantId, name: item.name },
     })
     const supplier = existing
       ? await prisma.supplier.update({
@@ -664,7 +686,7 @@ const seedInventoryCatalog = async () => {
         })
       : await prisma.supplier.create({
           data: {
-            tenantId: DEFAULT_TENANT_ID,
+            tenantId: tenantId,
             name: item.name,
             email: item.email,
             phone: item.phone,
@@ -677,7 +699,7 @@ const seedInventoryCatalog = async () => {
   const taxByName = new Map(
     (
       await prisma.tax.findMany({
-        where: { tenantId: DEFAULT_TENANT_ID, name: { in: ["GST 18%", "VAT 5%"] } },
+        where: { tenantId: tenantId, name: { in: ["GST 18%", "VAT 5%"] } },
         select: { id: true, name: true },
       })
     ).map((tax) => [tax.name, tax.id])
@@ -689,9 +711,9 @@ const seedInventoryCatalog = async () => {
     const supplierId = supplierByName.get(item.supplierName)
     if (!categoryId || !supplierId) continue
     const product = await prisma.inventoryProduct.upsert({
-      where: { tenantId_sku: { tenantId: DEFAULT_TENANT_ID, sku: item.sku } },
+      where: { tenantId_sku: { tenantId: tenantId, sku: item.sku } },
       update: {
-        tenantId: DEFAULT_TENANT_ID,
+        tenantId: tenantId,
         name: item.name,
         categoryId,
         status: InventoryProductStatus.ACTIVE,
@@ -702,7 +724,7 @@ const seedInventoryCatalog = async () => {
         onHandQty: item.initialQty,
       },
       create: {
-        tenantId: DEFAULT_TENANT_ID,
+        tenantId: tenantId,
         sku: item.sku,
         name: item.name,
         categoryId,
@@ -743,9 +765,9 @@ const seedInventoryCatalog = async () => {
   return { count: touched }
 }
 
-const seedPurchases = async () => {
+const seedPurchases = async (tenantId: string) => {
   const supplier = await prisma.supplier.findFirst({
-    where: { tenantId: DEFAULT_TENANT_ID, name: supplierSeeds[0].name },
+    where: { tenantId: tenantId, name: supplierSeeds[0].name },
   })
   if (!supplier) {
     throw new Error("Supplier seeds are missing. Seed inventory catalog first.")
@@ -753,7 +775,7 @@ const seedPurchases = async () => {
 
   const products = await prisma.inventoryProduct.findMany({
     where: {
-      tenantId: DEFAULT_TENANT_ID,
+      tenantId: tenantId,
       sku: { in: [productSeeds[0].sku, productSeeds[1].sku] },
     },
     select: { id: true, sku: true },
@@ -765,7 +787,7 @@ const seedPurchases = async () => {
 
   const orderNumber = "SEED-PO-001"
   const existing = await prisma.purchaseOrder.findUnique({
-    where: { tenantId_orderNumber: { tenantId: DEFAULT_TENANT_ID, orderNumber } },
+    where: { tenantId_orderNumber: { tenantId: tenantId, orderNumber } },
     select: { id: true },
   })
   if (existing) {
@@ -797,7 +819,7 @@ const seedPurchases = async () => {
 
   const order = await prisma.purchaseOrder.create({
     data: {
-      tenantId: DEFAULT_TENANT_ID,
+      tenantId: tenantId,
       orderNumber,
       supplierId: supplier.id,
       status: PurchaseOrderStatus.RECEIVED,
@@ -820,7 +842,7 @@ const seedPurchases = async () => {
       })
       await tx.inventoryStockMovement.create({
         data: {
-          tenantId: DEFAULT_TENANT_ID,
+          tenantId: tenantId,
           productId: item.productId,
           orderItemId: item.id,
           type: "PURCHASE_RECEIPT",
@@ -835,11 +857,11 @@ const seedPurchases = async () => {
   return { count: 1 }
 }
 
-const seedCoupons = async () => {
+const seedCoupons = async (tenantId: string) => {
   let touched = 0
   for (const item of couponSeeds) {
     await prisma.coupon.upsert({
-      where: { tenantId_code: { tenantId: DEFAULT_TENANT_ID, code: item.code } },
+      where: { tenantId_code: { tenantId: tenantId, code: item.code } },
       update: {
         name: item.name,
         discountType: item.discountType,
@@ -848,7 +870,7 @@ const seedCoupons = async () => {
         isActive: true,
       },
       create: {
-        tenantId: DEFAULT_TENANT_ID,
+        tenantId: tenantId,
         code: item.code,
         name: item.name,
         discountType: item.discountType,
@@ -880,11 +902,16 @@ const buildSeedDateTime = (daysFromToday: number, hour: number, minute: number) 
   )
 }
 
-const seedAppointments = async () => {
+const seedAppointments = async (tenantId: string, tenantSlug: string) => {
   const customers = await prisma.user.findMany({
     where: {
+      tenantId,
       role: Role.CUSTOMER,
-      email: { in: seededUsers.filter((user) => user.role === Role.CUSTOMER).map((user) => user.email) },
+      email: {
+        in: seededUsers
+          .filter((user) => user.role === Role.CUSTOMER)
+          .map((user) => seededEmailForTenant(tenantSlug, user.email)),
+      },
     },
     orderBy: { email: "asc" },
     take: 5,
@@ -893,8 +920,13 @@ const seedAppointments = async () => {
   const staffProfiles = await prisma.staffProfile.findMany({
     where: {
       user: {
+        tenantId,
         role: Role.STAFF,
-        email: { in: seededUsers.filter((user) => user.role === Role.STAFF).map((user) => user.email) },
+        email: {
+          in: seededUsers
+            .filter((user) => user.role === Role.STAFF)
+            .map((user) => seededEmailForTenant(tenantSlug, user.email)),
+        },
       },
     },
     orderBy: { user: { email: "asc" } },
@@ -903,6 +935,7 @@ const seedAppointments = async () => {
   })
   const services = await prisma.service.findMany({
     where: {
+      tenantId,
       type: ServiceType.STANDARD,
       name: { in: serviceSeeds.map((service) => service.name) },
     },
@@ -951,7 +984,7 @@ const seedAppointments = async () => {
   for (let index = 0; index < scenarios.length; index += 1) {
     const scenario = scenarios[index]
     const exists = await prisma.appointmentOrder.findFirst({
-      where: { internalNote: scenario.marker },
+      where: { tenantId, internalNote: scenario.marker },
       select: { id: true },
     })
     if (exists) continue
@@ -977,6 +1010,7 @@ const seedAppointments = async () => {
     await prisma.$transaction(async (tx) => {
       const order = await tx.appointmentOrder.create({
         data: {
+          tenantId,
           customerId,
           appointmentDate,
           appointmentStartAt: startAt,
@@ -1023,6 +1057,7 @@ const seedAppointments = async () => {
       const line = order.lines[0]
       await tx.appointment.create({
         data: {
+          tenantId,
           customerId,
           staffProfileId,
           serviceId: service.id,
@@ -1040,11 +1075,11 @@ const seedAppointments = async () => {
   return { count: created }
 }
 
-const seedShifts = async () => {
+const seedShifts = async (tenantId: string, tenantSlug: string) => {
   const templateByName = new Map<string, string>()
   for (const item of shiftTemplateSeeds) {
     const existing = await prisma.shiftTemplate.findFirst({
-      where: { name: item.name },
+      where: { tenantId, name: item.name },
       select: { id: true },
     })
     const template = existing
@@ -1054,6 +1089,7 @@ const seedShifts = async () => {
             description: item.description,
             color: item.color,
             isActive: true,
+            tenantId,
             startTime: item.startTime,
             endTime: item.endTime,
             breaks: {
@@ -1064,6 +1100,7 @@ const seedShifts = async () => {
         })
       : await prisma.shiftTemplate.create({
           data: {
+            tenantId,
             name: item.name,
             description: item.description,
             color: item.color,
@@ -1096,16 +1133,17 @@ const seedShifts = async () => {
     }
   ) => {
     const existing = await prisma.shiftSchedule.findFirst({
-      where: { name, isDefault: options.isDefault },
+      where: { tenantId, name, isDefault: options.isDefault },
       select: { id: true },
     })
     if (options.isDefault) {
-      await prisma.shiftSchedule.updateMany({ data: { isDefault: false } })
+      await prisma.shiftSchedule.updateMany({ where: { tenantId }, data: { isDefault: false } })
     }
     if (existing) {
       return prisma.shiftSchedule.update({
         where: { id: existing.id },
         data: {
+          tenantId,
           isDefault: options.isDefault,
           startDate,
           weekOffDay1: options.weekOffDay1,
@@ -1120,6 +1158,7 @@ const seedShifts = async () => {
     }
     return prisma.shiftSchedule.create({
       data: {
+        tenantId,
         name,
         isDefault: options.isDefault,
         startDate,
@@ -1144,7 +1183,11 @@ const seedShifts = async () => {
     where: {
       user: {
         role: Role.STAFF,
-        email: { in: seededUsers.filter((user) => user.role === Role.STAFF).map((user) => user.email) },
+        email: {
+          in: seededUsers
+            .filter((user) => user.role === Role.STAFF)
+            .map((user) => seededEmailForTenant(tenantSlug, user.email)),
+        },
       },
     },
     select: { id: true },
@@ -1152,13 +1195,14 @@ const seedShifts = async () => {
   })
   if (staffProfiles.length > 0) {
     const existing = await prisma.shiftSchedule.findFirst({
-      where: { name: "Seed Staff Schedule", isDefault: false },
+      where: { tenantId, name: "Seed Staff Schedule", isDefault: false },
       select: { id: true },
     })
     if (existing) {
       await prisma.shiftSchedule.update({
         where: { id: existing.id },
         data: {
+          tenantId,
           startDate,
           weekOffDay1: Weekday.SUNDAY,
           weekOffDay2: Weekday.SATURDAY,
@@ -1180,6 +1224,7 @@ const seedShifts = async () => {
     } else {
       await prisma.shiftSchedule.create({
         data: {
+          tenantId,
           name: "Seed Staff Schedule",
           isDefault: false,
           startDate,
@@ -1204,11 +1249,11 @@ const seedShifts = async () => {
   return { count: shiftTemplateSeeds.length + 2 }
 }
 
-const seedLeaves = async () => {
+const seedLeaves = async (tenantId: string, tenantSlug: string) => {
   const definitionIdByCode = new Map<string, string>()
   for (const item of leaveDefinitionSeeds) {
     const row = await prisma.leaveDefinition.upsert({
-      where: { tenantId_code: { tenantId: DEFAULT_TENANT_ID, code: item.code } },
+      where: { tenantId_code: { tenantId: tenantId, code: item.code } },
       update: {
         name: item.name,
         leaveType: item.leaveType,
@@ -1229,7 +1274,7 @@ const seedLeaves = async () => {
         sortOrder: item.sortOrder,
       },
       create: {
-        tenantId: DEFAULT_TENANT_ID,
+        tenantId: tenantId,
         code: item.code,
         name: item.name,
         leaveType: item.leaveType,
@@ -1282,9 +1327,13 @@ const seedLeaves = async () => {
   const staffProfiles = await prisma.staffProfile.findMany({
     where: {
       user: {
-        tenantId: DEFAULT_TENANT_ID,
+        tenantId: tenantId,
         role: Role.STAFF,
-        email: { in: seededUsers.filter((user) => user.role === Role.STAFF).map((user) => user.email) },
+        email: {
+          in: seededUsers
+            .filter((user) => user.role === Role.STAFF)
+            .map((user) => seededEmailForTenant(tenantSlug, user.email)),
+        },
       },
     },
     select: { id: true },
@@ -1301,7 +1350,7 @@ const seedLeaves = async () => {
         : []
 
     await prisma.leaveGroup.upsert({
-      where: { tenantId_code: { tenantId: DEFAULT_TENANT_ID, code: group.code } },
+      where: { tenantId_code: { tenantId: tenantId, code: group.code } },
       update: {
         name: group.name,
         description: group.description,
@@ -1322,7 +1371,7 @@ const seedLeaves = async () => {
         },
       },
       create: {
-        tenantId: DEFAULT_TENANT_ID,
+        tenantId: tenantId,
         code: group.code,
         name: group.name,
         description: group.description,
@@ -1346,14 +1395,13 @@ const seedLeaves = async () => {
   return { count: leaveDefinitionSeeds.length + leaveGroupSeeds.length }
 }
 
-const clearData = async () => {
+const clearData = async (tenantId: string) => {
   const adminUsers = await prisma.user.findMany({
-    where: { role: Role.ADMIN },
+    where: { tenantId, role: Role.ADMIN },
     select: { id: true, email: true },
   })
-  const adminIds = new Set(adminUsers.map((user) => user.id))
   const nonAdminUsers = await prisma.user.findMany({
-    where: { role: { not: Role.ADMIN } },
+    where: { tenantId, role: { not: Role.ADMIN } },
     select: { id: true },
   })
   const nonAdminIds = nonAdminUsers.map((user) => user.id)
@@ -1361,38 +1409,64 @@ const clearData = async () => {
   const result = await prisma.$transaction(async (tx) => {
     const counts: Record<string, number> = {}
 
-    counts.appointments = (await tx.appointment.deleteMany({})).count
-    counts.appointmentOrders = (await tx.appointmentOrder.deleteMany({})).count
-    counts.coupons = (await tx.coupon.deleteMany({})).count
+    counts.appointments = (await tx.appointment.deleteMany({ where: { tenantId } })).count
+    counts.appointmentOrders = (await tx.appointmentOrder.deleteMany({ where: { tenantId } })).count
+    counts.coupons = (await tx.coupon.deleteMany({ where: { tenantId } })).count
 
-    counts.inventoryStockMovements = (await tx.inventoryStockMovement.deleteMany({})).count
-    counts.purchaseOrders = (await tx.purchaseOrder.deleteMany({})).count
-    counts.inventoryProductSuppliers = (await tx.inventoryProductSupplier.deleteMany({})).count
-    counts.inventoryProductTaxes = (await tx.inventoryProductTax.deleteMany({})).count
-    counts.inventoryProducts = (await tx.inventoryProduct.deleteMany({})).count
-    counts.suppliers = (await tx.supplier.deleteMany({})).count
-    counts.inventoryCategories = (await tx.inventoryCategory.deleteMany({})).count
+    counts.inventoryStockMovements = (await tx.inventoryStockMovement.deleteMany({ where: { tenantId } })).count
+    counts.purchaseOrders = (await tx.purchaseOrder.deleteMany({ where: { tenantId } })).count
+    counts.inventoryProductSuppliers = (await tx.inventoryProductSupplier.deleteMany({
+      where: { product: { tenantId } },
+    })).count
+    counts.inventoryProductTaxes = (await tx.inventoryProductTax.deleteMany({
+      where: { product: { tenantId } },
+    })).count
+    counts.inventoryProducts = (await tx.inventoryProduct.deleteMany({ where: { tenantId } })).count
+    counts.suppliers = (await tx.supplier.deleteMany({ where: { tenantId } })).count
+    counts.inventoryCategories = (await tx.inventoryCategory.deleteMany({ where: { tenantId } })).count
 
-    counts.staffRosterHistoryDays = (await tx.staffRosterHistoryDay.deleteMany({})).count
-    counts.staffShiftOverrides = (await tx.staffShiftOverride.deleteMany({})).count
-    counts.staffScheduleAssignments = (await tx.staffScheduleAssignment.deleteMany({})).count
-    counts.shiftScheduleBlocks = (await tx.shiftScheduleBlock.deleteMany({})).count
-    counts.shiftSchedules = (await tx.shiftSchedule.deleteMany({})).count
-    counts.shiftTemplateBreaks = (await tx.shiftTemplateBreak.deleteMany({})).count
-    counts.shiftTemplates = (await tx.shiftTemplate.deleteMany({})).count
+    counts.staffRosterHistoryDays = (await tx.staffRosterHistoryDay.deleteMany({
+      where: { staffProfile: { user: { tenantId } } },
+    })).count
+    counts.staffShiftOverrides = (await tx.staffShiftOverride.deleteMany({
+      where: { staffProfile: { user: { tenantId } } },
+    })).count
+    counts.staffScheduleAssignments = (await tx.staffScheduleAssignment.deleteMany({
+      where: { staffProfile: { user: { tenantId } } },
+    })).count
+    counts.shiftScheduleBlocks = (await tx.shiftScheduleBlock.deleteMany({
+      where: { schedule: { tenantId } },
+    })).count
+    counts.shiftSchedules = (await tx.shiftSchedule.deleteMany({ where: { tenantId } })).count
+    counts.shiftTemplateBreaks = (await tx.shiftTemplateBreak.deleteMany({
+      where: { template: { tenantId } },
+    })).count
+    counts.shiftTemplates = (await tx.shiftTemplate.deleteMany({ where: { tenantId } })).count
 
-    counts.staffServiceEligibility = (await tx.staffServiceEligibility.deleteMany({})).count
-    counts.serviceTaxes = (await tx.serviceTax.deleteMany({})).count
-    counts.servicePackageItems = (await tx.servicePackageItem.deleteMany({})).count
-    counts.services = (await tx.service.deleteMany({})).count
-    counts.serviceCategories = (await tx.serviceCategory.deleteMany({})).count
-    counts.taxes = (await tx.tax.deleteMany({})).count
+    counts.staffServiceEligibility = (await tx.staffServiceEligibility.deleteMany({
+      where: { user: { tenantId } },
+    })).count
+    counts.serviceTaxes = (await tx.serviceTax.deleteMany({
+      where: { service: { tenantId } },
+    })).count
+    counts.servicePackageItems = (await tx.servicePackageItem.deleteMany({
+      where: { package: { tenantId } },
+    })).count
+    counts.services = (await tx.service.deleteMany({ where: { tenantId } })).count
+    counts.serviceCategories = (await tx.serviceCategory.deleteMany({ where: { tenantId } })).count
+    counts.taxes = (await tx.tax.deleteMany({ where: { tenantId } })).count
 
-    counts.staffCertifications = (await tx.staffCertification.deleteMany({})).count
-    counts.staffDocuments = (await tx.staffDocument.deleteMany({})).count
-    counts.invitations = (await tx.invitation.deleteMany({})).count
-    counts.passwordResetTokens = (await tx.passwordResetToken.deleteMany({})).count
-    counts.verificationTokens = (await tx.verificationToken.deleteMany({})).count
+    counts.staffCertifications = (await tx.staffCertification.deleteMany({
+      where: { staffProfile: { user: { tenantId } } },
+    })).count
+    counts.staffDocuments = (await tx.staffDocument.deleteMany({
+      where: { staffProfile: { user: { tenantId } } },
+    })).count
+    counts.invitations = (await tx.invitation.deleteMany({ where: { tenantId } })).count
+    counts.passwordResetTokens = (await tx.passwordResetToken.deleteMany({
+      where: { user: { tenantId } },
+    })).count
+    counts.verificationTokens = 0
     if (nonAdminIds.length > 0) {
       counts.sessions = (await tx.session.deleteMany({ where: { userId: { in: nonAdminIds } } })).count
       counts.accounts = (await tx.account.deleteMany({ where: { userId: { in: nonAdminIds } } })).count
@@ -1410,18 +1484,18 @@ const clearData = async () => {
 
   return {
     deleted: result,
-    preservedAdmins: adminUsers.filter((user) => adminIds.has(user.id)).map((user) => user.email),
+    preservedAdmins: adminUsers.map((user) => user.email),
   }
 }
 
-const previewClearData = async () => {
+const previewClearData = async (tenantId: string) => {
   const adminUsers = await prisma.user.findMany({
-    where: { role: Role.ADMIN },
+    where: { tenantId, role: Role.ADMIN },
     select: { id: true, email: true },
   })
   const nonAdminIds = (
     await prisma.user.findMany({
-      where: { role: { not: Role.ADMIN } },
+      where: { tenantId, role: { not: Role.ADMIN } },
       select: { id: true },
     })
   ).map((user) => user.id)
@@ -1460,34 +1534,34 @@ const previewClearData = async () => {
     staffProfiles,
     users,
   ] = await Promise.all([
-    prisma.appointment.count(),
-    prisma.appointmentOrder.count(),
-    prisma.coupon.count(),
-    prisma.inventoryStockMovement.count(),
-    prisma.purchaseOrder.count(),
-    prisma.inventoryProductSupplier.count(),
-    prisma.inventoryProductTax.count(),
-    prisma.inventoryProduct.count(),
-    prisma.supplier.count(),
-    prisma.inventoryCategory.count(),
-    prisma.staffRosterHistoryDay.count(),
-    prisma.staffShiftOverride.count(),
-    prisma.staffScheduleAssignment.count(),
-    prisma.shiftScheduleBlock.count(),
-    prisma.shiftSchedule.count(),
-    prisma.shiftTemplateBreak.count(),
-    prisma.shiftTemplate.count(),
-    prisma.staffServiceEligibility.count(),
-    prisma.serviceTax.count(),
-    prisma.servicePackageItem.count(),
-    prisma.service.count(),
-    prisma.serviceCategory.count(),
-    prisma.tax.count(),
-    prisma.staffCertification.count(),
-    prisma.staffDocument.count(),
-    prisma.invitation.count(),
-    prisma.passwordResetToken.count(),
-    prisma.verificationToken.count(),
+    prisma.appointment.count({ where: { tenantId } }),
+    prisma.appointmentOrder.count({ where: { tenantId } }),
+    prisma.coupon.count({ where: { tenantId } }),
+    prisma.inventoryStockMovement.count({ where: { tenantId } }),
+    prisma.purchaseOrder.count({ where: { tenantId } }),
+    prisma.inventoryProductSupplier.count({ where: { product: { tenantId } } }),
+    prisma.inventoryProductTax.count({ where: { product: { tenantId } } }),
+    prisma.inventoryProduct.count({ where: { tenantId } }),
+    prisma.supplier.count({ where: { tenantId } }),
+    prisma.inventoryCategory.count({ where: { tenantId } }),
+    prisma.staffRosterHistoryDay.count({ where: { staffProfile: { user: { tenantId } } } }),
+    prisma.staffShiftOverride.count({ where: { staffProfile: { user: { tenantId } } } }),
+    prisma.staffScheduleAssignment.count({ where: { staffProfile: { user: { tenantId } } } }),
+    prisma.shiftScheduleBlock.count({ where: { schedule: { tenantId } } }),
+    prisma.shiftSchedule.count({ where: { tenantId } }),
+    prisma.shiftTemplateBreak.count({ where: { template: { tenantId } } }),
+    prisma.shiftTemplate.count({ where: { tenantId } }),
+    prisma.staffServiceEligibility.count({ where: { user: { tenantId } } }),
+    prisma.serviceTax.count({ where: { service: { tenantId } } }),
+    prisma.servicePackageItem.count({ where: { package: { tenantId } } }),
+    prisma.service.count({ where: { tenantId } }),
+    prisma.serviceCategory.count({ where: { tenantId } }),
+    prisma.tax.count({ where: { tenantId } }),
+    prisma.staffCertification.count({ where: { staffProfile: { user: { tenantId } } } }),
+    prisma.staffDocument.count({ where: { staffProfile: { user: { tenantId } } } }),
+    prisma.invitation.count({ where: { tenantId } }),
+    prisma.passwordResetToken.count({ where: { user: { tenantId } } }),
+    Promise.resolve(0),
     nonAdminIds.length
       ? prisma.session.count({ where: { userId: { in: nonAdminIds } } })
       : Promise.resolve(0),
@@ -1600,11 +1674,11 @@ const expandClearModules = (selected: Set<ClearModule>, mode: ClearMode) => {
   }
 }
 
-const countModuleData = async (modules: Set<ClearModule>) => {
+const countModuleData = async (tenantId: string, modules: Set<ClearModule>) => {
   const nonAdminIds = modules.has("users")
     ? (
         await prisma.user.findMany({
-          where: { role: { not: Role.ADMIN } },
+          where: { tenantId, role: { not: Role.ADMIN } },
           select: { id: true },
         })
       ).map((user) => user.id)
@@ -1612,48 +1686,48 @@ const countModuleData = async (modules: Set<ClearModule>) => {
 
   const counts: Record<string, number> = {}
   if (modules.has("appointments")) {
-    counts.appointments = await prisma.appointment.count()
-    counts.appointmentOrders = await prisma.appointmentOrder.count()
+    counts.appointments = await prisma.appointment.count({ where: { tenantId } })
+    counts.appointmentOrders = await prisma.appointmentOrder.count({ where: { tenantId } })
   }
   if (modules.has("coupons")) {
-    counts.coupons = await prisma.coupon.count()
+    counts.coupons = await prisma.coupon.count({ where: { tenantId } })
   }
   if (modules.has("purchases")) {
-    counts.inventoryStockMovements = await prisma.inventoryStockMovement.count()
-    counts.purchaseOrders = await prisma.purchaseOrder.count()
+    counts.inventoryStockMovements = await prisma.inventoryStockMovement.count({ where: { tenantId } })
+    counts.purchaseOrders = await prisma.purchaseOrder.count({ where: { tenantId } })
   }
   if (modules.has("inventory")) {
-    counts.inventoryProductSuppliers = await prisma.inventoryProductSupplier.count()
-    counts.inventoryProductTaxes = await prisma.inventoryProductTax.count()
-    counts.inventoryProducts = await prisma.inventoryProduct.count()
-    counts.suppliers = await prisma.supplier.count()
-    counts.inventoryCategories = await prisma.inventoryCategory.count()
+    counts.inventoryProductSuppliers = await prisma.inventoryProductSupplier.count({ where: { product: { tenantId } } })
+    counts.inventoryProductTaxes = await prisma.inventoryProductTax.count({ where: { product: { tenantId } } })
+    counts.inventoryProducts = await prisma.inventoryProduct.count({ where: { tenantId } })
+    counts.suppliers = await prisma.supplier.count({ where: { tenantId } })
+    counts.inventoryCategories = await prisma.inventoryCategory.count({ where: { tenantId } })
   }
   if (modules.has("shifts")) {
-    counts.staffRosterHistoryDays = await prisma.staffRosterHistoryDay.count()
-    counts.staffShiftOverrides = await prisma.staffShiftOverride.count()
-    counts.staffScheduleAssignments = await prisma.staffScheduleAssignment.count()
-    counts.shiftScheduleBlocks = await prisma.shiftScheduleBlock.count()
-    counts.shiftSchedules = await prisma.shiftSchedule.count()
-    counts.shiftTemplateBreaks = await prisma.shiftTemplateBreak.count()
-    counts.shiftTemplates = await prisma.shiftTemplate.count()
+    counts.staffRosterHistoryDays = await prisma.staffRosterHistoryDay.count({ where: { staffProfile: { user: { tenantId } } } })
+    counts.staffShiftOverrides = await prisma.staffShiftOverride.count({ where: { staffProfile: { user: { tenantId } } } })
+    counts.staffScheduleAssignments = await prisma.staffScheduleAssignment.count({ where: { staffProfile: { user: { tenantId } } } })
+    counts.shiftScheduleBlocks = await prisma.shiftScheduleBlock.count({ where: { schedule: { tenantId } } })
+    counts.shiftSchedules = await prisma.shiftSchedule.count({ where: { tenantId } })
+    counts.shiftTemplateBreaks = await prisma.shiftTemplateBreak.count({ where: { template: { tenantId } } })
+    counts.shiftTemplates = await prisma.shiftTemplate.count({ where: { tenantId } })
   }
   if (modules.has("services")) {
-    counts.staffServiceEligibility = await prisma.staffServiceEligibility.count()
-    counts.serviceTaxes = await prisma.serviceTax.count()
-    counts.servicePackageItems = await prisma.servicePackageItem.count()
-    counts.services = await prisma.service.count()
-    counts.serviceCategories = await prisma.serviceCategory.count()
+    counts.staffServiceEligibility = await prisma.staffServiceEligibility.count({ where: { user: { tenantId } } })
+    counts.serviceTaxes = await prisma.serviceTax.count({ where: { service: { tenantId } } })
+    counts.servicePackageItems = await prisma.servicePackageItem.count({ where: { package: { tenantId } } })
+    counts.services = await prisma.service.count({ where: { tenantId } })
+    counts.serviceCategories = await prisma.serviceCategory.count({ where: { tenantId } })
   }
   if (modules.has("taxes")) {
-    counts.taxes = await prisma.tax.count()
+    counts.taxes = await prisma.tax.count({ where: { tenantId } })
   }
   if (modules.has("users")) {
-    counts.staffCertifications = await prisma.staffCertification.count()
-    counts.staffDocuments = await prisma.staffDocument.count()
-    counts.invitations = await prisma.invitation.count()
-    counts.passwordResetTokens = await prisma.passwordResetToken.count()
-    counts.verificationTokens = await prisma.verificationToken.count()
+    counts.staffCertifications = await prisma.staffCertification.count({ where: { staffProfile: { user: { tenantId } } } })
+    counts.staffDocuments = await prisma.staffDocument.count({ where: { staffProfile: { user: { tenantId } } } })
+    counts.invitations = await prisma.invitation.count({ where: { tenantId } })
+    counts.passwordResetTokens = await prisma.passwordResetToken.count({ where: { user: { tenantId } } })
+    counts.verificationTokens = 0
     counts.sessions = nonAdminIds.length
       ? await prisma.session.count({ where: { userId: { in: nonAdminIds } } })
       : 0
@@ -1670,7 +1744,7 @@ const countModuleData = async (modules: Set<ClearModule>) => {
 
   const preservedAdmins = (
     await prisma.user.findMany({
-      where: { role: Role.ADMIN },
+      where: { tenantId, role: Role.ADMIN },
       select: { email: true },
     })
   ).map((user) => user.email)
@@ -1678,11 +1752,11 @@ const countModuleData = async (modules: Set<ClearModule>) => {
   return { counts, preservedAdmins }
 }
 
-const clearModulesData = async (modules: Set<ClearModule>) => {
+const clearModulesData = async (tenantId: string, modules: Set<ClearModule>) => {
   const nonAdminIds = modules.has("users")
     ? (
         await prisma.user.findMany({
-          where: { role: { not: Role.ADMIN } },
+          where: { tenantId, role: { not: Role.ADMIN } },
           select: { id: true },
         })
       ).map((user) => user.id)
@@ -1695,41 +1769,41 @@ const clearModulesData = async (modules: Set<ClearModule>) => {
     for (const moduleKey of clearExecutionOrder) {
       if (!has(moduleKey)) continue
       if (moduleKey === "appointments") {
-        counts.appointments = (await tx.appointment.deleteMany({})).count
-        counts.appointmentOrders = (await tx.appointmentOrder.deleteMany({})).count
+        counts.appointments = (await tx.appointment.deleteMany({ where: { tenantId } })).count
+        counts.appointmentOrders = (await tx.appointmentOrder.deleteMany({ where: { tenantId } })).count
       } else if (moduleKey === "coupons") {
-        counts.coupons = (await tx.coupon.deleteMany({})).count
+        counts.coupons = (await tx.coupon.deleteMany({ where: { tenantId } })).count
       } else if (moduleKey === "purchases") {
-        counts.inventoryStockMovements = (await tx.inventoryStockMovement.deleteMany({})).count
-        counts.purchaseOrders = (await tx.purchaseOrder.deleteMany({})).count
+        counts.inventoryStockMovements = (await tx.inventoryStockMovement.deleteMany({ where: { tenantId } })).count
+        counts.purchaseOrders = (await tx.purchaseOrder.deleteMany({ where: { tenantId } })).count
       } else if (moduleKey === "inventory") {
-        counts.inventoryProductSuppliers = (await tx.inventoryProductSupplier.deleteMany({})).count
-        counts.inventoryProductTaxes = (await tx.inventoryProductTax.deleteMany({})).count
-        counts.inventoryProducts = (await tx.inventoryProduct.deleteMany({})).count
-        counts.suppliers = (await tx.supplier.deleteMany({})).count
-        counts.inventoryCategories = (await tx.inventoryCategory.deleteMany({})).count
+        counts.inventoryProductSuppliers = (await tx.inventoryProductSupplier.deleteMany({ where: { product: { tenantId } } })).count
+        counts.inventoryProductTaxes = (await tx.inventoryProductTax.deleteMany({ where: { product: { tenantId } } })).count
+        counts.inventoryProducts = (await tx.inventoryProduct.deleteMany({ where: { tenantId } })).count
+        counts.suppliers = (await tx.supplier.deleteMany({ where: { tenantId } })).count
+        counts.inventoryCategories = (await tx.inventoryCategory.deleteMany({ where: { tenantId } })).count
       } else if (moduleKey === "shifts") {
-        counts.staffRosterHistoryDays = (await tx.staffRosterHistoryDay.deleteMany({})).count
-        counts.staffShiftOverrides = (await tx.staffShiftOverride.deleteMany({})).count
-        counts.staffScheduleAssignments = (await tx.staffScheduleAssignment.deleteMany({})).count
-        counts.shiftScheduleBlocks = (await tx.shiftScheduleBlock.deleteMany({})).count
-        counts.shiftSchedules = (await tx.shiftSchedule.deleteMany({})).count
-        counts.shiftTemplateBreaks = (await tx.shiftTemplateBreak.deleteMany({})).count
-        counts.shiftTemplates = (await tx.shiftTemplate.deleteMany({})).count
+        counts.staffRosterHistoryDays = (await tx.staffRosterHistoryDay.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
+        counts.staffShiftOverrides = (await tx.staffShiftOverride.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
+        counts.staffScheduleAssignments = (await tx.staffScheduleAssignment.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
+        counts.shiftScheduleBlocks = (await tx.shiftScheduleBlock.deleteMany({ where: { schedule: { tenantId } } })).count
+        counts.shiftSchedules = (await tx.shiftSchedule.deleteMany({ where: { tenantId } })).count
+        counts.shiftTemplateBreaks = (await tx.shiftTemplateBreak.deleteMany({ where: { template: { tenantId } } })).count
+        counts.shiftTemplates = (await tx.shiftTemplate.deleteMany({ where: { tenantId } })).count
       } else if (moduleKey === "services") {
-        counts.staffServiceEligibility = (await tx.staffServiceEligibility.deleteMany({})).count
-        counts.serviceTaxes = (await tx.serviceTax.deleteMany({})).count
-        counts.servicePackageItems = (await tx.servicePackageItem.deleteMany({})).count
-        counts.services = (await tx.service.deleteMany({})).count
-        counts.serviceCategories = (await tx.serviceCategory.deleteMany({})).count
+        counts.staffServiceEligibility = (await tx.staffServiceEligibility.deleteMany({ where: { user: { tenantId } } })).count
+        counts.serviceTaxes = (await tx.serviceTax.deleteMany({ where: { service: { tenantId } } })).count
+        counts.servicePackageItems = (await tx.servicePackageItem.deleteMany({ where: { package: { tenantId } } })).count
+        counts.services = (await tx.service.deleteMany({ where: { tenantId } })).count
+        counts.serviceCategories = (await tx.serviceCategory.deleteMany({ where: { tenantId } })).count
       } else if (moduleKey === "taxes") {
-        counts.taxes = (await tx.tax.deleteMany({})).count
+        counts.taxes = (await tx.tax.deleteMany({ where: { tenantId } })).count
       } else if (moduleKey === "users") {
-        counts.staffCertifications = (await tx.staffCertification.deleteMany({})).count
-        counts.staffDocuments = (await tx.staffDocument.deleteMany({})).count
-        counts.invitations = (await tx.invitation.deleteMany({})).count
-        counts.passwordResetTokens = (await tx.passwordResetToken.deleteMany({})).count
-        counts.verificationTokens = (await tx.verificationToken.deleteMany({})).count
+        counts.staffCertifications = (await tx.staffCertification.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
+        counts.staffDocuments = (await tx.staffDocument.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
+        counts.invitations = (await tx.invitation.deleteMany({ where: { tenantId } })).count
+        counts.passwordResetTokens = (await tx.passwordResetToken.deleteMany({ where: { user: { tenantId } } })).count
+        counts.verificationTokens = 0
         counts.sessions = nonAdminIds.length
           ? (await tx.session.deleteMany({ where: { userId: { in: nonAdminIds } } })).count
           : 0
@@ -1750,7 +1824,7 @@ const clearModulesData = async (modules: Set<ClearModule>) => {
 
   const preservedAdmins = (
     await prisma.user.findMany({
-      where: { role: Role.ADMIN },
+      where: { tenantId, role: Role.ADMIN },
       select: { email: true },
     })
   ).map((user) => user.email)
@@ -1762,11 +1836,17 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const unauthorized = await ensureAuthorized()
-  if (unauthorized) {
-    logApiRequestSuccess(logContext, unauthorized.status, { reason: "unauthorized" })
-    return withRequestId(unauthorized, logContext.requestId)
+  const authorized = await ensureAuthorized(request)
+  if (authorized.error) {
+    logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized" })
+    return withRequestId(authorized.error, logContext.requestId)
   }
+  const tenantId = authorized.context.tenantId
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { slug: true },
+  })
+  const tenantSlug = tenant?.slug ?? "tenant"
 
   try {
     const payload = await request.json().catch(() => null)
@@ -1781,7 +1861,7 @@ export async function POST(request: Request) {
     }
 
     if (parsed.data.action === "previewClear") {
-      const preview = await previewClearData()
+      const preview = await previewClearData(tenantId)
       const response = NextResponse.json({
         ok: true,
         action: "previewClear",
@@ -1815,7 +1895,7 @@ export async function POST(request: Request) {
       }
 
       const expandedSet = new Set<ClearModule>(expansion.expanded)
-      const preview = await countModuleData(expandedSet)
+      const preview = await countModuleData(tenantId, expandedSet)
       const response = NextResponse.json({
         ok: true,
         action: "previewModulesClear",
@@ -1831,7 +1911,7 @@ export async function POST(request: Request) {
     }
 
     if (parsed.data.action === "clear") {
-      const result = await clearData()
+      const result = await clearData(tenantId)
       const response = NextResponse.json({
         ok: true,
         action: "clear",
@@ -1864,7 +1944,7 @@ export async function POST(request: Request) {
         return withRequestId(response, logContext.requestId)
       }
       const expandedSet = new Set<ClearModule>(expansion.expanded)
-      const result = await clearModulesData(expandedSet)
+      const result = await clearModulesData(tenantId, expandedSet)
       const response = NextResponse.json({
         ok: true,
         action: "clearModules",
@@ -1903,23 +1983,23 @@ export async function POST(request: Request) {
       await runGroup(dependency)
     }
     if (group === "taxes") {
-      summary.taxes = (await seedTaxes()).count
+      summary.taxes = (await seedTaxes(tenantId)).count
     } else if (group === "users") {
-      summary.users = (await seedUsers()).count
+      summary.users = (await seedUsers(tenantId, tenantSlug)).count
     } else if (group === "serviceCatalog") {
-      summary.serviceCatalog = (await seedServiceCatalog()).count
+      summary.serviceCatalog = (await seedServiceCatalog(tenantId, tenantSlug)).count
     } else if (group === "inventoryCatalog") {
-      summary.inventoryCatalog = (await seedInventoryCatalog()).count
+      summary.inventoryCatalog = (await seedInventoryCatalog(tenantId)).count
     } else if (group === "purchases") {
-      summary.purchases = (await seedPurchases()).count
+      summary.purchases = (await seedPurchases(tenantId)).count
     } else if (group === "leaves") {
-      summary.leaves = (await seedLeaves()).count
+      summary.leaves = (await seedLeaves(tenantId, tenantSlug)).count
     } else if (group === "shifts") {
-      summary.shifts = (await seedShifts()).count
+      summary.shifts = (await seedShifts(tenantId, tenantSlug)).count
     } else if (group === "appointments") {
-      summary.appointments = (await seedAppointments()).count
+      summary.appointments = (await seedAppointments(tenantId, tenantSlug)).count
     } else if (group === "coupons") {
-      summary.coupons = (await seedCoupons()).count
+      summary.coupons = (await seedCoupons(tenantId)).count
     }
     done.add(group)
   }

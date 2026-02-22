@@ -12,18 +12,22 @@ const prisma = new PrismaClient({
   adapter: new PrismaPg(pool),
 })
 
-const ADMIN_NAME = "Alvin Araujo"
-const ADMIN_EMAIL = "alvinaraujo@gmail.com"
-const ADMIN_PASSWORD = "password123"
+const PLATFORM_TENANT_SLUG = (
+  process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
+)
+const PLATFORM_TENANT_NAME = process.env.PLATFORM_ADMIN_TENANT_NAME?.trim() || "Platform Tenant"
+const ADMIN_NAME = process.env.PLATFORM_ADMIN_NAME?.trim() || "Platform Admin"
+const ADMIN_EMAIL = process.env.PLATFORM_ADMIN_EMAIL?.trim().toLowerCase() || "platform-admin@ls-salon.test"
+const ADMIN_PASSWORD = process.env.PLATFORM_ADMIN_PASSWORD?.trim() || "password123"
 
 async function main() {
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10)
   const tenant = await prisma.tenant.upsert({
-    where: { slug: "default" },
+    where: { slug: PLATFORM_TENANT_SLUG },
     update: { status: "ACTIVE" },
     create: {
-      slug: "default",
-      name: "Default Tenant",
+      slug: PLATFORM_TENANT_SLUG,
+      name: PLATFORM_TENANT_NAME,
       status: "ACTIVE",
     },
     select: { id: true },
@@ -48,7 +52,13 @@ async function main() {
     },
   })
 
-  console.log(`Admin bootstrap complete for ${ADMIN_EMAIL}`)
+  await prisma.appSetting.upsert({
+    where: { tenantId: tenant.id },
+    update: {},
+    create: { tenantId: tenant.id },
+  })
+
+  console.log(`Platform admin bootstrap complete for ${ADMIN_EMAIL} on tenant slug ${PLATFORM_TENANT_SLUG}`)
 }
 
 main()

@@ -7,7 +7,7 @@ import { resolveTenantFromServerHeaders } from "@/lib/tenancy"
 import TenantsPageClient from "./tenants-page-client"
 
 const PLATFORM_TENANT_SLUG = (
-  process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "default"
+  process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
 )
 
 export default async function SettingsTenantsPage() {
@@ -28,4 +28,3 @@ export default async function SettingsTenantsPage() {
 
   return <TenantsPageClient />
 }
-

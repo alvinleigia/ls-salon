@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 
 const PLATFORM_TENANT_SLUG = (
-  process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "default"
+  process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
 )
 
 const getTenantSlugFromHost = (hostHeader: string | null) => {

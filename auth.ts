@@ -75,5 +75,35 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       return true;
     },
+    async redirect({ url, baseUrl }) {
+      if (url.startsWith("/")) return `${baseUrl}${url}`
+
+      try {
+        const target = new URL(url)
+        const base = new URL(baseUrl)
+        if (target.origin === base.origin) return url
+
+        const targetHost = target.hostname.toLowerCase()
+        const baseHost = base.hostname.toLowerCase()
+        if (
+          baseHost === "localhost" &&
+          (targetHost === "localhost" || targetHost.endsWith(".localhost"))
+        ) {
+          return url
+        }
+
+        const rootDomain = process.env.APP_ROOT_DOMAIN?.trim().toLowerCase()
+        if (rootDomain) {
+          const sameRootDomain =
+            (targetHost === rootDomain || targetHost.endsWith(`.${rootDomain}`)) &&
+            (baseHost === rootDomain || baseHost.endsWith(`.${rootDomain}`))
+          if (sameRootDomain) return url
+        }
+      } catch {
+        return baseUrl
+      }
+
+      return baseUrl
+    },
   },
 });

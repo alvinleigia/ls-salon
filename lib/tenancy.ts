@@ -2,7 +2,9 @@ import { headers } from "next/headers"
 
 import { prisma } from "@/lib/prisma"
 
-const DEFAULT_DEV_SLUG = "default"
+const PLATFORM_TENANT_SLUG = (
+  process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
+)
 
 export type TenantContext = {
   id: string
@@ -17,7 +19,7 @@ export const getTenantSlugFromHost = (hostHeader: string | null | undefined) => 
   const hostname = getHostname(hostHeader)
 
   if (hostname === "localhost") {
-    return DEFAULT_DEV_SLUG
+    return PLATFORM_TENANT_SLUG
   }
 
   if (hostname.endsWith(".localhost")) {
@@ -40,19 +42,6 @@ export const resolveTenantBySlug = async (slug: string) => {
     select: { id: true, slug: true, name: true },
   })
   if (tenant) return tenant
-
-  if (slug === DEFAULT_DEV_SLUG && process.env.NODE_ENV !== "production") {
-    return prisma.tenant.upsert({
-      where: { slug: DEFAULT_DEV_SLUG },
-      update: { status: "ACTIVE" },
-      create: {
-        slug: DEFAULT_DEV_SLUG,
-        name: "Default Tenant",
-        status: "ACTIVE",
-      },
-      select: { id: true, slug: true, name: true },
-    })
-  }
   return null
 }
 

@@ -1099,5 +1099,24 @@ export const updateTenantStatusSchema = z.object({
   status: z.enum(["ACTIVE", "SUSPENDED", "ARCHIVED"]),
 })
 
+export const resetAllTenantsSchema = z.object({
+  confirmation: z.literal("RESET"),
+  keepPlatformTenant: z.boolean().optional().default(true),
+})
+
+export const updateTenantAdminSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).optional().or(z.literal("")),
+    email: z.string().trim().email().optional().or(z.literal("")),
+    phone: z.string().trim().min(7).max(20).optional().or(z.literal("")),
+    status: z.enum(["ACTIVE", "SUSPENDED", "ARCHIVED"]).optional(),
+    password: z.string().trim().min(8).max(100).optional().or(z.literal("")),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required.",
+  })
+
 export type CreateTenantInput = z.infer<typeof createTenantSchema>
 export type UpdateTenantStatusInput = z.infer<typeof updateTenantStatusSchema>
+export type ResetAllTenantsInput = z.infer<typeof resetAllTenantsSchema>
+export type UpdateTenantAdminInput = z.infer<typeof updateTenantAdminSchema>

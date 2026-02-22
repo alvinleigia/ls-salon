@@ -24,6 +24,10 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Keep one shared database with strict tenant scoping in Prisma queries and model uniqueness constraints (`@@unique([tenantId, ...])` where applicable).
 - Platform operations (tenant provisioning, status lifecycle, admin reset) are centralized under `/api/tenants*` and must validate platform-tenant scope (`PLATFORM_ADMIN_TENANT_SLUG`).
 - Tenant management UI lives under `/settings/tenants` and is only visible/accessible for platform admin users.
+- `/api/tenants` storefront listing should exclude internal tenant records (`platform` control-plane tenant and legacy `default` bootstrap tenant).
+- Use a dedicated platform tenant slug (recommended: `platform`) instead of reusing a business tenant slug like `default`.
+- Tenant admin profile management (name/email/phone/status/password) is handled via `/api/tenants/[id]/admin` and exposed from `/settings/tenants` row actions.
+- Platform danger reset is handled via `/api/tenants/reset-all` (confirmation token required); preserve the configured platform-admin login tenant and allow optional platform-tenant preservation.
 - Platform super-admin scope is provisioning-only:
   - allowed UI surface: `/settings/tenants`.
   - allowed API surface: `/api/tenants*` (plus auth/session endpoints).
@@ -44,6 +48,8 @@ This is the baseline for new modules (API + UI) in this codebase.
   - `tenant.created`
   - `tenant.status.updated`
   - `tenant.admin.reset_sent`
+  - `tenant.admin.updated`
+  - `tenant.reset_all`
 
 ## Delete policy (global)
 - Default: **restrict delete** if the record is referenced by other records.
@@ -101,6 +107,7 @@ This is the baseline for new modules (API + UI) in this codebase.
 
 ## Seeding + reset conventions
 - Seed/clear operations are API-driven via `/api/seeds` and must remain role-gated (`canManageUsers`).
+- Seed/clear operations must be tenant-scoped to the current tenant context (host/session tenant); never run cross-tenant deletes from this API.
 - Seeds must not create/update/delete admin users; admin records are preserve-only.
 - Seeds must not modify global settings (`AppSetting` + working hours/overrides).
 - Seed groups should be dependency-aware (auto-run prerequisites), and response should include executed groups.

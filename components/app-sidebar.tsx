@@ -61,7 +61,7 @@ export function AppSidebar() {
   const user = session?.user
   const role = (user as { role?: Role })?.role
   const platformTenantSlug =
-    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "default"
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
   const tenantSlug = React.useMemo(() => {
     if (typeof window === "undefined") return null
     const hostname = window.location.hostname.toLowerCase()
@@ -548,7 +548,7 @@ export function AppSidebar() {
                         </SidebarMenuSubButton>
                       </SidebarMenuSubItem>
                     ) : null}
-                    {canManageTenants(role ?? null) ? (
+                    {canManageTenants(role ?? null) && isPlatformSuperAdmin ? (
                       <SidebarMenuSubItem>
                         <SidebarMenuSubButton
                           asChild
@@ -628,7 +628,13 @@ export function AppSidebar() {
             </DropdownMenuItem>
             <DropdownMenuItem
               className="justify-start"
-              onSelect={() => signOut({ callbackUrl: "/auth/signin" })}
+              onSelect={() => {
+                const callbackUrl =
+                  typeof window !== "undefined"
+                    ? `${window.location.origin}/auth/signin`
+                    : "/auth/signin"
+                void signOut({ callbackUrl })
+              }}
             >
               <LogOutIcon className="mr-1" />
               <span>Logout</span>
