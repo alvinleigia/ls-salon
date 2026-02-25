@@ -40,7 +40,6 @@ export const defaultLeaveDefinitionFormValues: LeaveDefinitionFormValues = {
   weekOffBothSideAllowed: true,
   holidaySingleSideAllowed: true,
   holidayBothSideAllowed: true,
-  maxConsecutiveDays: 30,
   maxPendingRequests: 3,
   status: "ACTIVE",
   sortOrder: 0,

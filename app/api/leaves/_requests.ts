@@ -243,7 +243,6 @@ export const validateCreateLeaveRequestRules = async ({
       allowedUsers: true,
       minDaysPerRequest: true,
       maxDaysPerRequest: true,
-      maxConsecutiveDays: true,
       maxPendingRequests: true,
       allowWithOtherLeaves: true,
       priorEntryAllowed: true,
@@ -288,9 +287,6 @@ export const validateCreateLeaveRequestRules = async ({
   }
   if (daysCount > leaveDefinition.maxDaysPerRequest) {
     throw new Error("Requested days exceed the maximum allowed per request.")
-  }
-  if (daysCount > leaveDefinition.maxConsecutiveDays) {
-    throw new Error("Requested days exceed max consecutive days for this leave.")
   }
 
   const today = getTodayDateOnlyUtc()
@@ -604,7 +600,6 @@ type BuildLeaveRequestRuleChecksInput = {
     allowedUsers: "MALE" | "FEMALE" | "ALL"
     minDaysPerRequest: number
     maxDaysPerRequest: number
-    maxConsecutiveDays: number
     priorEntryAllowed: boolean
     noticeDays: number
     weekOffSingleSideAllowed: boolean
@@ -651,14 +646,6 @@ export const buildLeaveRequestRuleChecks = async ({
     label: "Min/Max days per request",
     passed: minMaxPassed,
     detail: `${passFail(minMaxPassed)} (${daysCount} day(s), allowed ${leaveDefinition.minDaysPerRequest}-${leaveDefinition.maxDaysPerRequest})`,
-  })
-
-  const consecutivePassed = daysCount <= leaveDefinition.maxConsecutiveDays
-  checks.push({
-    key: "maxConsecutiveDays",
-    label: "Max consecutive days",
-    passed: consecutivePassed,
-    detail: `${passFail(consecutivePassed)} (${daysCount}/${leaveDefinition.maxConsecutiveDays})`,
   })
 
   const createdDateOnly = new Date(

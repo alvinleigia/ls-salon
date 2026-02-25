@@ -28,7 +28,6 @@ export type LeaveDefinitionRow = {
   weekOffBothSideAllowed: boolean
   holidaySingleSideAllowed: boolean
   holidayBothSideAllowed: boolean
-  maxConsecutiveDays: number
   maxPendingRequests: number
   status: LeaveDefinitionStatus
   sortOrder: number
@@ -56,7 +55,6 @@ export type LeaveDefinitionFormValues = {
   weekOffBothSideAllowed: boolean
   holidaySingleSideAllowed: boolean
   holidayBothSideAllowed: boolean
-  maxConsecutiveDays: number
   maxPendingRequests: number
   status: LeaveDefinitionStatus
   sortOrder: number

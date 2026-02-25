@@ -1,3 +1,5 @@
+# http://platform.localhost:3000/ - Email: default.admin@ls-salon.test Password: password123
+# http://storefront1.localhost:3000/ - Email: storefront1.admin@ls-salon.test Password: password123
 # Base Conventions
 
 This is the baseline for new modules (API + UI) in this codebase.
@@ -157,6 +159,10 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Roster displays only shift schedules; if no staff schedule and no default schedule, show empty.
 - Roster overrides apply shift templates or mark a date range unavailable for a staff member (skip holidays/week off optional).
 - Shift overrides must not conflict with booked appointments. Require a resolution action (cancel, reassign, or reschedule) before applying changes.
+- Leave definition day-length policy should use only:
+  - `minDaysPerRequest`
+  - `maxDaysPerRequest`
+  - treat `maxConsecutiveDays` as deprecated in API/UI and keep it internally mirrored to `maxDaysPerRequest` only for DB backward compatibility.
 - Appointment domain contracts live in `types/appointments.ts` (status/action/request/response and row/form shapes).
 - Appointment conflict resolution payloads must use `appointmentResolveSchema` in `lib/validation.ts` for API validation.
 - Appointment booking uses one shared form component/model, opened from both calendar cell click and "New appointment" action.

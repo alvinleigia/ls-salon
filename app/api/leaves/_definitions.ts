@@ -20,7 +20,6 @@ type LeaveDefinitionWithLinks = {
   weekOffBothSideAllowed: boolean
   holidaySingleSideAllowed: boolean
   holidayBothSideAllowed: boolean
-  maxConsecutiveDays: number
   maxPendingRequests: number
   status: LeaveDefinitionRow["status"]
   sortOrder: number
@@ -51,7 +50,6 @@ export const leaveDefinitionSelect = {
   weekOffBothSideAllowed: true,
   holidaySingleSideAllowed: true,
   holidayBothSideAllowed: true,
-  maxConsecutiveDays: true,
   maxPendingRequests: true,
   status: true,
   sortOrder: true,
@@ -88,7 +86,6 @@ export const serializeLeaveDefinition = (
   weekOffBothSideAllowed: item.weekOffBothSideAllowed,
   holidaySingleSideAllowed: item.holidaySingleSideAllowed,
   holidayBothSideAllowed: item.holidayBothSideAllowed,
-  maxConsecutiveDays: item.maxConsecutiveDays,
   maxPendingRequests: item.maxPendingRequests,
   status: item.status,
   sortOrder: item.sortOrder,

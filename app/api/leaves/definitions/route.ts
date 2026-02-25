@@ -178,7 +178,7 @@ export async function POST(request: Request) {
           weekOffBothSideAllowed: parsed.data.weekOffBothSideAllowed,
           holidaySingleSideAllowed: parsed.data.holidaySingleSideAllowed,
           holidayBothSideAllowed: parsed.data.holidayBothSideAllowed,
-          maxConsecutiveDays: parsed.data.maxConsecutiveDays,
+          maxConsecutiveDays: parsed.data.maxDaysPerRequest,
           maxPendingRequests: parsed.data.maxPendingRequests,
           status: parsed.data.status,
           sortOrder: parsed.data.sortOrder,

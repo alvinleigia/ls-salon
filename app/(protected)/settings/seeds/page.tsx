@@ -114,36 +114,49 @@ export default function SeedsPage() {
     }
     setSeeding(true)
     setResult("")
-    const response = await fetch("/api/seeds", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "seed",
-        groups: selectedGroups,
-      }),
-    })
-    setSeeding(false)
+    try {
+      const controller = new AbortController()
+      const timeoutId = window.setTimeout(() => controller.abort(), 180000)
+      const response = await fetch("/api/seeds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          action: "seed",
+          groups: selectedGroups,
+        }),
+      })
+      window.clearTimeout(timeoutId)
 
-    const data = (await response.json().catch(() => ({}))) as {
-      error?: string
-      message?: string
-      summary?: Record<string, number>
-      executedGroups?: string[]
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string
+        message?: string
+        summary?: Record<string, number>
+        executedGroups?: string[]
+      }
+      if (!response.ok) {
+        toast.error(data.error ?? "Unable to apply seeds.")
+        return
+      }
+      const summaryText = Object.entries(data.summary ?? {})
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(", ")
+      const executedText = (data.executedGroups ?? []).join(", ")
+      setResult(
+        [summaryText || "Seed completed.", executedText ? `Executed: ${executedText}` : ""]
+          .filter(Boolean)
+          .join(" | ")
+      )
+      toast.success(data.message ?? "Seed completed.")
+    } catch (error) {
+      const message =
+        error instanceof DOMException && error.name === "AbortError"
+          ? "Seeding timed out. Reduce selected groups and retry."
+          : "Unable to apply seeds."
+      toast.error(message)
+    } finally {
+      setSeeding(false)
     }
-    if (!response.ok) {
-      toast.error(data.error ?? "Unable to apply seeds.")
-      return
-    }
-    const summaryText = Object.entries(data.summary ?? {})
-      .map(([key, value]) => `${key}: ${value}`)
-      .join(", ")
-    const executedText = (data.executedGroups ?? []).join(", ")
-    setResult(
-      [summaryText || "Seed completed.", executedText ? `Executed: ${executedText}` : ""]
-        .filter(Boolean)
-        .join(" | ")
-    )
-    toast.success(data.message ?? "Seed completed.")
   }
 
   const previewClear = async () => {

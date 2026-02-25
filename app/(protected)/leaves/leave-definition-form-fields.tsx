@@ -116,7 +116,7 @@ export function LeaveDefinitionFormFields({
         </FormField>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-3">
         <FormField
           id="minDaysPerRequest"
           label="Minimum allowed at a time"
@@ -143,16 +143,6 @@ export function LeaveDefinitionFormFields({
             max={365}
             value={values.maxDaysPerRequest}
             onChange={handleNumber("maxDaysPerRequest")}
-          />
-        </FormField>
-        <FormField id="maxConsecutiveDays" label="Max consecutive days" error={errors.maxConsecutiveDays}>
-          <Input
-            id="maxConsecutiveDays"
-            type="number"
-            min={1}
-            max={365}
-            value={values.maxConsecutiveDays}
-            onChange={handleNumber("maxConsecutiveDays")}
           />
         </FormField>
         <FormField id="maxPendingRequests" label="Max pending requests" error={errors.maxPendingRequests}>

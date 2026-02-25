@@ -52,13 +52,93 @@ const parseDateOnly = (value: string | null) => {
   return parsed
 }
 
-const toDateKey = (value: Date) => value.toISOString().slice(0, 10)
+const dateKeyToUtcDate = (value: string) => new Date(`${value}T00:00:00.000Z`)
+const addDaysToDateKey = (value: string, days: number) => {
+  const base = dateKeyToUtcDate(value)
+  base.setUTCDate(base.getUTCDate() + days)
+  return base.toISOString().slice(0, 10)
+}
 
-const toDateLabel = (value: Date) =>
+const getDatePartsInTimeZone = (value: Date, timeZone: string) => {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+  const parts = formatter.formatToParts(value)
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "00"
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+  }
+}
+
+const toDateKeyInTimeZone = (value: Date, timeZone: string) => {
+  const parts = getDatePartsInTimeZone(value, timeZone)
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
+const toDateLabelInTimeZone = (value: Date, timeZone: string) =>
   value.toLocaleDateString("en-US", {
+    timeZone,
     month: "short",
     day: "numeric",
   })
+
+const getTimePartsInTimeZone = (value: Date, timeZone: string) => {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+  const parts = formatter.formatToParts(value)
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? "0")
+  return {
+    hour: get("hour"),
+    minute: get("minute"),
+  }
+}
+
+const zonedDateTimeToUtc = (
+  dateKey: string,
+  timeZone: string,
+  hour = 0,
+  minute = 0
+) => {
+  let probe = new Date(
+    `${dateKey}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00.000Z`
+  )
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const dateParts = getDatePartsInTimeZone(probe, timeZone)
+    const timeParts = getTimePartsInTimeZone(probe, timeZone)
+
+    const current = Date.UTC(
+      Number(dateParts.year),
+      Number(dateParts.month) - 1,
+      Number(dateParts.day),
+      timeParts.hour,
+      timeParts.minute
+    )
+    const target = Date.UTC(
+      Number(dateKey.slice(0, 4)),
+      Number(dateKey.slice(5, 7)) - 1,
+      Number(dateKey.slice(8, 10)),
+      hour,
+      minute
+    )
+    const deltaMinutes = Math.round((target - current) / 60000)
+    if (deltaMinutes === 0) break
+    probe = new Date(probe.getTime() + deltaMinutes * 60000)
+  }
+
+  return probe
+}
 
 const getRangeBounds = (
   range: string,
@@ -120,11 +200,13 @@ export async function GET(request: Request) {
     const range = (url.searchParams.get("range") || "week").toLowerCase()
     const startDateRaw = url.searchParams.get("startDate")
     const endDateRaw = url.searchParams.get("endDate")
+    const debug = url.searchParams.get("debug") === "1"
 
     const settings = await prisma.appSetting.findUnique({
       where: { tenantId },
-      select: { firstDayOfWeek: true },
+      select: { firstDayOfWeek: true, timeZone: true },
     })
+    const timeZone = settings?.timeZone || "America/New_York"
 
     const bounds = getRangeBounds(
       range,
@@ -133,10 +215,19 @@ export async function GET(request: Request) {
       endDateRaw
     )
 
-    const today = startOfDay(new Date())
-    const tomorrow = addDays(today, 1)
-    const periodStartDateOnly = startOfDay(bounds.start)
-    const periodEndDateOnly = addDays(startOfDay(bounds.endExclusive), -1)
+    const now = new Date()
+    const todayDateKey = toDateKeyInTimeZone(now, timeZone)
+    const tomorrowDateKey = addDaysToDateKey(todayDateKey, 1)
+    const todayStart = zonedDateTimeToUtc(todayDateKey, timeZone, 0, 0)
+    const tomorrowStart = zonedDateTimeToUtc(tomorrowDateKey, timeZone, 0, 0)
+    const rangeStartDateKey = toDateKeyInTimeZone(bounds.start, timeZone)
+    const rangeEndDateKey = toDateKeyInTimeZone(addDays(bounds.endExclusive, -1), timeZone)
+    const rangeEndExclusiveDateKey = addDaysToDateKey(rangeEndDateKey, 1)
+    const rangeStart = zonedDateTimeToUtc(rangeStartDateKey, timeZone, 0, 0)
+    const rangeEndExclusive = zonedDateTimeToUtc(rangeEndExclusiveDateKey, timeZone, 0, 0)
+    const periodStartDateOnly = dateKeyToUtcDate(rangeStartDateKey)
+    const periodEndDateOnly = dateKeyToUtcDate(rangeEndDateKey)
+    const todayDateOnly = dateKeyToUtcDate(todayDateKey)
 
     const [
       periodOrders,
@@ -151,7 +242,7 @@ export async function GET(request: Request) {
       lowStockProducts,
       appointmentStatusRows,
       topServiceLines,
-      staffTodayAppointments,
+      staffRangeAppointments,
     ] = await Promise.all([
       prisma.appointmentOrder.findMany({
         where: {
@@ -172,23 +263,21 @@ export async function GET(request: Request) {
         where: {
           tenantId,
           status: { in: REVENUE_STATUSES },
-          appointmentDate: { gte: today, lte: today },
+          appointmentDate: { gte: todayDateOnly, lte: todayDateOnly },
         },
         select: { totalCents: true },
       }),
       prisma.appointment.findMany({
         where: {
           tenantId,
-          startAt: { gte: bounds.start, lt: bounds.endExclusive },
-          status: { in: BOOKING_STATUSES },
+          startAt: { gte: rangeStart, lt: rangeEndExclusive },
         },
         select: { id: true, startAt: true, status: true, customerId: true },
       }),
       prisma.appointment.findMany({
         where: {
           tenantId,
-          startAt: { gte: today, lt: tomorrow },
-          status: { in: BOOKING_STATUSES },
+          startAt: { gte: todayStart, lt: tomorrowStart },
         },
         select: {
           id: true,
@@ -200,8 +289,7 @@ export async function GET(request: Request) {
       prisma.appointment.findMany({
         where: {
           tenantId,
-          startAt: { gte: bounds.start, lt: bounds.endExclusive },
-          status: { in: BOOKING_STATUSES },
+          startAt: { gte: rangeStart, lt: rangeEndExclusive },
         },
         distinct: ["customerId"],
         select: { customerId: true },
@@ -270,7 +358,7 @@ export async function GET(request: Request) {
         by: ["status"],
         where: {
           tenantId,
-          startAt: { gte: bounds.start, lt: bounds.endExclusive },
+          startAt: { gte: rangeStart, lt: rangeEndExclusive },
         },
         _count: { _all: true },
       }),
@@ -294,7 +382,7 @@ export async function GET(request: Request) {
       prisma.appointment.findMany({
         where: {
           tenantId,
-          startAt: { gte: today, lt: tomorrow },
+          startAt: { gte: rangeStart, lt: rangeEndExclusive },
           status: { in: BOOKING_STATUSES },
         },
         select: {
@@ -306,26 +394,31 @@ export async function GET(request: Request) {
       }),
     ])
 
+    const rangeDays = Math.max(
+      1,
+      Math.round((bounds.endExclusive.getTime() - bounds.start.getTime()) / (24 * 60 * 60 * 1000))
+    )
+
     const daySeriesMap = new Map<string, { date: string; label: string; revenueCents: number; bookings: number }>()
     for (let cursor = new Date(bounds.start); cursor < bounds.endExclusive; cursor = addDays(cursor, 1)) {
-      const key = toDateKey(cursor)
+      const key = toDateKeyInTimeZone(cursor, timeZone)
       daySeriesMap.set(key, {
         date: key,
-        label: toDateLabel(cursor),
+        label: toDateLabelInTimeZone(cursor, timeZone),
         revenueCents: 0,
         bookings: 0,
       })
     }
 
     for (const order of periodOrders) {
-      const key = toDateKey(order.appointmentDate)
+      const key = toDateKeyInTimeZone(order.appointmentDate, timeZone)
       const point = daySeriesMap.get(key)
       if (!point) continue
       point.revenueCents += order.totalCents
     }
 
     for (const appointment of periodAppointments) {
-      const key = toDateKey(appointment.startAt)
+      const key = toDateKeyInTimeZone(appointment.startAt, timeZone)
       const point = daySeriesMap.get(key)
       if (!point) continue
       point.bookings += 1
@@ -346,7 +439,7 @@ export async function GET(request: Request) {
     }
 
     const staffMap = new Map<string, { staffProfileId: string; name: string; bookings: number; bookedMinutes: number }>()
-    for (const row of staffTodayAppointments) {
+    for (const row of staffRangeAppointments) {
       const key = row.staffProfileId
       const current = staffMap.get(key) ?? {
         staffProfileId: key,
@@ -363,8 +456,8 @@ export async function GET(request: Request) {
     const payload = {
       range: {
         label: bounds.label,
-        startDate: toDateKey(bounds.start),
-        endDate: toDateKey(addDays(bounds.endExclusive, -1)),
+        startDate: rangeStartDateKey,
+        endDate: rangeEndDateKey,
       },
       kpis: {
         revenueCents: periodOrders.reduce((sum, row) => sum + row.totalCents, 0),
@@ -391,7 +484,7 @@ export async function GET(request: Request) {
       staffUtilization: Array.from(staffMap.values())
         .map((row) => ({
           ...row,
-          utilizationPercent: Math.min(100, Math.round((row.bookedMinutes / (8 * 60)) * 100)),
+          utilizationPercent: Math.min(100, Math.round((row.bookedMinutes / (rangeDays * 8 * 60)) * 100)),
         }))
         .sort((a, b) => b.bookedMinutes - a.bookedMinutes)
         .slice(0, 6),
@@ -414,6 +507,61 @@ export async function GET(request: Request) {
         reorderQty: row.reorderQty,
       })),
       generatedAt: new Date().toISOString(),
+    }
+
+    if (debug) {
+      const daily = payload.series as { daily: Array<{ bookings: number; revenueCents: number }> }
+      const appointmentStatus = payload.appointmentStatus as Array<{ count: number }>
+      const staffUtilization = payload.staffUtilization as Array<{ bookings: number; bookedMinutes: number }>
+      const topServices = payload.topServices as Array<{ bookings: number; revenueCents: number }>
+      const kpis = payload.kpis as { appointments: number; revenueCents: number; appointmentsToday: number; revenueTodayCents: number }
+      ;(payload as { debug?: unknown }).debug = {
+        tenantId,
+        request: {
+          range,
+          startDateRaw,
+          endDateRaw,
+          host: request.headers.get("host"),
+          forwardedHost: request.headers.get("x-forwarded-host"),
+        },
+        computedBounds: {
+          label: bounds.label,
+          timeZone,
+          start: bounds.start.toISOString(),
+          endExclusive: bounds.endExclusive.toISOString(),
+          todayStart: todayStart.toISOString(),
+          tomorrowStart: tomorrowStart.toISOString(),
+          periodStartDateOnly: periodStartDateOnly.toISOString(),
+          periodEndDateOnly: periodEndDateOnly.toISOString(),
+          todayDateOnly: todayDateOnly.toISOString(),
+          rangeDays,
+        },
+        sourceCounts: {
+          periodOrders: periodOrders.length,
+          todayOrders: todayOrders.length,
+          periodAppointments: periodAppointments.length,
+          todayAppointments: todayAppointments.length,
+          distinctCustomers: distinctCustomers.length,
+          appointmentStatusRows: appointmentStatusRows.length,
+          topServiceLines: topServiceLines.length,
+          staffRangeAppointments: staffRangeAppointments.length,
+          upcomingAppointments: upcomingAppointments.length,
+          lowStockProducts: lowStockProducts.length,
+        },
+        derivedTotals: {
+          kpiAppointments: kpis.appointments,
+          dailyBookingsTotal: daily.daily.reduce((sum, row) => sum + row.bookings, 0),
+          statusMixTotal: appointmentStatus.reduce((sum, row) => sum + row.count, 0),
+          staffBookingsTotal: staffUtilization.reduce((sum, row) => sum + row.bookings, 0),
+          staffBookedMinutesTotal: staffUtilization.reduce((sum, row) => sum + row.bookedMinutes, 0),
+          topServicesBookingsTotal: topServices.reduce((sum, row) => sum + row.bookings, 0),
+          kpiRevenueCents: kpis.revenueCents,
+          dailyRevenueTotalCents: daily.daily.reduce((sum, row) => sum + row.revenueCents, 0),
+          topServicesRevenueTotalCents: topServices.reduce((sum, row) => sum + row.revenueCents, 0),
+          kpiAppointmentsToday: kpis.appointmentsToday,
+          kpiRevenueTodayCents: kpis.revenueTodayCents,
+        },
+      }
     }
 
     const response = NextResponse.json(payload)

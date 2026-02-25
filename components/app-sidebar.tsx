@@ -317,7 +317,8 @@ export function AppSidebar() {
     cn("transition-colors", active && "bg-sidebar-primary/20 text-sidebar-primary font-semibold")
 
   const subButtonClass = (active: boolean) =>
-    cn("transition-colors", active && "bg-sidebar-primary/15 text-sidebar-primary font-semibold")
+    cn("transition-colors", active && "bg-sidebar-primary/20 text-sidebar-primary font-semibold")
+  const navIconClass = "h-4 w-4 !text-zinc-500 dark:!text-zinc-400"
 
   return (
     <Sidebar>
@@ -339,7 +340,7 @@ export function AppSidebar() {
       <SidebarSeparator />
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel></SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => {
@@ -348,7 +349,7 @@ export function AppSidebar() {
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton asChild isActive={active} className={menuButtonClass(active)}>
                       <Link href={item.href} className="flex w-full items-center">
-                        <item.icon className="h-4 w-4 text-zinc-300 dark:text-zinc-500" />
+                        <item.icon className={navIconClass} />
                         <span>{item.title}</span>
                       </Link>
                     </SidebarMenuButton>
@@ -372,7 +373,7 @@ export function AppSidebar() {
                           isActive={sectionActive}
                           className={menuButtonClass(sectionActive)}
                         >
-                            <section.icon className="h-4 w-4 text-zinc-300 dark:text-zinc-500" />
+                            <section.icon className={navIconClass} />
                           <span>{section.title}</span>
                           <ChevronRightIcon
                             className={cn("ml-auto h-4 w-4 transition-transform", isOpen && "rotate-90")}
@@ -387,7 +388,7 @@ export function AppSidebar() {
                               <SidebarMenuSubItem key={item.href}>
                                 <SidebarMenuSubButton asChild isActive={subActive} className={subButtonClass(subActive)}>
                                   <Link href={item.href} className="flex w-full items-center">
-                                    <item.icon className="h-4 w-4 text-zinc-300 dark:text-zinc-500" />
+                                    <item.icon className={navIconClass} />
                                     <span>{item.title}</span>
                                     <span
                                       className={cn(

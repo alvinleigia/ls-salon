@@ -84,7 +84,6 @@ export async function GET(
       allowedUsers: true,
       minDaysPerRequest: true,
       maxDaysPerRequest: true,
-      maxConsecutiveDays: true,
       priorEntryAllowed: true,
       noticeDays: true,
       weekOffSingleSideAllowed: true,

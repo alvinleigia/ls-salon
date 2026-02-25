@@ -33,7 +33,6 @@ const mapToFormValues = (row: LeaveDefinitionRow): LeaveDefinitionFormValues => 
   weekOffBothSideAllowed: row.weekOffBothSideAllowed,
   holidaySingleSideAllowed: row.holidaySingleSideAllowed,
   holidayBothSideAllowed: row.holidayBothSideAllowed,
-  maxConsecutiveDays: row.maxConsecutiveDays,
   maxPendingRequests: row.maxPendingRequests,
   status: row.status,
   sortOrder: row.sortOrder,

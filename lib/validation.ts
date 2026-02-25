@@ -873,7 +873,6 @@ const leaveDefinitionBaseSchema = z.object({
   weekOffBothSideAllowed: z.boolean().default(true),
   holidaySingleSideAllowed: z.boolean().default(true),
   holidayBothSideAllowed: z.boolean().default(true),
-  maxConsecutiveDays: z.coerce.number().int().min(1).max(365),
   maxPendingRequests: z.coerce.number().int().min(1).max(50),
   status: leaveDefinitionStatusSchema.default("ACTIVE"),
   sortOrder: z.coerce.number().int().min(0).max(9999).default(0),
@@ -887,13 +886,6 @@ export const createLeaveDefinitionSchema = leaveDefinitionBaseSchema.superRefine
         code: z.ZodIssueCode.custom,
         message: "Minimum days must be less than or equal to maximum days.",
         path: ["minDaysPerRequest"],
-      })
-    }
-    if (value.maxConsecutiveDays > value.maxDaysPerRequest) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Max consecutive days cannot be more than max days per request.",
-        path: ["maxConsecutiveDays"],
       })
     }
     if (

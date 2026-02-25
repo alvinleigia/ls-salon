@@ -86,7 +86,6 @@ export async function PATCH(
         name: true,
         minDaysPerRequest: true,
         maxDaysPerRequest: true,
-        maxConsecutiveDays: true,
       },
     })
     if (!current) {
@@ -108,21 +107,12 @@ export async function PATCH(
 
     const nextMin = parsed.data.minDaysPerRequest ?? current.minDaysPerRequest
     const nextMax = parsed.data.maxDaysPerRequest ?? current.maxDaysPerRequest
-    const nextMaxConsecutive = parsed.data.maxConsecutiveDays ?? current.maxConsecutiveDays
     if (nextMin > nextMax) {
       const response = NextResponse.json(
         { error: "Minimum days must be less than or equal to maximum days." },
         { status: 400 }
       )
       logApiRequestSuccess(logContext, 400, { reason: "invalid_day_range" })
-      return withRequestId(response, logContext.requestId)
-    }
-    if (nextMaxConsecutive > nextMax) {
-      const response = NextResponse.json(
-        { error: "Max consecutive days cannot be more than max days per request." },
-        { status: 400 }
-      )
-      logApiRequestSuccess(logContext, 400, { reason: "invalid_max_consecutive" })
       return withRequestId(response, logContext.requestId)
     }
 
@@ -169,6 +159,9 @@ export async function PATCH(
           ...(typeof parsed.data.maxDaysPerRequest === "number"
             ? { maxDaysPerRequest: parsed.data.maxDaysPerRequest }
             : {}),
+          ...(typeof parsed.data.maxDaysPerRequest === "number"
+            ? { maxConsecutiveDays: parsed.data.maxDaysPerRequest }
+            : {}),
           ...(typeof parsed.data.allowWithOtherLeaves === "boolean"
             ? { allowWithOtherLeaves: parsed.data.allowWithOtherLeaves }
             : {}),
@@ -192,9 +185,6 @@ export async function PATCH(
             : {}),
           ...(typeof parsed.data.holidayBothSideAllowed === "boolean"
             ? { holidayBothSideAllowed: parsed.data.holidayBothSideAllowed }
-            : {}),
-          ...(typeof parsed.data.maxConsecutiveDays === "number"
-            ? { maxConsecutiveDays: parsed.data.maxConsecutiveDays }
             : {}),
           ...(typeof parsed.data.maxPendingRequests === "number"
             ? { maxPendingRequests: parsed.data.maxPendingRequests }

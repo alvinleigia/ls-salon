@@ -92,6 +92,24 @@ type DashboardSummary = {
 }
 
 const pieColors = ["#22c55e", "#38bdf8", "#f59e0b", "#f97316", "#ef4444", "#a855f7"]
+const chartTooltipContentStyle = {
+  backgroundColor: "hsl(var(--popover))",
+  opacity: 1,
+  border: "1px solid hsl(var(--border))",
+  borderRadius: "0.5rem",
+  boxShadow: "0 10px 25px rgba(0, 0, 0, 0.28)",
+  color: "hsl(var(--popover-foreground))",
+  padding: "8px 10px",
+}
+const chartTooltipLabelStyle = {
+  color: "hsl(var(--muted-foreground))",
+  fontSize: "12px",
+}
+const chartTooltipItemStyle = {
+  color: "hsl(var(--popover-foreground))",
+  fontSize: "12px",
+  fontWeight: 500,
+}
 
 const normalizeStatusLabel = (status: string) =>
   status
@@ -100,13 +118,25 @@ const normalizeStatusLabel = (status: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ")
 
+const parseDateOnlyLocal = (value: string) => {
+  const [year, month, day] = value.split("-").map(Number)
+  return new Date(year, (month ?? 1) - 1, day ?? 1)
+}
+
+const toDateOnlyLocal = (value: Date) => {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, "0")
+  const day = String(value.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
 export default function DashboardPage() {
   const [range, setRange] = React.useState<"today" | "week" | "month" | "custom">("week")
   const [dateRange, setDateRange] = React.useState<DateRange | undefined>()
   const [settings, setSettings] = React.useState<
     Pick<
       AppSettingsPayload,
-      "currency" | "currencySymbolPlacement" | "locale" | "numberFormat" | "firstDayOfWeek"
+      "currency" | "currencySymbolPlacement" | "locale" | "numberFormat" | "firstDayOfWeek" | "timeZone"
     >
   >({})
   const [summary, setSummary] = React.useState<DashboardSummary | null>(null)
@@ -131,6 +161,7 @@ export default function DashboardPage() {
           locale: data.locale,
           numberFormat: data.numberFormat,
           firstDayOfWeek: data.firstDayOfWeek,
+          timeZone: data.timeZone,
         })
       })
       .catch(() => undefined)
@@ -144,8 +175,8 @@ export default function DashboardPage() {
     let mounted = true
     const query = new URLSearchParams({ range })
     if (range === "custom" && dateRange?.from && dateRange?.to) {
-      query.set("startDate", dateRange.from.toISOString().slice(0, 10))
-      query.set("endDate", dateRange.to.toISOString().slice(0, 10))
+      query.set("startDate", toDateOnlyLocal(dateRange.from))
+      query.set("endDate", toDateOnlyLocal(dateRange.to))
     }
 
     setLoading(true)
@@ -179,8 +210,8 @@ export default function DashboardPage() {
 
   const rangeText = React.useMemo(() => {
     if (!summary?.range) return ""
-    const from = new Date(`${summary.range.startDate}T00:00:00.000Z`)
-    const to = new Date(`${summary.range.endDate}T00:00:00.000Z`)
+    const from = parseDateOnlyLocal(summary.range.startDate)
+    const to = parseDateOnlyLocal(summary.range.endDate)
     return `${formatDate(from)} - ${formatDate(to)}`
   }, [formatDate, summary])
 
@@ -223,22 +254,106 @@ export default function DashboardPage() {
     ]
   }, [settings, summary])
 
+  const formatUpcomingDate = React.useCallback(
+    (value: string) => formatDate(value),
+    [formatDate]
+  )
+
+  const formatUpcomingTime = React.useCallback(
+    (value: string) =>
+      new Date(value).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: settings.timeZone,
+      }),
+    [settings.timeZone]
+  )
+
+  React.useEffect(() => {
+    if (!summary) return
+
+    const dailyBookingsTotal = summary.series.daily.reduce((sum, row) => sum + row.bookings, 0)
+    const statusTotal = summary.appointmentStatus.reduce((sum, row) => sum + row.count, 0)
+    const staffBookingsTotal = summary.staffUtilization.reduce((sum, row) => sum + row.bookings, 0)
+    const topServicesBookingsTotal = summary.topServices.reduce((sum, row) => sum + row.bookings, 0)
+    const topServicesRevenueTotal = summary.topServices.reduce((sum, row) => sum + row.revenueCents, 0)
+
+    console.groupCollapsed(
+      `[Dashboard Debug] range=${range} uiRange=${summary.range.startDate}..${summary.range.endDate}`
+    )
+
+    console.log("Filter Query", {
+      selectedRange: range,
+      customFrom: dateRange?.from ? toDateOnlyLocal(dateRange.from) : null,
+      customTo: dateRange?.to ? toDateOnlyLocal(dateRange.to) : null,
+    })
+
+    console.log("Widget: KPI Cards", summary.kpis)
+
+    console.log("Widget: Daily Bookings", {
+      points: summary.series.daily,
+      totalBookingsFromSeries: dailyBookingsTotal,
+    })
+
+    console.log("Widget: Appointment Status Mix", {
+      rows: summary.appointmentStatus,
+      totalFromStatusMix: statusTotal,
+    })
+
+    console.log("Widget: Staff Load", {
+      rows: summary.staffUtilization,
+      totalStaffBookings: staffBookingsTotal,
+      totalStaffBookedMinutes: summary.staffUtilization.reduce(
+        (sum, row) => sum + row.bookedMinutes,
+        0
+      ),
+    })
+
+    console.log("Widget: Upcoming Appointments", {
+      count: summary.upcomingAppointments.length,
+      rows: summary.upcomingAppointments,
+    })
+
+    console.log("Widget: Top Services", {
+      rows: summary.topServices,
+      totalBookingsFromTopServices: topServicesBookingsTotal,
+      totalRevenueFromTopServicesCents: topServicesRevenueTotal,
+    })
+
+    console.log("Widget: Low Stock", {
+      count: summary.lowStock.length,
+      rows: summary.lowStock,
+    })
+
+    console.log("Consistency Checks", {
+      kpiAppointmentsEqualsDailyBookings:
+        summary.kpis.appointments === dailyBookingsTotal,
+      kpiAppointmentsEqualsStatusMix:
+        summary.kpis.appointments === statusTotal,
+      staffBookingsCanExceedAppointments:
+        "Expected true when one appointment can involve one staff booking row; compare only after confirming filters",
+    })
+
+    console.log("Raw Summary Payload", summary)
+    console.groupEnd()
+  }, [dateRange?.from, dateRange?.to, range, summary])
+
   return (
     <div className="space-y-6">
-      <section className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-[#0b0b0b] via-[#151515] to-[#1f1f1f] p-6 text-white">
-        <div className="absolute -right-12 -top-12 h-36 w-36 rounded-full bg-emerald-500/20 blur-3xl" />
-        <div className="absolute -bottom-12 left-12 h-40 w-40 rounded-full bg-sky-500/20 blur-3xl" />
+      <section className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-white via-slate-50 to-slate-100 p-6 text-slate-900 dark:from-[#0b0b0b] dark:via-[#151515] dark:to-[#1f1f1f] dark:text-white">
+        <div className="absolute -right-12 -top-12 h-36 w-36 rounded-full bg-emerald-500/10 blur-3xl dark:bg-emerald-500/20" />
+        <div className="absolute -bottom-12 left-12 h-40 w-40 rounded-full bg-sky-500/10 blur-3xl dark:bg-sky-500/20" />
         <div className="relative space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-xs uppercase tracking-[0.25em] text-white/60">Salon Overview</p>
+              <p className="text-xs uppercase tracking-[0.25em] text-slate-600 dark:text-white/60">Salon Overview</p>
               <h1 className="mt-2 text-3xl font-semibold tracking-tight font-serif">
                 {summary?.range.label || "Dashboard"}
               </h1>
-              <p className="mt-1 text-xs text-white/70">{rangeText || "Choose a range to view live metrics"}</p>
+              <p className="mt-1 text-xs text-slate-600 dark:text-white/70">{rangeText || "Choose a range to view live metrics"}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-2 py-1">
+              <div className="flex items-center gap-2 rounded-full border border-slate-300 bg-white/70 px-2 py-1 dark:border-white/15 dark:bg-white/5">
                 {[
                   { id: "today", label: "Today" },
                   { id: "week", label: "Week" },
@@ -252,7 +367,9 @@ export default function DashboardPage() {
                       setDateRange(undefined)
                     }}
                     className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                      range === option.id ? "bg-white text-black" : "text-white/70 hover:text-white"
+                      range === option.id
+                        ? "bg-slate-900 text-white dark:bg-white dark:text-black"
+                        : "text-slate-600 hover:text-slate-900 dark:text-white/70 dark:hover:text-white"
                     }`}
                   >
                     {option.label}
@@ -265,25 +382,25 @@ export default function DashboardPage() {
                   setDateRange(next)
                   if (next?.from && next?.to) setRange("custom")
                 }}
-                buttonClassName="rounded-full bg-white/5 border-white/20 text-white hover:bg-white/10"
+                buttonClassName="rounded-full border-slate-300 bg-white/70 text-slate-900 hover:bg-white dark:bg-white/5 dark:border-white/20 dark:text-white dark:hover:bg-white/10"
               />
             </div>
           </div>
 
           {loading ? (
-            <div className="text-sm text-white/70">Loading metrics...</div>
+            <div className="text-sm text-slate-600 dark:text-white/70">Loading metrics...</div>
           ) : error ? (
             <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">{error}</div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {headerCards.map((card) => (
-                <div key={card.label} className="rounded-xl border border-white/10 bg-white/5 p-4">
-                  <div className="flex items-center justify-between text-xs text-white/70">
+                <div key={card.label} className="rounded-xl border border-slate-300 bg-white/75 p-4 dark:border-white/10 dark:bg-white/5">
+                  <div className="flex items-center justify-between text-xs text-slate-600 dark:text-white/70">
                     <span>{card.label}</span>
                     <card.icon className="h-4 w-4" />
                   </div>
                   <div className="mt-3 text-2xl font-semibold">{card.value}</div>
-                  <div className="mt-1 text-xs text-white/60">{card.hint}</div>
+                  <div className="mt-1 text-xs text-slate-600 dark:text-white/60">{card.hint}</div>
                 </div>
               ))}
             </div>
@@ -310,7 +427,9 @@ export default function DashboardPage() {
                 <XAxis dataKey="label" stroke="#9ca3af" fontSize={12} />
                 <YAxis stroke="#9ca3af" fontSize={12} />
                 <Tooltip
-                  contentStyle={{ background: "#0f0f0f", border: "1px solid #2a2a2a" }}
+                  contentStyle={chartTooltipContentStyle}
+                  labelStyle={chartTooltipLabelStyle}
+                  itemStyle={chartTooltipItemStyle}
                   formatter={(value, name) => {
                     if (name === "revenue") {
                       return [formatCurrencyFromCents(Math.round(Number(value) * 100), settings), "Revenue"]
@@ -338,8 +457,18 @@ export default function DashboardPage() {
                   ))}
                 </Pie>
                 <Tooltip
-                  contentStyle={{ background: "#0f0f0f", border: "1px solid #2a2a2a" }}
-                  formatter={(value, _name, payload) => [String(value), normalizeStatusLabel(String(payload?.payload?.status || "Status"))]}
+                  content={({ active, payload }) => {
+                    if (!active || !payload || payload.length === 0) return null
+                    const row = payload[0] as { value?: number; payload?: { status?: string } }
+                    const label = normalizeStatusLabel(String(row.payload?.status || "Status"))
+                    return (
+                      <div className="rounded-md border bg-popover px-2 py-1 text-popover-foreground shadow-lg">
+                        <div className="text-xs font-medium">
+                          {label}: {row.value ?? 0}
+                        </div>
+                      </div>
+                    )
+                  }}
                 />
               </PieChart>
             </ResponsiveContainer>
@@ -356,18 +485,26 @@ export default function DashboardPage() {
       </section>
 
       <section className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-        <div className="rounded-2xl border bg-card p-5">
+        <div className="rounded-2xl border bg-card p-5 h-full flex flex-col">
           <div className="mb-3">
             <h2 className="text-lg font-semibold">Daily bookings</h2>
             <p className="text-xs text-muted-foreground">Booking count by day</p>
           </div>
-          <div className="h-56">
+          <div className="min-h-[260px] flex-1">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={summary?.series.daily ?? []}>
+              <BarChart
+                data={summary?.series.daily ?? []}
+                margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                barCategoryGap="18%"
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
                 <XAxis dataKey="label" stroke="#9ca3af" fontSize={12} />
                 <YAxis stroke="#9ca3af" fontSize={12} allowDecimals={false} />
-                <Tooltip contentStyle={{ background: "#0f0f0f", border: "1px solid #2a2a2a" }} />
+                <Tooltip
+                  contentStyle={chartTooltipContentStyle}
+                  labelStyle={chartTooltipLabelStyle}
+                  itemStyle={chartTooltipItemStyle}
+                />
                 <Bar dataKey="bookings" fill="#38bdf8" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -376,12 +513,14 @@ export default function DashboardPage() {
 
         <div className="rounded-2xl border bg-card p-5">
           <div className="mb-3">
-            <h2 className="text-lg font-semibold">Staff load today</h2>
-            <p className="text-xs text-muted-foreground">Booked time vs 8-hour day</p>
+            <h2 className="text-lg font-semibold">Staff load</h2>
+            <p className="text-xs text-muted-foreground">
+              Booked time in selected range (8h/day baseline)
+            </p>
           </div>
           <div className="space-y-3">
             {(summary?.staffUtilization ?? []).length === 0 ? (
-              <div className="text-sm text-muted-foreground">No staff bookings for today.</div>
+              <div className="text-sm text-muted-foreground">No staff bookings in selected range.</div>
             ) : (
               (summary?.staffUtilization ?? []).map((staff) => (
                 <div key={staff.staffProfileId} className="rounded-xl border bg-muted/20 px-3 py-2">
@@ -414,6 +553,7 @@ export default function DashboardPage() {
             <table className="min-w-full text-sm">
               <thead className="text-xs uppercase text-muted-foreground">
                 <tr className="border-b">
+                  <th className="py-3 text-left">Date</th>
                   <th className="py-3 text-left">Time</th>
                   <th className="py-3 text-left">Customer</th>
                   <th className="py-3 text-left">Service</th>
@@ -424,12 +564,13 @@ export default function DashboardPage() {
               <tbody>
                 {(summary?.upcomingAppointments ?? []).length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-5 text-center text-muted-foreground">No upcoming appointments.</td>
+                    <td colSpan={6} className="py-5 text-center text-muted-foreground">No upcoming appointments.</td>
                   </tr>
                 ) : (
                   (summary?.upcomingAppointments ?? []).map((row) => (
                     <tr key={row.id} className="border-b last:border-0">
-                      <td className="py-3 text-muted-foreground">{new Date(row.startAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
+                      <td className="py-3 text-muted-foreground">{formatUpcomingDate(row.startAt)}</td>
+                      <td className="py-3 text-muted-foreground">{formatUpcomingTime(row.startAt)}</td>
                       <td className="py-3 font-medium">{row.customerName}</td>
                       <td className="py-3 text-muted-foreground">{row.serviceName}</td>
                       <td className="py-3 text-muted-foreground">{row.staffName}</td>

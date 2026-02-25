@@ -27,6 +27,7 @@ import {
   logApiRequestSuccess,
   withRequestId,
 } from "@/lib/api-logging"
+import { checkStaffAppointmentAvailability } from "@/app/api/appointments/_availability"
 import { canManageUsers } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import { requireTenantSession } from "@/lib/tenant-auth"
@@ -284,7 +285,6 @@ const leaveDefinitionSeeds = [
     weekOffBothSideAllowed: true,
     holidaySingleSideAllowed: true,
     holidayBothSideAllowed: true,
-    maxConsecutiveDays: 10,
     maxPendingRequests: 2,
     status: LeaveDefinitionStatus.ACTIVE,
     sortOrder: 1,
@@ -305,7 +305,6 @@ const leaveDefinitionSeeds = [
     weekOffBothSideAllowed: false,
     holidaySingleSideAllowed: true,
     holidayBothSideAllowed: false,
-    maxConsecutiveDays: 20,
     maxPendingRequests: 1,
     status: LeaveDefinitionStatus.ACTIVE,
     sortOrder: 2,
@@ -326,7 +325,6 @@ const leaveDefinitionSeeds = [
     weekOffBothSideAllowed: true,
     holidaySingleSideAllowed: true,
     holidayBothSideAllowed: true,
-    maxConsecutiveDays: 30,
     maxPendingRequests: 3,
     status: LeaveDefinitionStatus.ACTIVE,
     sortOrder: 3,
@@ -347,7 +345,6 @@ const leaveDefinitionSeeds = [
     weekOffBothSideAllowed: false,
     holidaySingleSideAllowed: false,
     holidayBothSideAllowed: false,
-    maxConsecutiveDays: 2,
     maxPendingRequests: 2,
     status: LeaveDefinitionStatus.ACTIVE,
     sortOrder: 4,
@@ -368,7 +365,6 @@ const leaveDefinitionSeeds = [
     weekOffBothSideAllowed: false,
     holidaySingleSideAllowed: false,
     holidayBothSideAllowed: false,
-    maxConsecutiveDays: 3,
     maxPendingRequests: 2,
     status: LeaveDefinitionStatus.ACTIVE,
     sortOrder: 5,
@@ -389,7 +385,6 @@ const leaveDefinitionSeeds = [
     weekOffBothSideAllowed: false,
     holidaySingleSideAllowed: true,
     holidayBothSideAllowed: false,
-    maxConsecutiveDays: 15,
     maxPendingRequests: 2,
     status: LeaveDefinitionStatus.ACTIVE,
     sortOrder: 6,
@@ -884,25 +879,77 @@ const seedCoupons = async (tenantId: string) => {
   return { count: touched }
 }
 
-const toDateOnlyUtc = (value: Date) =>
-  new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()))
+const getDatePartsInTimeZone = (value: Date, timeZone: string) => {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+  const parts = formatter.formatToParts(value)
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? "0")
 
-const buildSeedDateTime = (daysFromToday: number, hour: number, minute: number) => {
-  const now = new Date()
-  return new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() + daysFromToday,
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+  }
+}
+
+const toDateKeyInTimeZone = (value: Date, timeZone: string) => {
+  const parts = getDatePartsInTimeZone(value, timeZone)
+  return `${String(parts.year).padStart(4, "0")}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`
+}
+
+const dateKeyToUtcDate = (value: string) => new Date(`${value}T00:00:00.000Z`)
+
+const addDaysToDateKey = (value: string, days: number) => {
+  const base = dateKeyToUtcDate(value)
+  base.setUTCDate(base.getUTCDate() + days)
+  return base.toISOString().slice(0, 10)
+}
+
+const zonedDateTimeToUtc = (
+  dateKey: string,
+  hour: number,
+  minute: number,
+  timeZone: string
+) => {
+  let probe = new Date(`${dateKey}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00.000Z`)
+
+  // Converges quickly and keeps local time aligned to the tenant timezone.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const zoned = getDatePartsInTimeZone(probe, timeZone)
+    const current = Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute)
+    const target = Date.UTC(
+      Number(dateKey.slice(0, 4)),
+      Number(dateKey.slice(5, 7)) - 1,
+      Number(dateKey.slice(8, 10)),
       hour,
-      minute,
-      0,
-      0
+      minute
     )
-  )
+    const deltaMinutes = Math.round((target - current) / 60000)
+    if (deltaMinutes === 0) break
+    probe = new Date(probe.getTime() + deltaMinutes * 60000)
+  }
+
+  return probe
 }
 
 const seedAppointments = async (tenantId: string, tenantSlug: string) => {
+  const settings = await prisma.appSetting.findUnique({
+    where: { tenantId },
+    select: { timeZone: true },
+  })
+  const timeZone = settings?.timeZone || "America/New_York"
+  const todayDateKey = toDateKeyInTimeZone(new Date(), timeZone)
+
   const customers = await prisma.user.findMany({
     where: {
       tenantId,
@@ -940,7 +987,7 @@ const seedAppointments = async (tenantId: string, tenantSlug: string) => {
       name: { in: serviceSeeds.map((service) => service.name) },
     },
     orderBy: { name: "asc" },
-    take: 3,
+    take: 5,
     select: {
       id: true,
       durationMinutes: true,
@@ -963,49 +1010,321 @@ const seedAppointments = async (tenantId: string, tenantSlug: string) => {
     throw new Error("User and service seeds are required before seeding appointments.")
   }
 
-  const totalAppointments = 60
-  const pastAppointments = 12
-  const scenarios = Array.from({ length: totalAppointments }, (_, index) => {
-    const isPast = index < pastAppointments
-    const daysFromToday = isPast
-      ? -1 - (index % 7)
-      : 1 + Math.floor((index - pastAppointments) / 2)
-    return {
-      marker: `SEED_APPT_V2_${String(index + 1).padStart(3, "0")}`,
-      daysFromToday,
-      hour: 9 + (index % 8),
-      minute: (index % 2) * 30,
-      status: isPast ? AppointmentOrderStatus.COMPLETED : AppointmentOrderStatus.CONFIRMED,
-      appointmentStatus: isPast ? AppointmentStatus.COMPLETED : AppointmentStatus.SCHEDULED,
-    }
+  // Rebuild only seeded appointment rows so reruns stay deterministic without touching user-entered data.
+  const existingSeededOrders = await prisma.appointmentOrder.findMany({
+    where: {
+      tenantId,
+      internalNote: { startsWith: "SEED_APPT_" },
+    },
+    select: {
+      id: true,
+      lines: { select: { id: true } },
+    },
   })
+  if (existingSeededOrders.length > 0) {
+    const seededOrderIds = existingSeededOrders.map((order) => order.id)
+    const seededLineIds = existingSeededOrders.flatMap((order) => order.lines.map((line) => line.id))
+    if (seededLineIds.length > 0) {
+      await prisma.appointment.deleteMany({
+        where: {
+          tenantId,
+          orderLineId: { in: seededLineIds },
+        },
+      })
+    }
+    await prisma.appointmentOrder.deleteMany({
+      where: {
+        id: { in: seededOrderIds },
+      },
+    })
+  }
+
+  const weightedServiceIndices = Array.from(
+    { length: Math.max(services.length, 5) * 2 },
+    (_, index) => {
+      if (services.length === 1) return 0
+      if (services.length === 2) return index % 2 === 0 ? 0 : 1
+      if (services.length === 3) return [0, 0, 1, 1, 2, 0][index % 6]
+      if (services.length === 4) return [0, 0, 1, 1, 2, 3, 0, 1][index % 8]
+      return [0, 0, 1, 1, 2, 3, 4, 0, 1, 2][index % 10]
+    }
+  )
+  const weightedStaffIndices = Array.from(
+    { length: Math.max(staffProfiles.length, 5) * 2 },
+    (_, index) => {
+      if (staffProfiles.length === 1) return 0
+      if (staffProfiles.length === 2) return index % 3 === 0 ? 1 : 0
+      if (staffProfiles.length === 3) return [0, 0, 1, 2, 0, 1][index % 6]
+      if (staffProfiles.length === 4) return [0, 0, 1, 2, 3, 0, 1, 2][index % 8]
+      return [0, 0, 1, 1, 2, 3, 4, 0, 1, 2][index % 10]
+    }
+  )
+
+  const buildScenario = (
+    index: number,
+    phase: "past" | "today" | "future",
+    appointmentStatus: AppointmentStatus
+  ) => {
+    const orderStatus =
+      appointmentStatus === AppointmentStatus.CANCELED ||
+      appointmentStatus === AppointmentStatus.NO_SHOW
+        ? AppointmentOrderStatus.CANCELED
+        : appointmentStatus === AppointmentStatus.COMPLETED
+          ? AppointmentOrderStatus.COMPLETED
+          : AppointmentOrderStatus.CONFIRMED
+
+    const dayOffset =
+      phase === "past"
+        ? -1 - (index % 21)
+        : phase === "today"
+          ? 0
+          : 1 + Math.floor(index / 2)
+
+    const hourBase = phase === "today" ? 9 : phase === "past" ? 10 : 11
+    const hour = hourBase + (index % 8)
+    const minute = (index % 2) * 30
+
+    return {
+      marker: `SEED_APPT_${phase.toUpperCase()}_${String(index + 1).padStart(3, "0")}`,
+      phase,
+      daysFromToday: dayOffset,
+      hour,
+      minute,
+      orderStatus,
+      appointmentStatus,
+    }
+  }
+
+  const pastStatuses: AppointmentStatus[] = [
+    ...Array.from({ length: 24 }, () => AppointmentStatus.COMPLETED),
+    ...Array.from({ length: 6 }, () => AppointmentStatus.CANCELED),
+    ...Array.from({ length: 5 }, () => AppointmentStatus.NO_SHOW),
+  ]
+  const todayStatuses: AppointmentStatus[] = [
+    ...Array.from({ length: 2 }, () => AppointmentStatus.COMPLETED),
+    ...Array.from({ length: 2 }, () => AppointmentStatus.IN_PROGRESS),
+    ...Array.from({ length: 8 }, () => AppointmentStatus.CONFIRMED),
+    ...Array.from({ length: 6 }, () => AppointmentStatus.SCHEDULED),
+  ]
+  const futureStatuses: AppointmentStatus[] = [
+    ...Array.from({ length: 17 }, () => AppointmentStatus.SCHEDULED),
+    ...Array.from({ length: 8 }, () => AppointmentStatus.CONFIRMED),
+    ...Array.from({ length: 2 }, () => AppointmentStatus.CANCELED),
+  ]
+
+  const scenarios = [
+    ...pastStatuses.map((status, index) => buildScenario(index, "past", status)),
+    ...todayStatuses.map((status, index) => buildScenario(index, "today", status)),
+    ...futureStatuses.map((status, index) => buildScenario(index, "future", status)),
+  ]
+
+  const activeBlockingStatuses: AppointmentStatus[] = [
+    AppointmentStatus.SCHEDULED,
+    AppointmentStatus.CONFIRMED,
+    AppointmentStatus.IN_PROGRESS,
+    AppointmentStatus.COMPLETED,
+  ]
+
+  const slotTemplates = [
+    { hour: 9, minute: 0 },
+    { hour: 10, minute: 30 },
+    { hour: 12, minute: 30 },
+    { hour: 14, minute: 0 },
+    { hour: 15, minute: 30 },
+    { hour: 17, minute: 0 },
+  ]
+
+  const expandOffsets = (baseOffset: number, phase: "past" | "today" | "future") => {
+    if (phase === "past") {
+      return [baseOffset, baseOffset - 1, baseOffset - 2, baseOffset - 3, baseOffset - 5, baseOffset - 7]
+    }
+    if (phase === "today") {
+      return [0, 1, 2, 3, 4, 5, 6]
+    }
+    return [baseOffset, baseOffset + 1, baseOffset + 2, baseOffset + 3, baseOffset + 5, baseOffset + 7]
+  }
+
+  const buildPreferredSlots = (hour: number, minute: number) => {
+    const preferred = [{ hour, minute }, ...slotTemplates]
+    const deduped: Array<{ hour: number; minute: number }> = []
+    for (const slot of preferred) {
+      if (!deduped.some((item) => item.hour === slot.hour && item.minute === slot.minute)) {
+        deduped.push(slot)
+      }
+    }
+    return deduped.slice(0, 4)
+  }
+
+  const pickBookingServices = (scenarioIndex: number) => {
+    const roll = (scenarioIndex * 37 + 17) % 100
+    const requestedCount = roll < 18 ? 3 : roll < 52 ? 2 : 1
+    const serviceCount = Math.min(requestedCount, services.length)
+    const picked: (typeof services)[number][] = []
+    const usedIds = new Set<string>()
+    let step = 0
+
+    while (picked.length < serviceCount && step < services.length * 3) {
+      const weightedIndex = (scenarioIndex + step) % weightedServiceIndices.length
+      const candidate = services[weightedServiceIndices[weightedIndex] % services.length]
+      if (!usedIds.has(candidate.id)) {
+        picked.push(candidate)
+        usedIds.add(candidate.id)
+      }
+      step += 1
+    }
+
+    if (picked.length === 0) {
+      picked.push(services[weightedServiceIndices[scenarioIndex % weightedServiceIndices.length] % services.length])
+    }
+
+    return picked
+  }
+
+  const findPlacement = async (
+    scenario: (typeof scenarios)[number],
+    bookingServices: (typeof services),
+    scenarioIndex: number
+  ) => {
+    const candidateOffsets = expandOffsets(scenario.daysFromToday, scenario.phase)
+    const preferredSlots = buildPreferredSlots(scenario.hour, scenario.minute)
+    const maxAttempts = Math.max(1, candidateOffsets.length * preferredSlots.length)
+    let attempts = 0
+
+    for (const dayOffset of candidateOffsets) {
+      const dateKey = addDaysToDateKey(todayDateKey, dayOffset)
+      for (const slot of preferredSlots) {
+        if (attempts >= maxAttempts) return null
+        attempts += 1
+
+        const startAt = zonedDateTimeToUtc(dateKey, slot.hour, slot.minute, timeZone)
+        const weightedIndex = (scenarioIndex + attempts) % weightedStaffIndices.length
+        const staffProfileId =
+          staffProfiles[weightedStaffIndices[weightedIndex] % staffProfiles.length].id
+        const lines: Array<{
+          sortOrder: number
+          startAt: Date
+          endAt: Date
+          service: (typeof services)[number]
+        }> = []
+        let cursor = startAt
+        let isValidPlacement = true
+
+        for (let lineIndex = 0; lineIndex < bookingServices.length; lineIndex += 1) {
+          const service = bookingServices[lineIndex]
+          const lineStartAt = cursor
+          const lineEndAt = new Date(lineStartAt.getTime() + service.durationMinutes * 60000)
+
+          const availability = await checkStaffAppointmentAvailability(
+            staffProfileId,
+            lineStartAt,
+            lineEndAt,
+            tenantId
+          )
+          if (!availability.ok) {
+            isValidPlacement = false
+            break
+          }
+
+          const conflict = await prisma.appointment.findFirst({
+            where: {
+              tenantId,
+              staffProfileId,
+              status: { in: activeBlockingStatuses },
+              startAt: { lt: lineEndAt },
+              endAt: { gt: lineStartAt },
+            },
+            select: { id: true },
+          })
+          if (conflict) {
+            isValidPlacement = false
+            break
+          }
+
+          lines.push({
+            sortOrder: lineIndex,
+            startAt: lineStartAt,
+            endAt: lineEndAt,
+            service,
+          })
+          cursor = lineEndAt
+        }
+
+        if (!isValidPlacement || lines.length === 0) continue
+
+        return {
+          staffProfileId,
+          appointmentStartAt: lines[0].startAt,
+          appointmentEndAt: lines[lines.length - 1].endAt,
+          lines,
+        }
+      }
+    }
+
+    return null
+  }
 
   let created = 0
   for (let index = 0; index < scenarios.length; index += 1) {
     const scenario = scenarios[index]
-    const exists = await prisma.appointmentOrder.findFirst({
-      where: { tenantId, internalNote: scenario.marker },
-      select: { id: true },
-    })
-    if (exists) continue
 
     const customerId = customers[index % customers.length].id
-    const staffProfileId = staffProfiles[index % staffProfiles.length].id
-    const service = services[index % services.length]
-    const startAt = buildSeedDateTime(scenario.daysFromToday, scenario.hour, scenario.minute)
-    const endAt = new Date(startAt.getTime() + service.durationMinutes * 60000)
-    const appointmentDate = toDateOnlyUtc(startAt)
-    const subtotalCents = service.priceCents
-    const lineTaxEntries = service.defaultTaxes
-      .map((entry) => entry.tax)
-      .map((tax) => ({
-        taxId: tax.id,
-        name: tax.name,
-        percent: tax.percent,
-        taxCents: Math.max(0, Math.round((subtotalCents * tax.percent) / 100)),
-      }))
-    const lineTaxCents = lineTaxEntries.reduce((sum, entry) => sum + entry.taxCents, 0)
-    const lineTotalCents = subtotalCents + lineTaxCents
+    const bookingServices = pickBookingServices(index)
+    const placement = await findPlacement(scenario, bookingServices, index)
+    if (!placement) continue
+    const appointmentDate = dateKeyToUtcDate(toDateKeyInTimeZone(placement.appointmentStartAt, timeZone))
+
+    const orderLineCreates = placement.lines.map((line) => {
+      const lineSubtotalCents = line.service.priceCents
+      const lineTaxEntries = line.service.defaultTaxes
+        .map((entry) => entry.tax)
+        .map((tax) => ({
+          taxId: tax.id,
+          name: tax.name,
+          percent: tax.percent,
+          taxCents: Math.max(0, Math.round((lineSubtotalCents * tax.percent) / 100)),
+        }))
+      const lineTaxCents = lineTaxEntries.reduce((sum, entry) => sum + entry.taxCents, 0)
+      const lineTotalCents = lineSubtotalCents + lineTaxCents
+
+      return {
+        serviceId: line.service.id,
+        staffProfileId: placement.staffProfileId,
+        sortOrder: line.sortOrder,
+        quantity: 1,
+        durationMinutes: line.service.durationMinutes,
+        unitPriceCents: line.service.priceCents,
+        discountType: "NONE" as const,
+        discountValue: 0,
+        taxMode: line.service.taxMode,
+        taxIds: lineTaxEntries.map((entry) => entry.taxId),
+        lineSubtotalCents,
+        lineDiscountCents: 0,
+        lineTaxCents,
+        lineTotalCents,
+        startAt: line.startAt,
+        endAt: line.endAt,
+        note: "Seeded appointment",
+        _taxEntries: lineTaxEntries,
+      }
+    })
+
+    const subtotalCents = orderLineCreates.reduce((sum, line) => sum + line.lineSubtotalCents, 0)
+    const taxCents = orderLineCreates.reduce((sum, line) => sum + line.lineTaxCents, 0)
+    const totalCents = orderLineCreates.reduce((sum, line) => sum + line.lineTotalCents, 0)
+
+    const orderTaxMap = new Map<string, { taxId: string; name: string; percent: number; taxCents: number }>()
+    for (const line of orderLineCreates) {
+      for (const entry of line._taxEntries) {
+        const key = entry.taxId
+        const existing = orderTaxMap.get(key)
+        if (existing) {
+          existing.taxCents += entry.taxCents
+        } else {
+          orderTaxMap.set(key, { ...entry })
+        }
+      }
+    }
+    const orderTaxes = Array.from(orderTaxMap.values())
 
     await prisma.$transaction(async (tx) => {
       const order = await tx.appointmentOrder.create({
@@ -1013,16 +1332,16 @@ const seedAppointments = async (tenantId: string, tenantSlug: string) => {
           tenantId,
           customerId,
           appointmentDate,
-          appointmentStartAt: startAt,
-          status: scenario.status,
+          appointmentStartAt: placement.appointmentStartAt,
+          status: scenario.orderStatus,
           internalNote: scenario.marker,
           subtotalCents,
           lineDiscountCents: 0,
           couponDiscountCents: 0,
-          taxCents: lineTaxCents,
-          totalCents: lineTotalCents,
+          taxCents,
+          totalCents,
           taxes: {
-            create: lineTaxEntries.map((entry) => ({
+            create: orderTaxes.map((entry) => ({
               taxId: entry.taxId,
               name: entry.name,
               percent: entry.percent,
@@ -1030,42 +1349,41 @@ const seedAppointments = async (tenantId: string, tenantSlug: string) => {
             })),
           },
           lines: {
-            create: [{
-              serviceId: service.id,
-              staffProfileId,
-              sortOrder: 0,
-              quantity: 1,
-              durationMinutes: service.durationMinutes,
-              unitPriceCents: service.priceCents,
-              discountType: "NONE",
-              discountValue: 0,
-              taxMode: service.taxMode,
-              taxIds: lineTaxEntries.map((entry) => entry.taxId),
-              lineSubtotalCents: subtotalCents,
-              lineDiscountCents: 0,
-              lineTaxCents,
-              lineTotalCents,
-              startAt,
-              endAt,
-              note: "Seeded appointment",
-            }],
+            create: orderLineCreates.map((line) => ({
+              serviceId: line.serviceId,
+              staffProfileId: line.staffProfileId,
+              sortOrder: line.sortOrder,
+              quantity: line.quantity,
+              durationMinutes: line.durationMinutes,
+              unitPriceCents: line.unitPriceCents,
+              discountType: line.discountType,
+              discountValue: line.discountValue,
+              taxMode: line.taxMode,
+              taxIds: line.taxIds,
+              lineSubtotalCents: line.lineSubtotalCents,
+              lineDiscountCents: line.lineDiscountCents,
+              lineTaxCents: line.lineTaxCents,
+              lineTotalCents: line.lineTotalCents,
+              startAt: line.startAt,
+              endAt: line.endAt,
+              note: line.note,
+            })),
           },
         },
         include: { lines: true },
       })
 
-      const line = order.lines[0]
-      await tx.appointment.create({
-        data: {
+      await tx.appointment.createMany({
+        data: order.lines.map((line) => ({
           tenantId,
           customerId,
-          staffProfileId,
-          serviceId: service.id,
+          staffProfileId: line.staffProfileId,
+          serviceId: line.serviceId,
           orderLineId: line.id,
-          startAt,
-          endAt,
+          startAt: line.startAt,
+          endAt: line.endAt,
           status: scenario.appointmentStatus,
-        },
+        })),
       })
     })
 
@@ -1116,8 +1434,10 @@ const seedShifts = async (tenantId: string, tenantSlug: string) => {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   const offsetToMonday = (today.getDay() + 6) % 7
-  const startDate = new Date(today)
-  startDate.setDate(today.getDate() - offsetToMonday)
+  const currentWeekMonday = new Date(today)
+  currentWeekMonday.setDate(today.getDate() - offsetToMonday)
+  const startDate = new Date(currentWeekMonday)
+  startDate.setDate(currentWeekMonday.getDate() - 7)
   const morningTemplateId = templateByName.get("Morning Shift")
   const eveningTemplateId = templateByName.get("Evening Shift")
   if (!morningTemplateId || !eveningTemplateId) {
@@ -1268,7 +1588,7 @@ const seedLeaves = async (tenantId: string, tenantSlug: string) => {
         weekOffBothSideAllowed: item.weekOffBothSideAllowed,
         holidaySingleSideAllowed: item.holidaySingleSideAllowed,
         holidayBothSideAllowed: item.holidayBothSideAllowed,
-        maxConsecutiveDays: item.maxConsecutiveDays,
+        maxConsecutiveDays: item.maxDaysPerRequest,
         maxPendingRequests: item.maxPendingRequests,
         status: item.status,
         sortOrder: item.sortOrder,
@@ -1289,7 +1609,7 @@ const seedLeaves = async (tenantId: string, tenantSlug: string) => {
         weekOffBothSideAllowed: item.weekOffBothSideAllowed,
         holidaySingleSideAllowed: item.holidaySingleSideAllowed,
         holidayBothSideAllowed: item.holidayBothSideAllowed,
-        maxConsecutiveDays: item.maxConsecutiveDays,
+        maxConsecutiveDays: item.maxDaysPerRequest,
         maxPendingRequests: item.maxPendingRequests,
         status: item.status,
         sortOrder: item.sortOrder,
