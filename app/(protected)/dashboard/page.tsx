@@ -390,7 +390,7 @@ export default function DashboardPage() {
           {loading ? (
             <div className="text-sm text-slate-600 dark:text-white/70">Loading metrics...</div>
           ) : error ? (
-            <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">{error}</div>
+            <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-800 dark:text-red-100">{error}</div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {headerCards.map((card) => (

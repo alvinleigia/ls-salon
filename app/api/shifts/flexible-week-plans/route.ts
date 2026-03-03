@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { Weekday } from "@prisma/client"
+import { z } from "zod"
 
 import {
   createApiLogContext,
@@ -27,6 +28,10 @@ const querySchema = {
 }
 
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+const deleteSchema = z.object({
+  staffId: z.string().trim().min(1),
+  weekStartDate: z.string().trim().regex(dateRegex),
+})
 const weekdayOrder: Weekday[] = [
   Weekday.MONDAY,
   Weekday.TUESDAY,
@@ -319,6 +324,78 @@ export async function PUT(request: Request) {
   } catch (error) {
     logApiRequestError(logContext, error, 500)
     const response = NextResponse.json({ error: "Unable to save flexible week plan." }, { status: 500 })
+    return withRequestId(response, logContext.requestId)
+  }
+}
+
+export async function DELETE(request: Request) {
+  const logContext = createApiLogContext(request)
+  logApiRequestStart(logContext, request)
+
+  const tenantSession = await requireTenantSession(request)
+  if (tenantSession.error) {
+    logApiRequestSuccess(logContext, tenantSession.error.status, { reason: "tenant_or_auth_failed" })
+    return withRequestId(tenantSession.error, logContext.requestId)
+  }
+  const { tenantId, role } = tenantSession.context
+  if (!canManageUsers(role as Role)) {
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    logApiRequestSuccess(logContext, 401, { reason: "unauthorized" })
+    return withRequestId(response, logContext.requestId)
+  }
+
+  const payload = await request.json().catch(() => null)
+  const parsed = deleteSchema.safeParse(payload)
+  if (!parsed.success) {
+    const response = NextResponse.json(
+      { error: "Invalid input.", details: parsed.error.flatten() },
+      { status: 400 }
+    )
+    logApiRequestSuccess(logContext, 400, { reason: "validation_failed" })
+    return withRequestId(response, logContext.requestId)
+  }
+
+  const data = parsed.data
+  if (!isMondayDate(data.weekStartDate)) {
+    const response = NextResponse.json(
+      { error: "weekStartDate must be a Monday (YYYY-MM-DD)." },
+      { status: 400 }
+    )
+    logApiRequestSuccess(logContext, 400, { reason: "invalid_week_start" })
+    return withRequestId(response, logContext.requestId)
+  }
+
+  const staffProfile = await prisma.staffProfile.findFirst({
+    where: { userId: data.staffId, user: { tenantId, role: "STAFF" } },
+    select: { id: true, schedulingMode: true },
+  })
+  if (!staffProfile) {
+    const response = NextResponse.json({ error: "Staff profile not found." }, { status: 404 })
+    logApiRequestSuccess(logContext, 404, { reason: "staff_profile_not_found" })
+    return withRequestId(response, logContext.requestId)
+  }
+  if (staffProfile.schedulingMode !== "FLEXIBLE") {
+    const response = NextResponse.json(
+      { error: "Set staff scheduling mode to Flexible before clearing weekly plan." },
+      { status: 409 }
+    )
+    logApiRequestSuccess(logContext, 409, { reason: "invalid_scheduling_mode" })
+    return withRequestId(response, logContext.requestId)
+  }
+
+  try {
+    const result = await prisma.staffFlexibleWeekPlan.deleteMany({
+      where: {
+        staffProfileId: staffProfile.id,
+        weekStartDate: new Date(`${data.weekStartDate}T00:00:00.000Z`),
+      },
+    })
+    const response = NextResponse.json({ deletedCount: result.count })
+    logApiRequestSuccess(logContext, 200, { deletedCount: result.count })
+    return withRequestId(response, logContext.requestId)
+  } catch (error) {
+    logApiRequestError(logContext, error, 500)
+    const response = NextResponse.json({ error: "Unable to clear flexible week plan." }, { status: 500 })
     return withRequestId(response, logContext.requestId)
   }
 }

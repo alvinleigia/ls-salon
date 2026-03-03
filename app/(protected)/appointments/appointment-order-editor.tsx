@@ -113,22 +113,22 @@ const ORDER_STATUS_META: Record<
 > = {
   DRAFT: {
     label: "Draft",
-    badgeClass: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+    badgeClass: "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300",
     helperText: "Draft booking. Confirm to lock the schedule and mark it as active.",
   },
   CONFIRMED: {
     label: "Confirmed",
-    badgeClass: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+    badgeClass: "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300",
     helperText: "Confirmed booking. Save changes to update details while keeping status confirmed.",
   },
   COMPLETED: {
     label: "Completed",
-    badgeClass: "border-slate-500/30 bg-slate-500/10 text-slate-300",
+    badgeClass: "border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300",
     helperText: "Completed booking. This record is read-only.",
   },
   CANCELED: {
     label: "Canceled",
-    badgeClass: "border-rose-500/30 bg-rose-500/10 text-rose-300",
+    badgeClass: "border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-300",
     helperText: "Canceled booking. This record is read-only.",
   },
 }
@@ -982,9 +982,9 @@ export function AppointmentOrderEditor({ mode, appointmentId }: AppointmentOrder
       ) : null}
 
       {activeSuggestion && !isReadOnlyBooking ? (
-        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs">
-          <p className="text-amber-200">{activeSuggestion.reason}</p>
-          <p className="mt-1 text-amber-200/90">
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+          <p>{activeSuggestion.reason}</p>
+          <p className="mt-1">
             Next available start:{" "}
             {`${toDateInput(new Date(activeSuggestion.suggestedStartAt))} ${formatTimeFromDate(
               new Date(activeSuggestion.suggestedStartAt),

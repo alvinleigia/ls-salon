@@ -115,12 +115,12 @@ const canEditAppointment = (status: AppointmentStatus) =>
   status === "SCHEDULED" || status === "CONFIRMED"
 
 const STATUS_BADGE_CLASS: Record<AppointmentStatus, string> = {
-  SCHEDULED: "bg-sky-500/15 text-sky-300 border-sky-500/30",
-  CONFIRMED: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  IN_PROGRESS: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-  COMPLETED: "bg-slate-500/15 text-slate-300 border-slate-500/30",
-  CANCELED: "bg-rose-500/15 text-rose-300 border-rose-500/30",
-  NO_SHOW: "bg-pink-500/15 text-pink-300 border-pink-500/30",
+  SCHEDULED: "bg-sky-500/15 text-sky-800 dark:text-sky-300 border-sky-500/30",
+  CONFIRMED: "bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/30",
+  IN_PROGRESS: "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30",
+  COMPLETED: "bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/30",
+  CANCELED: "bg-rose-500/15 text-rose-800 dark:text-rose-300 border-rose-500/30",
+  NO_SHOW: "bg-pink-500/15 text-pink-800 dark:text-pink-300 border-pink-500/30",
 }
 
 const APPOINTMENT_STATUS_META: Record<AppointmentStatus, { label: string; helperText: string }> = {

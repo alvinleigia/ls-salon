@@ -133,7 +133,7 @@ export function AppointmentOrderFormFields({
                         {lineScheduleMeta[line.id].startsAtLabel} - {lineScheduleMeta[line.id].endsAtLabel}
                       </span>
                       {lineScheduleMeta[line.id].waitMinutes > 0 ? (
-                        <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-300">
+                        <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-800 dark:text-amber-300">
                           Wait {lineScheduleMeta[line.id].waitMinutes}m
                         </span>
                       ) : null}

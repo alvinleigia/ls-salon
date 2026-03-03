@@ -136,6 +136,23 @@ const createEmptyFlexibleDraftDay = (day: Weekday): FlexibleDraftDay => ({
   slots: [],
 })
 
+const cloneFlexibleDraftDays = (days: FlexibleDraftDay[]): FlexibleDraftDay[] =>
+  days.map((day) => ({
+    day: day.day,
+    isOff: day.isOff,
+    slots: day.slots.map((slot) => ({
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      breaks: slot.breaks.map((slotBreak) => ({
+        startTime: slotBreak.startTime,
+        endTime: slotBreak.endTime,
+      })),
+    })),
+  }))
+
+const hasAnyConfiguredFlexibleDay = (days: FlexibleDraftDay[]) =>
+  days.some((day) => !day.isOff || day.slots.length > 0)
+
 export default function RosterPage() {
   const searchParams = useSearchParams()
   const debugEnabled = searchParams.get("debug") === "1"
@@ -1166,6 +1183,41 @@ export default function RosterPage() {
     [createEmptyRecurringWeeks, getActiveRecurringPatternForDate, recurringPatternsByStaffId]
   )
 
+  const getFlexibleDraftForEffectiveWeek = React.useCallback(
+    (staffId: string, weekStartDate: string): FlexibleDraftDay[] => {
+      const weeklyDraft = getFlexibleDraftForWeek(staffId, weekStartDate)
+      if (hasAnyConfiguredFlexibleDay(weeklyDraft)) {
+        return weeklyDraft
+      }
+
+      const referenceDate = new Date(`${weekStartDate}T00:00:00.000Z`)
+      const recurringDraft = getRecurringDraftFromPattern(staffId, referenceDate)
+      if (!recurringDraft.patternId || !recurringDraft.validFrom || !recurringDraft.weeks.length) {
+        return weeklyDraft
+      }
+
+      const weekStartMs = referenceDate.getTime()
+      const validFromMs = new Date(`${recurringDraft.validFrom}T00:00:00.000Z`).getTime()
+      const validToMs = recurringDraft.validTo
+        ? new Date(`${recurringDraft.validTo}T23:59:59.999Z`).getTime()
+        : Number.POSITIVE_INFINITY
+      if (weekStartMs < validFromMs || weekStartMs > validToMs) {
+        return weeklyDraft
+      }
+
+      const weekOffset = Math.floor(Math.max(0, weekStartMs - validFromMs) / 86400000 / 7)
+      const cycleLength = Math.max(1, recurringDraft.cycleLength)
+      const weekIndex = (weekOffset % cycleLength) + 1
+      const recurringWeek = recurringDraft.weeks.find((week) => week.weekIndex === weekIndex)
+      if (!recurringWeek) {
+        return weeklyDraft
+      }
+
+      return cloneFlexibleDraftDays(recurringWeek.days)
+    },
+    [getFlexibleDraftForWeek, getRecurringDraftFromPattern]
+  )
+
   const currentEditableDays = React.useMemo(() => {
     if (flexibleEditorMode === "WEEK_OVERRIDE") {
       return flexibleDraftDays
@@ -1180,6 +1232,22 @@ export default function RosterPage() {
     recurringDraftWeeks,
     recurringSelectedWeekIndex,
   ])
+
+  const hasWeeklyOverrideInContext = React.useMemo(() => {
+    if (!overrideStaffId || !overrideStartDate) return false
+    return Boolean(flexibleWeekPlanMap[overrideStaffId]?.[overrideStartDate])
+  }, [flexibleWeekPlanMap, overrideStaffId, overrideStartDate])
+
+  const isOverrideStaffFlexible = React.useMemo(
+    () => (overrideStaffId ? (staffSchedulingModeMap[overrideStaffId] ?? "STANDARD") === "FLEXIBLE" : false),
+    [overrideStaffId, staffSchedulingModeMap]
+  )
+
+  React.useEffect(() => {
+    if (useFlexibleSlot && overrideStaffId && !isOverrideStaffFlexible) {
+      setUseFlexibleSlot(false)
+    }
+  }, [isOverrideStaffFlexible, overrideStaffId, useFlexibleSlot])
 
   const openOverrideEditor = React.useCallback(
     (staffId: string, dateValue: Date) => {
@@ -1201,7 +1269,7 @@ export default function RosterPage() {
       setOverrideUnavailable(false)
       setUseFlexibleSlot(schedulingMode === "FLEXIBLE")
       setFlexibleEditorMode("WEEK_OVERRIDE")
-      setFlexibleDraftDays(getFlexibleDraftForWeek(staffId, weekStartDate))
+      setFlexibleDraftDays(getFlexibleDraftForEffectiveWeek(staffId, weekStartDate))
       const recurringDraft = getRecurringDraftFromPattern(staffId, dateValue)
       setRecurringPatternId(recurringDraft.patternId)
       setRecurringPatternName(recurringDraft.patternName)
@@ -1214,7 +1282,12 @@ export default function RosterPage() {
       setRecurringImpactPreview(null)
       setOverrideOpen(true)
     },
-    [getFlexibleDraftForWeek, getRecurringDraftFromPattern, isPastDate, staffSchedulingModeMap]
+    [
+      getFlexibleDraftForEffectiveWeek,
+      getRecurringDraftFromPattern,
+      isPastDate,
+      staffSchedulingModeMap,
+    ]
   )
 
   const quickInfoContent = React.useCallback((props: Record<string, unknown>) => {
@@ -1732,23 +1805,26 @@ export default function RosterPage() {
     try {
       if (useFlexibleSlot) {
         if (flexibleEditorMode === "WEEK_OVERRIDE") {
+          if (!hasWeeklyOverrideInContext) {
+            toast.error("No weekly override exists for this staff and week.")
+            return
+          }
           const response = await fetch("/api/shifts/flexible-week-plans", {
-            method: "PUT",
+            method: "DELETE",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               staffId: overrideStaffId,
               weekStartDate: overrideStartDate,
-              days: WEEKDAY_ORDER.map((day, dayIndex) => ({
-                day,
-                isOff: true,
-                sortOrder: dayIndex,
-                slots: [],
-              })),
             }),
           })
           if (!response.ok) {
             const error = await response.json().catch(() => ({}))
             throw new Error(error.error || "Failed to clear flexible weekly plan.")
+          }
+          const result = (await response.json()) as { deletedCount?: number }
+          if (!result.deletedCount) {
+            toast.error("No weekly override found to clear.")
+            return
           }
           toast.success("Flexible weekly override cleared.")
         } else {
@@ -1815,6 +1891,7 @@ export default function RosterPage() {
     overrideEndDate,
     overrideStaffId,
     overrideStartDate,
+    hasWeeklyOverrideInContext,
     recurringPatternId,
     useFlexibleSlot,
   ])
@@ -2361,7 +2438,34 @@ export default function RosterPage() {
                   value: member.id,
                   label: member.name?.trim() || member.email,
                 }))}
-                onChange={(nextValue) => setOverrideStaffId(nextValue)}
+                onChange={(nextValue) => {
+                  setOverrideStaffId(nextValue)
+                  if (!nextValue) return
+                  const nextStaffFlexible =
+                    (staffSchedulingModeMap[nextValue] ?? "STANDARD") === "FLEXIBLE"
+                  if (!nextStaffFlexible) {
+                    setUseFlexibleSlot(false)
+                    return
+                  }
+                  if (!useFlexibleSlot) return
+                  const weekStartDate = getWeekStartMondayKey(
+                    new Date(`${overrideStartDate}T00:00:00.000Z`)
+                  )
+                  setFlexibleDraftDays(getFlexibleDraftForEffectiveWeek(nextValue, weekStartDate))
+                  const recurringDraft = getRecurringDraftFromPattern(
+                    nextValue,
+                    new Date(`${weekStartDate}T00:00:00.000Z`)
+                  )
+                  setRecurringPatternId(recurringDraft.patternId)
+                  setRecurringPatternName(recurringDraft.patternName)
+                  setRecurringValidFrom(recurringDraft.validFrom || weekStartDate)
+                  setRecurringValidTo(recurringDraft.validTo)
+                  setRecurringCycleLength(recurringDraft.cycleLength)
+                  setRecurringSelectedWeekIndex(1)
+                  setRecurringDraftWeeks(recurringDraft.weeks)
+                  setRecurringImpactMode("UPDATE")
+                  setRecurringImpactPreview(null)
+                }}
               />
             </div>
             <div className="space-y-1">
@@ -2371,6 +2475,10 @@ export default function RosterPage() {
                 value={useFlexibleSlot ? "FLEXIBLE" : "TEMPLATE"}
                 onChange={(event) => {
                   const nextFlexible = event.target.value === "FLEXIBLE"
+                  if (nextFlexible && !isOverrideStaffFlexible) {
+                    setUseFlexibleSlot(false)
+                    return
+                  }
                   setUseFlexibleSlot(nextFlexible)
                   if (nextFlexible) {
                     setOverrideUnavailable(false)
@@ -2383,7 +2491,9 @@ export default function RosterPage() {
                     setOverrideEndDate(toISODate(weekEndDate))
                     setFlexibleEditorMode("WEEK_OVERRIDE")
                     if (overrideStaffId) {
-                      setFlexibleDraftDays(getFlexibleDraftForWeek(overrideStaffId, weekStartDate))
+                      setFlexibleDraftDays(
+                        getFlexibleDraftForEffectiveWeek(overrideStaffId, weekStartDate)
+                      )
                       const recurringDraft = getRecurringDraftFromPattern(
                         overrideStaffId,
                         new Date(`${weekStartDate}T00:00:00.000Z`)
@@ -2402,7 +2512,9 @@ export default function RosterPage() {
                 }}
               >
                 <option value="TEMPLATE">Template/Unavailable override</option>
-                <option value="FLEXIBLE">Flexible weekly plan</option>
+                {isOverrideStaffFlexible ? (
+                  <option value="FLEXIBLE">Flexible weekly plan</option>
+                ) : null}
               </select>
             </div>
             {!useFlexibleSlot ? (
@@ -2777,7 +2889,15 @@ export default function RosterPage() {
             <Button variant="outline" onClick={() => setOverrideOpen(false)}>
               Cancel
             </Button>
-            <Button variant="outline" onClick={clearOverride}>
+            <Button
+              variant="outline"
+              onClick={clearOverride}
+              disabled={
+                useFlexibleSlot &&
+                flexibleEditorMode === "WEEK_OVERRIDE" &&
+                !hasWeeklyOverrideInContext
+              }
+            >
               {useFlexibleSlot
                 ? flexibleEditorMode === "WEEK_OVERRIDE"
                   ? "Clear weekly override"
