@@ -142,6 +142,11 @@ export default function ShiftSchedulesPage() {
   const [deleting, setDeleting] = React.useState(false)
   const [deleteTarget, setDeleteTarget] = React.useState<ShiftSchedule | null>(null)
   const [editingSchedule, setEditingSchedule] = React.useState<ShiftSchedule | null>(null)
+  const [unassignOpen, setUnassignOpen] = React.useState(false)
+  const [unassignTarget, setUnassignTarget] = React.useState<ShiftSchedule | null>(null)
+  const [unassignAssignmentId, setUnassignAssignmentId] = React.useState("")
+  const [unassignEndDate, setUnassignEndDate] = React.useState("")
+  const [unassigning, setUnassigning] = React.useState(false)
 
   const today = React.useMemo(() => toISODate(new Date()), [])
   const defaultForm = React.useMemo(() => createDefaultScheduleForm(today), [today])
@@ -377,6 +382,21 @@ export default function ShiftSchedulesPage() {
     setDeleteOpen(true)
   }, [])
 
+  const requestUnassign = React.useCallback((schedule: ShiftSchedule) => {
+    const assignments = schedule.assignments ?? []
+    if (!assignments.length) {
+      toast.error("No assignments found for this schedule.")
+      return
+    }
+    const firstAssignment = assignments[0]
+    const todayDate = toISODate(new Date())
+    const startDate = toDateInputValue(firstAssignment?.startDate)
+    setUnassignTarget(schedule)
+    setUnassignAssignmentId(firstAssignment?.id ?? "")
+    setUnassignEndDate(startDate && startDate > todayDate ? startDate : todayDate)
+    setUnassignOpen(true)
+  }, [])
+
   const confirmDelete = React.useCallback(async () => {
     if (!deleteTarget) return
     setDeleting(true)
@@ -395,6 +415,40 @@ export default function ShiftSchedulesPage() {
     setDeleteTarget(null)
     await loadSchedules()
   }, [deleteTarget, loadSchedules])
+
+  const confirmUnassign = React.useCallback(async () => {
+    if (!unassignAssignmentId) {
+      toast.error("Select an assigned staff member.")
+      return
+    }
+    if (!unassignEndDate) {
+      toast.error("Select an end date.")
+      return
+    }
+    setUnassigning(true)
+    try {
+      const response = await fetch(`/api/shifts/assignments/${unassignAssignmentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endDate: unassignEndDate }),
+      })
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string }
+        throw new Error(data.error ?? "Unable to end assignment.")
+      }
+      toast.success("Staff assignment ended.")
+      setUnassignOpen(false)
+      setUnassignTarget(null)
+      setUnassignAssignmentId("")
+      setUnassignEndDate("")
+      await loadSchedules()
+    } catch (error) {
+      console.error(error)
+      toast.error(error instanceof Error ? error.message : "Unable to end assignment.")
+    } finally {
+      setUnassigning(false)
+    }
+  }, [loadSchedules, unassignAssignmentId, unassignEndDate])
 
   const columns = React.useMemo<ColumnDef<ShiftSchedule>[]>(
     () => [
@@ -549,6 +603,11 @@ export default function ShiftSchedulesPage() {
               <DropdownMenuItem onSelect={() => startEdit(row.original)}>
                 Edit
               </DropdownMenuItem>
+              {!row.original.isDefault && (row.original.assignments?.length ?? 0) > 0 ? (
+                <DropdownMenuItem onSelect={() => requestUnassign(row.original)}>
+                  End staff assignment
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 onSelect={() => requestDelete(row.original)}
                 className="text-destructive"
@@ -560,10 +619,9 @@ export default function ShiftSchedulesPage() {
         ),
       },
     ],
-    [formatDate, requestDelete, startEdit]
+    [formatDate, requestDelete, requestUnassign, startEdit]
   )
 
-  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: schedules,
     columns,
@@ -653,6 +711,79 @@ export default function ShiftSchedulesPage() {
             </Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
               {deleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={unassignOpen}
+        onOpenChange={(open) => {
+          setUnassignOpen(open)
+          if (!open) {
+            setUnassignTarget(null)
+            setUnassignAssignmentId("")
+            setUnassignEndDate("")
+            setUnassigning(false)
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>End assignment</DialogTitle>
+            <DialogDescription>
+              Set an end date for the selected staff assignment. Historical schedule data remains preserved.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Assigned staff</label>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={unassignAssignmentId}
+                onChange={(event) => {
+                  const nextId = event.target.value
+                  setUnassignAssignmentId(nextId)
+                  const selected = (unassignTarget?.assignments ?? []).find((item) => item.id === nextId)
+                  const todayDate = toISODate(new Date())
+                  const startDate = toDateInputValue(selected?.startDate)
+                  if (startDate) {
+                    setUnassignEndDate(startDate > todayDate ? startDate : todayDate)
+                  }
+                }}
+              >
+                {(unassignTarget?.assignments ?? []).map((assignment) => (
+                  <option key={assignment.id} value={assignment.id}>
+                    {(assignment.staffProfile?.user?.name || assignment.staffProfile?.user?.email || "Staff") +
+                      ` (${toDateInputValue(assignment.startDate)} - ${
+                        assignment.endDate ? toDateInputValue(assignment.endDate) : "ongoing"
+                      })`}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">End date</label>
+              <Input
+                type="date"
+                value={unassignEndDate}
+                min={toDateInputValue(
+                  (unassignTarget?.assignments ?? []).find((item) => item.id === unassignAssignmentId)?.startDate
+                )}
+                onChange={(event) => setUnassignEndDate(event.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setUnassignOpen(false)}
+              disabled={unassigning}
+            >
+              Cancel
+            </Button>
+            <Button onClick={confirmUnassign} loading={unassigning} loadingText="Saving...">
+              End assignment
             </Button>
           </DialogFooter>
         </DialogContent>
