@@ -148,6 +148,7 @@ export default function RosterPage() {
   const [historyDays, setHistoryDays] = React.useState<RosterHistoryDay[]>([])
   const approvedLeavesRequestVersionRef = React.useRef(0)
   const [overrideOpen, setOverrideOpen] = React.useState(false)
+  const [saveAsNewConfirmOpen, setSaveAsNewConfirmOpen] = React.useState(false)
   const [overrideStaffId, setOverrideStaffId] = React.useState<string>("")
   const [overrideStartDate, setOverrideStartDate] = React.useState<string>("")
   const [overrideEndDate, setOverrideEndDate] = React.useState<string>("")
@@ -2599,7 +2600,7 @@ export default function RosterPage() {
             {useFlexibleSlot &&
             flexibleEditorMode === "RECURRING_PATTERN" &&
             Boolean(recurringPatternId) ? (
-              <Button variant="outline" onClick={() => submitOverride(true)}>
+              <Button variant="outline" onClick={() => setSaveAsNewConfirmOpen(true)}>
                 Save as new pattern
               </Button>
             ) : null}
@@ -2611,6 +2612,29 @@ export default function RosterPage() {
                     ? "Update recurring pattern"
                     : "Save recurring pattern"
                 : "Save override"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={saveAsNewConfirmOpen} onOpenChange={setSaveAsNewConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Save as new recurring pattern?</DialogTitle>
+            <DialogDescription>
+              This keeps the current pattern and creates a new active pattern version for this staff member.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={() => setSaveAsNewConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setSaveAsNewConfirmOpen(false)
+                void submitOverride(true)
+              }}
+            >
+              Confirm and save new
             </Button>
           </DialogFooter>
         </DialogContent>
