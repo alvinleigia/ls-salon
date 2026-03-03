@@ -84,6 +84,8 @@ const seededUsers = [
   { name: "Customer Five", email: "customer5@ls-salon.test", role: Role.CUSTOMER },
 ]
 
+const seededFlexibleStaffBaseEmails = ["staff4@ls-salon.test", "staff5@ls-salon.test"] as const
+
 const serviceCategorySeeds = [
   { name: "Hair Services", description: "Haircut, styling, and coloring." },
   { name: "Skin Services", description: "Facials and skin care services." },
@@ -430,6 +432,11 @@ const seededEmailForTenant = (tenantSlug: string, baseEmail: string) => {
   if (!localPart || !domainPart) return `${tenantSlug}.${baseEmail}`
   return `${localPart}.${tenantSlug}@${domainPart}`
 }
+
+const seededStaffEmailsForTenant = (tenantSlug: string) =>
+  seededUsers
+    .filter((user) => user.role === Role.STAFF)
+    .map((user) => seededEmailForTenant(tenantSlug, user.email))
 
 const seedTaxes = async (tenantId: string) => {
   const taxes = [
@@ -969,11 +976,7 @@ const seedAppointments = async (tenantId: string, tenantSlug: string) => {
       user: {
         tenantId,
         role: Role.STAFF,
-        email: {
-          in: seededUsers
-            .filter((user) => user.role === Role.STAFF)
-            .map((user) => seededEmailForTenant(tenantSlug, user.email)),
-        },
+        email: { in: seededStaffEmailsForTenant(tenantSlug) },
       },
     },
     orderBy: { user: { email: "asc" } },
@@ -1503,64 +1506,266 @@ const seedShifts = async (tenantId: string, tenantSlug: string) => {
     where: {
       user: {
         role: Role.STAFF,
-        email: {
-          in: seededUsers
-            .filter((user) => user.role === Role.STAFF)
-            .map((user) => seededEmailForTenant(tenantSlug, user.email)),
-        },
+        email: { in: seededStaffEmailsForTenant(tenantSlug) },
       },
     },
-    select: { id: true },
+    select: {
+      id: true,
+      user: { select: { email: true } },
+    },
+    orderBy: { user: { email: "asc" } },
     take: 5,
   })
   let flexibleSlotCount = 0
+  let flexibleWeekPlanCount = 0
+  let flexiblePatternCount = 0
   if (staffProfiles.length > 0) {
-    const standardStaffProfiles = staffProfiles.slice(0, Math.max(0, staffProfiles.length - 1))
-    const flexibleStaffProfile = staffProfiles[staffProfiles.length - 1] ?? null
+    const preferredFlexibleEmails = new Set(
+      seededFlexibleStaffBaseEmails.map((email) => seededEmailForTenant(tenantSlug, email))
+    )
+    const preferredFlexibleProfiles = staffProfiles.filter((profile) =>
+      preferredFlexibleEmails.has(profile.user.email)
+    )
+    const fallbackFlexibleProfiles = staffProfiles
+      .filter((profile) => !preferredFlexibleEmails.has(profile.user.email))
+      .slice(-Math.max(0, 2 - preferredFlexibleProfiles.length))
+    const flexibleStaffProfiles = [...preferredFlexibleProfiles, ...fallbackFlexibleProfiles].slice(0, 2)
+    const flexibleStaffIds = new Set(flexibleStaffProfiles.map((profile) => profile.id))
+    const standardStaffProfiles = staffProfiles.filter((profile) => !flexibleStaffIds.has(profile.id))
+    const allStaffProfileIds = staffProfiles.map((profile) => profile.id)
 
     await prisma.staffProfile.updateMany({
-      where: { id: { in: staffProfiles.map((profile) => profile.id) } },
+      where: { id: { in: allStaffProfileIds } },
       data: { schedulingMode: "STANDARD" },
     })
+    await prisma.staffFlexiblePatternBreak.deleteMany({
+      where: {
+        slot: {
+          day: {
+            week: {
+              pattern: {
+                staffProfileId: { in: allStaffProfileIds },
+              },
+            },
+          },
+        },
+      },
+    })
+    await prisma.staffFlexiblePatternSlot.deleteMany({
+      where: {
+        day: {
+          week: {
+            pattern: {
+              staffProfileId: { in: allStaffProfileIds },
+            },
+          },
+        },
+      },
+    })
+    await prisma.staffFlexiblePatternDay.deleteMany({
+      where: {
+        week: {
+          pattern: {
+            staffProfileId: { in: allStaffProfileIds },
+          },
+        },
+      },
+    })
+    await prisma.staffFlexiblePatternWeek.deleteMany({
+      where: { pattern: { staffProfileId: { in: allStaffProfileIds } } },
+    })
+    await prisma.staffFlexiblePattern.deleteMany({
+      where: { staffProfileId: { in: allStaffProfileIds } },
+    })
+    await prisma.staffFlexibleWeekBreak.deleteMany({
+      where: {
+        slot: {
+          day: {
+            plan: {
+              staffProfileId: { in: allStaffProfileIds },
+            },
+          },
+        },
+      },
+    })
+    await prisma.staffFlexibleWeekSlot.deleteMany({
+      where: {
+        day: {
+          plan: {
+            staffProfileId: { in: allStaffProfileIds },
+          },
+        },
+      },
+    })
+    await prisma.staffFlexibleWeekDay.deleteMany({
+      where: { plan: { staffProfileId: { in: allStaffProfileIds } } },
+    })
+    await prisma.staffFlexibleWeekPlan.deleteMany({
+      where: { staffProfileId: { in: allStaffProfileIds } },
+    })
     await prisma.staffFlexibleAvailability.deleteMany({
-      where: { staffProfileId: { in: staffProfiles.map((profile) => profile.id) } },
+      where: { staffProfileId: { in: allStaffProfileIds } },
     })
 
-    if (flexibleStaffProfile) {
+    for (const flexibleStaffProfile of flexibleStaffProfiles) {
       await prisma.staffProfile.update({
         where: { id: flexibleStaffProfile.id },
         data: { schedulingMode: "FLEXIBLE" },
       })
-      const slotDays = 28
-      const slotStart = new Date(startDate)
-      for (let dayOffset = 0; dayOffset < slotDays; dayOffset += 1) {
-        const day = new Date(slotStart)
-        day.setDate(slotStart.getDate() + dayOffset)
-        const weekday = day.getDay()
-        const dateIso = day.toISOString().slice(0, 10)
-        const dateValue = new Date(`${dateIso}T00:00:00.000Z`)
-        // Flexible contracted pattern: Mon/Wed/Fri full-ish, Tue/Thu short, weekend off.
-        const slotsForDay: Array<{ startTime: string; endTime: string }> =
-          weekday === 1 || weekday === 3 || weekday === 5
-            ? [
-                { startTime: "10:00", endTime: "14:00" },
-                { startTime: "15:00", endTime: "19:00" },
-              ]
-            : weekday === 2 || weekday === 4
-              ? [{ startTime: "11:00", endTime: "15:00" }]
-              : []
-        if (!slotsForDay.length) continue
-        for (let index = 0; index < slotsForDay.length; index += 1) {
-          await prisma.staffFlexibleAvailability.create({
+
+      const weeklyPlan = await prisma.staffFlexibleWeekPlan.create({
+        data: {
+          staffProfileId: flexibleStaffProfile.id,
+          weekStartDate: startDate,
+        },
+      })
+      flexibleWeekPlanCount += 1
+
+      const weekdayDefinitions: Array<{
+        day: Weekday
+        isOff: boolean
+        slots: Array<{
+          startTime: string
+          endTime: string
+          breaks?: Array<{ startTime: string; endTime: string }>
+        }>
+      }> = [
+        {
+          day: Weekday.MONDAY,
+          isOff: false,
+          slots: [
+            { startTime: "10:00", endTime: "13:00", breaks: [{ startTime: "11:30", endTime: "11:45" }] },
+          ],
+        },
+        {
+          day: Weekday.TUESDAY,
+          isOff: false,
+          slots: [{ startTime: "14:00", endTime: "19:00", breaks: [{ startTime: "16:00", endTime: "16:20" }] }],
+        },
+        {
+          day: Weekday.WEDNESDAY,
+          isOff: false,
+          slots: [{ startTime: "09:30", endTime: "13:30" }],
+        },
+        {
+          day: Weekday.THURSDAY,
+          isOff: false,
+          slots: [
+            { startTime: "12:00", endTime: "16:00" },
+            { startTime: "17:00", endTime: "20:00", breaks: [{ startTime: "18:30", endTime: "18:45" }] },
+          ],
+        },
+        {
+          day: Weekday.FRIDAY,
+          isOff: false,
+          slots: [{ startTime: "11:00", endTime: "15:00" }],
+        },
+        { day: Weekday.SATURDAY, isOff: true, slots: [] },
+        { day: Weekday.SUNDAY, isOff: true, slots: [] },
+      ]
+
+      for (let weekdayIndex = 0; weekdayIndex < weekdayDefinitions.length; weekdayIndex += 1) {
+        const currentDay = weekdayDefinitions[weekdayIndex]
+        const createdDay = await prisma.staffFlexibleWeekDay.create({
+          data: {
+            planId: weeklyPlan.id,
+            day: currentDay.day,
+            isOff: currentDay.isOff,
+            sortOrder: weekdayIndex,
+          },
+        })
+        for (let slotIndex = 0; slotIndex < currentDay.slots.length; slotIndex += 1) {
+          const currentSlot = currentDay.slots[slotIndex]
+          const createdSlot = await prisma.staffFlexibleWeekSlot.create({
             data: {
-              staffProfileId: flexibleStaffProfile.id,
-              date: dateValue,
-              startTime: slotsForDay[index].startTime,
-              endTime: slotsForDay[index].endTime,
-              sortOrder: index,
+              dayId: createdDay.id,
+              startTime: currentSlot.startTime,
+              endTime: currentSlot.endTime,
+              sortOrder: slotIndex,
             },
           })
-          flexibleSlotCount += 1
+          const slotBreaks = currentSlot.breaks ?? []
+          if (slotBreaks.length) {
+            await prisma.staffFlexibleWeekBreak.createMany({
+              data: slotBreaks.map((currentBreak, breakIndex) => ({
+                slotId: createdSlot.id,
+                startTime: currentBreak.startTime,
+                endTime: currentBreak.endTime,
+                sortOrder: breakIndex,
+              })),
+            })
+          }
+        }
+      }
+
+      const recurringPattern = await prisma.staffFlexiblePattern.create({
+        data: {
+          staffProfileId: flexibleStaffProfile.id,
+          name: "Seed Flexible Recurring Plan",
+          cycleLengthWeeks: 2,
+          validFrom: startDate,
+          validTo: null,
+          isActive: true,
+        },
+      })
+      flexiblePatternCount += 1
+
+      const recurringWeeks = [
+        {
+          weekIndex: 1,
+          days: [
+            { day: Weekday.MONDAY, isOff: false, slots: [{ startTime: "08:00", endTime: "13:00" }] },
+            { day: Weekday.TUESDAY, isOff: false, slots: [{ startTime: "08:00", endTime: "13:00" }] },
+            { day: Weekday.WEDNESDAY, isOff: true, slots: [] },
+            { day: Weekday.THURSDAY, isOff: false, slots: [{ startTime: "08:00", endTime: "13:00" }] },
+            { day: Weekday.FRIDAY, isOff: true, slots: [] },
+            { day: Weekday.SATURDAY, isOff: true, slots: [] },
+            { day: Weekday.SUNDAY, isOff: true, slots: [] },
+          ],
+        },
+        {
+          weekIndex: 2,
+          days: [
+            { day: Weekday.MONDAY, isOff: true, slots: [] },
+            { day: Weekday.TUESDAY, isOff: true, slots: [] },
+            { day: Weekday.WEDNESDAY, isOff: false, slots: [{ startTime: "14:00", endTime: "19:00" }] },
+            { day: Weekday.THURSDAY, isOff: true, slots: [] },
+            { day: Weekday.FRIDAY, isOff: false, slots: [{ startTime: "14:00", endTime: "19:00" }] },
+            { day: Weekday.SATURDAY, isOff: false, slots: [{ startTime: "14:00", endTime: "19:00" }] },
+            { day: Weekday.SUNDAY, isOff: true, slots: [] },
+          ],
+        },
+      ] as const
+
+      for (const patternWeek of recurringWeeks) {
+        const createdWeek = await prisma.staffFlexiblePatternWeek.create({
+          data: {
+            patternId: recurringPattern.id,
+            weekIndex: patternWeek.weekIndex,
+          },
+        })
+        for (let dayIndex = 0; dayIndex < patternWeek.days.length; dayIndex += 1) {
+          const patternDay = patternWeek.days[dayIndex]
+          const createdPatternDay = await prisma.staffFlexiblePatternDay.create({
+            data: {
+              weekId: createdWeek.id,
+              day: patternDay.day,
+              isOff: patternDay.isOff,
+              sortOrder: dayIndex,
+            },
+          })
+          for (let slotIndex = 0; slotIndex < patternDay.slots.length; slotIndex += 1) {
+            const patternSlot = patternDay.slots[slotIndex]
+            await prisma.staffFlexiblePatternSlot.create({
+              data: {
+                dayId: createdPatternDay.id,
+                startTime: patternSlot.startTime,
+                endTime: patternSlot.endTime,
+                sortOrder: slotIndex,
+              },
+            })
+            flexibleSlotCount += 1
+          }
         }
       }
     }
@@ -1617,7 +1822,7 @@ const seedShifts = async (tenantId: string, tenantSlug: string) => {
     }
   }
 
-  return { count: shiftTemplateSeeds.length + 2 + flexibleSlotCount }
+  return { count: shiftTemplateSeeds.length + 2 + flexibleSlotCount + flexibleWeekPlanCount + flexiblePatternCount }
 }
 
 const seedLeaves = async (tenantId: string, tenantSlug: string) => {
@@ -1802,6 +2007,33 @@ const clearData = async (tenantId: string) => {
     counts.staffShiftOverrides = (await tx.staffShiftOverride.deleteMany({
       where: { staffProfile: { user: { tenantId } } },
     })).count
+    counts.staffFlexiblePatternBreaks = (await tx.staffFlexiblePatternBreak.deleteMany({
+      where: { slot: { day: { week: { pattern: { staffProfile: { user: { tenantId } } } } } } },
+    })).count
+    counts.staffFlexiblePatternSlots = (await tx.staffFlexiblePatternSlot.deleteMany({
+      where: { day: { week: { pattern: { staffProfile: { user: { tenantId } } } } } },
+    })).count
+    counts.staffFlexiblePatternDays = (await tx.staffFlexiblePatternDay.deleteMany({
+      where: { week: { pattern: { staffProfile: { user: { tenantId } } } } },
+    })).count
+    counts.staffFlexiblePatternWeeks = (await tx.staffFlexiblePatternWeek.deleteMany({
+      where: { pattern: { staffProfile: { user: { tenantId } } } },
+    })).count
+    counts.staffFlexiblePatterns = (await tx.staffFlexiblePattern.deleteMany({
+      where: { staffProfile: { user: { tenantId } } },
+    })).count
+    counts.staffFlexibleWeekBreaks = (await tx.staffFlexibleWeekBreak.deleteMany({
+      where: { slot: { day: { plan: { staffProfile: { user: { tenantId } } } } } },
+    })).count
+    counts.staffFlexibleWeekSlots = (await tx.staffFlexibleWeekSlot.deleteMany({
+      where: { day: { plan: { staffProfile: { user: { tenantId } } } } },
+    })).count
+    counts.staffFlexibleWeekDays = (await tx.staffFlexibleWeekDay.deleteMany({
+      where: { plan: { staffProfile: { user: { tenantId } } } },
+    })).count
+    counts.staffFlexibleWeekPlans = (await tx.staffFlexibleWeekPlan.deleteMany({
+      where: { staffProfile: { user: { tenantId } } },
+    })).count
     counts.staffFlexibleAvailability = (await tx.staffFlexibleAvailability.deleteMany({
       where: { staffProfile: { user: { tenantId } } },
     })).count
@@ -1887,6 +2119,15 @@ const previewClearData = async (tenantId: string) => {
     inventoryCategories,
     staffRosterHistoryDays,
     staffShiftOverrides,
+    staffFlexiblePatternBreaks,
+    staffFlexiblePatternSlots,
+    staffFlexiblePatternDays,
+    staffFlexiblePatternWeeks,
+    staffFlexiblePatterns,
+    staffFlexibleWeekBreaks,
+    staffFlexibleWeekSlots,
+    staffFlexibleWeekDays,
+    staffFlexibleWeekPlans,
     staffFlexibleAvailability,
     staffScheduleAssignments,
     shiftScheduleBlocks,
@@ -1921,6 +2162,33 @@ const previewClearData = async (tenantId: string) => {
     prisma.inventoryCategory.count({ where: { tenantId } }),
     prisma.staffRosterHistoryDay.count({ where: { staffProfile: { user: { tenantId } } } }),
     prisma.staffShiftOverride.count({ where: { staffProfile: { user: { tenantId } } } }),
+    prisma.staffFlexiblePatternBreak.count({
+      where: { slot: { day: { week: { pattern: { staffProfile: { user: { tenantId } } } } } } },
+    }),
+    prisma.staffFlexiblePatternSlot.count({
+      where: { day: { week: { pattern: { staffProfile: { user: { tenantId } } } } } },
+    }),
+    prisma.staffFlexiblePatternDay.count({
+      where: { week: { pattern: { staffProfile: { user: { tenantId } } } } },
+    }),
+    prisma.staffFlexiblePatternWeek.count({
+      where: { pattern: { staffProfile: { user: { tenantId } } } },
+    }),
+    prisma.staffFlexiblePattern.count({
+      where: { staffProfile: { user: { tenantId } } },
+    }),
+    prisma.staffFlexibleWeekBreak.count({
+      where: { slot: { day: { plan: { staffProfile: { user: { tenantId } } } } } },
+    }),
+    prisma.staffFlexibleWeekSlot.count({
+      where: { day: { plan: { staffProfile: { user: { tenantId } } } } },
+    }),
+    prisma.staffFlexibleWeekDay.count({
+      where: { plan: { staffProfile: { user: { tenantId } } } },
+    }),
+    prisma.staffFlexibleWeekPlan.count({
+      where: { staffProfile: { user: { tenantId } } },
+    }),
     prisma.staffFlexibleAvailability.count({ where: { staffProfile: { user: { tenantId } } } }),
     prisma.staffScheduleAssignment.count({ where: { staffProfile: { user: { tenantId } } } }),
     prisma.shiftScheduleBlock.count({ where: { schedule: { tenantId } } }),
@@ -1966,6 +2234,15 @@ const previewClearData = async (tenantId: string) => {
       inventoryCategories,
       staffRosterHistoryDays,
       staffShiftOverrides,
+      staffFlexiblePatternBreaks,
+      staffFlexiblePatternSlots,
+      staffFlexiblePatternDays,
+      staffFlexiblePatternWeeks,
+      staffFlexiblePatterns,
+      staffFlexibleWeekBreaks,
+      staffFlexibleWeekSlots,
+      staffFlexibleWeekDays,
+      staffFlexibleWeekPlans,
       staffFlexibleAvailability,
       staffScheduleAssignments,
       shiftScheduleBlocks,
@@ -2083,6 +2360,33 @@ const countModuleData = async (tenantId: string, modules: Set<ClearModule>) => {
   if (modules.has("shifts")) {
     counts.staffRosterHistoryDays = await prisma.staffRosterHistoryDay.count({ where: { staffProfile: { user: { tenantId } } } })
     counts.staffShiftOverrides = await prisma.staffShiftOverride.count({ where: { staffProfile: { user: { tenantId } } } })
+    counts.staffFlexiblePatternBreaks = await prisma.staffFlexiblePatternBreak.count({
+      where: { slot: { day: { week: { pattern: { staffProfile: { user: { tenantId } } } } } } },
+    })
+    counts.staffFlexiblePatternSlots = await prisma.staffFlexiblePatternSlot.count({
+      where: { day: { week: { pattern: { staffProfile: { user: { tenantId } } } } } },
+    })
+    counts.staffFlexiblePatternDays = await prisma.staffFlexiblePatternDay.count({
+      where: { week: { pattern: { staffProfile: { user: { tenantId } } } } },
+    })
+    counts.staffFlexiblePatternWeeks = await prisma.staffFlexiblePatternWeek.count({
+      where: { pattern: { staffProfile: { user: { tenantId } } } },
+    })
+    counts.staffFlexiblePatterns = await prisma.staffFlexiblePattern.count({
+      where: { staffProfile: { user: { tenantId } } },
+    })
+    counts.staffFlexibleWeekBreaks = await prisma.staffFlexibleWeekBreak.count({
+      where: { slot: { day: { plan: { staffProfile: { user: { tenantId } } } } } },
+    })
+    counts.staffFlexibleWeekSlots = await prisma.staffFlexibleWeekSlot.count({
+      where: { day: { plan: { staffProfile: { user: { tenantId } } } } },
+    })
+    counts.staffFlexibleWeekDays = await prisma.staffFlexibleWeekDay.count({
+      where: { plan: { staffProfile: { user: { tenantId } } } },
+    })
+    counts.staffFlexibleWeekPlans = await prisma.staffFlexibleWeekPlan.count({
+      where: { staffProfile: { user: { tenantId } } },
+    })
     counts.staffFlexibleAvailability = await prisma.staffFlexibleAvailability.count({ where: { staffProfile: { user: { tenantId } } } })
     counts.staffScheduleAssignments = await prisma.staffScheduleAssignment.count({ where: { staffProfile: { user: { tenantId } } } })
     counts.shiftScheduleBlocks = await prisma.shiftScheduleBlock.count({ where: { schedule: { tenantId } } })
@@ -2163,6 +2467,33 @@ const clearModulesData = async (tenantId: string, modules: Set<ClearModule>) => 
       } else if (moduleKey === "shifts") {
         counts.staffRosterHistoryDays = (await tx.staffRosterHistoryDay.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
         counts.staffShiftOverrides = (await tx.staffShiftOverride.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
+        counts.staffFlexiblePatternBreaks = (await tx.staffFlexiblePatternBreak.deleteMany({
+          where: { slot: { day: { week: { pattern: { staffProfile: { user: { tenantId } } } } } } },
+        })).count
+        counts.staffFlexiblePatternSlots = (await tx.staffFlexiblePatternSlot.deleteMany({
+          where: { day: { week: { pattern: { staffProfile: { user: { tenantId } } } } } },
+        })).count
+        counts.staffFlexiblePatternDays = (await tx.staffFlexiblePatternDay.deleteMany({
+          where: { week: { pattern: { staffProfile: { user: { tenantId } } } } },
+        })).count
+        counts.staffFlexiblePatternWeeks = (await tx.staffFlexiblePatternWeek.deleteMany({
+          where: { pattern: { staffProfile: { user: { tenantId } } } },
+        })).count
+        counts.staffFlexiblePatterns = (await tx.staffFlexiblePattern.deleteMany({
+          where: { staffProfile: { user: { tenantId } } },
+        })).count
+        counts.staffFlexibleWeekBreaks = (await tx.staffFlexibleWeekBreak.deleteMany({
+          where: { slot: { day: { plan: { staffProfile: { user: { tenantId } } } } } },
+        })).count
+        counts.staffFlexibleWeekSlots = (await tx.staffFlexibleWeekSlot.deleteMany({
+          where: { day: { plan: { staffProfile: { user: { tenantId } } } } },
+        })).count
+        counts.staffFlexibleWeekDays = (await tx.staffFlexibleWeekDay.deleteMany({
+          where: { plan: { staffProfile: { user: { tenantId } } } },
+        })).count
+        counts.staffFlexibleWeekPlans = (await tx.staffFlexibleWeekPlan.deleteMany({
+          where: { staffProfile: { user: { tenantId } } },
+        })).count
         counts.staffFlexibleAvailability = (await tx.staffFlexibleAvailability.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
         counts.staffScheduleAssignments = (await tx.staffScheduleAssignment.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
         counts.shiftScheduleBlocks = (await tx.shiftScheduleBlock.deleteMany({ where: { schedule: { tenantId } } })).count
