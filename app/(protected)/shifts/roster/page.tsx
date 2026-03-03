@@ -654,23 +654,42 @@ export default function RosterPage() {
     return map
   }, [flexibleWeekPlans])
 
-  const activePatternByStaffId = React.useMemo(() => {
-    const map: Record<string, StaffFlexiblePattern | undefined> = {}
+  const recurringPatternsByStaffId = React.useMemo(() => {
+    const map: Record<string, StaffFlexiblePattern[]> = {}
     for (const pattern of flexiblePatterns) {
       if (!pattern.staffId) continue
-      const existing = map[pattern.staffId]
-      if (!existing) {
-        map[pattern.staffId] = pattern
-        continue
+      if (!map[pattern.staffId]) {
+        map[pattern.staffId] = []
       }
-      const existingFrom = new Date(`${existing.validFrom}T00:00:00.000Z`).getTime()
-      const nextFrom = new Date(`${pattern.validFrom}T00:00:00.000Z`).getTime()
-      if (nextFrom > existingFrom) {
-        map[pattern.staffId] = pattern
-      }
+      map[pattern.staffId].push(pattern)
+    }
+    for (const staffId of Object.keys(map)) {
+      map[staffId].sort((a, b) => {
+        const aStart = new Date(`${a.validFrom}T00:00:00.000Z`).getTime()
+        const bStart = new Date(`${b.validFrom}T00:00:00.000Z`).getTime()
+        return bStart - aStart
+      })
     }
     return map
   }, [flexiblePatterns])
+
+  const getActiveRecurringPatternForDate = React.useCallback(
+    (staffId: string, value: Date) => {
+      const patterns = recurringPatternsByStaffId[staffId] ?? []
+      const dateValue = new Date(`${toISODate(value)}T00:00:00.000Z`).getTime()
+      return (
+        patterns.find((pattern) => {
+          if (!pattern.isActive) return false
+          const validFrom = new Date(`${pattern.validFrom}T00:00:00.000Z`).getTime()
+          const validTo = pattern.validTo
+            ? new Date(`${pattern.validTo}T23:59:59.999Z`).getTime()
+            : Number.POSITIVE_INFINITY
+          return dateValue >= validFrom && dateValue <= validTo
+        }) ?? null
+      )
+    },
+    [recurringPatternsByStaffId]
+  )
 
   const leaveMap = React.useMemo(() => {
     const map: Record<string, Record<string, LeaveRosterItem>> = {}
@@ -812,7 +831,7 @@ export default function RosterPage() {
           })
         }
 
-        const recurringPattern = activePatternByStaffId[staffId]
+        const recurringPattern = getActiveRecurringPatternForDate(staffId, value)
         if (recurringPattern) {
           const dateKeyUtc = toISODate(value)
           const validFrom = new Date(`${recurringPattern.validFrom}T00:00:00.000Z`).getTime()
@@ -878,7 +897,7 @@ export default function RosterPage() {
     },
     [
       buildShiftSegments,
-      activePatternByStaffId,
+      getActiveRecurringPatternForDate,
       flexibleWeekPlanMap,
       flexibleSlotMap,
       formatDateKey,
@@ -1092,8 +1111,11 @@ export default function RosterPage() {
   )
 
   const getRecurringDraftFromPattern = React.useCallback(
-    (staffId: string) => {
-      const pattern = activePatternByStaffId[staffId]
+    (staffId: string, referenceDate?: Date) => {
+      const pattern =
+        (referenceDate ? getActiveRecurringPatternForDate(staffId, referenceDate) : null) ??
+        recurringPatternsByStaffId[staffId]?.find((item) => item.isActive) ??
+        null
       if (!pattern) {
         return {
           patternId: "",
@@ -1141,7 +1163,7 @@ export default function RosterPage() {
         weeks,
       }
     },
-    [activePatternByStaffId, createEmptyRecurringWeeks]
+    [createEmptyRecurringWeeks, getActiveRecurringPatternForDate, recurringPatternsByStaffId]
   )
 
   const currentEditableDays = React.useMemo(() => {
@@ -1180,7 +1202,7 @@ export default function RosterPage() {
       setUseFlexibleSlot(schedulingMode === "FLEXIBLE")
       setFlexibleEditorMode("WEEK_OVERRIDE")
       setFlexibleDraftDays(getFlexibleDraftForWeek(staffId, weekStartDate))
-      const recurringDraft = getRecurringDraftFromPattern(staffId)
+      const recurringDraft = getRecurringDraftFromPattern(staffId, dateValue)
       setRecurringPatternId(recurringDraft.patternId)
       setRecurringPatternName(recurringDraft.patternName)
       setRecurringValidFrom(recurringDraft.validFrom || weekStartDate)
@@ -2362,7 +2384,10 @@ export default function RosterPage() {
                     setFlexibleEditorMode("WEEK_OVERRIDE")
                     if (overrideStaffId) {
                       setFlexibleDraftDays(getFlexibleDraftForWeek(overrideStaffId, weekStartDate))
-                      const recurringDraft = getRecurringDraftFromPattern(overrideStaffId)
+                      const recurringDraft = getRecurringDraftFromPattern(
+                        overrideStaffId,
+                        new Date(`${weekStartDate}T00:00:00.000Z`)
+                      )
                       setRecurringPatternId(recurringDraft.patternId)
                       setRecurringPatternName(recurringDraft.patternName)
                       setRecurringValidFrom(recurringDraft.validFrom || weekStartDate)

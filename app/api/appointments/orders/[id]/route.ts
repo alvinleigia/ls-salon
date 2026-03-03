@@ -196,7 +196,7 @@ export async function PATCH(
     const excludedIds = existingAppointments.map((item) => item.id)
     const scheduledLines =
       resolved.status === "CONFIRMED"
-        ? await scheduleConfirmedOrderLines(resolved.lines, resolved.customerId, excludedIds)
+        ? await scheduleConfirmedOrderLines(resolved.lines, resolved.customerId, excludedIds, tenantId)
         : resolved.lines
 
     const updated = await prisma.$transaction(async (tx) => {

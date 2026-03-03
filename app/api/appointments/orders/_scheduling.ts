@@ -26,12 +26,14 @@ const SUGGESTION_MAX_STEPS = 14 * 24 * (60 / SUGGESTION_STEP_MINUTES)
 const getLineConflictReason = async (
   line: { staffProfileId: string; startAt: Date; endAt: Date },
   customerId: string,
-  excludedAppointmentIds: string[]
+  excludedAppointmentIds: string[],
+  tenantId: string
 ) => {
   const availability = await checkStaffAppointmentAvailability(
     line.staffProfileId,
     line.startAt,
-    line.endAt
+    line.endAt,
+    tenantId
   )
   if (!availability.ok) {
     return availability.reason || "Staff is unavailable for one of the selected slots."
@@ -40,6 +42,7 @@ const getLineConflictReason = async (
   const [staffConflict, customerConflict] = await Promise.all([
     prisma.appointment.findFirst({
       where: {
+        tenantId,
         id: excludedAppointmentIds.length ? { notIn: excludedAppointmentIds } : undefined,
         staffProfileId: line.staffProfileId,
         status: { in: ACTIVE_APPOINTMENT_STATUSES },
@@ -50,6 +53,7 @@ const getLineConflictReason = async (
     }),
     prisma.appointment.findFirst({
       where: {
+        tenantId,
         id: excludedAppointmentIds.length ? { notIn: excludedAppointmentIds } : undefined,
         customerId,
         status: { in: ACTIVE_APPOINTMENT_STATUSES },
@@ -83,7 +87,8 @@ const findNextAvailableLineStart = async (
   line: ResolvedOrderLine,
   customerId: string,
   excludedAppointmentIds: string[],
-  earliestStart: Date
+  earliestStart: Date,
+  tenantId: string
 ) => {
   let candidate = alignToStep(earliestStart)
 
@@ -98,7 +103,8 @@ const findNextAvailableLineStart = async (
         endAt,
       },
       customerId,
-      excludedAppointmentIds
+      excludedAppointmentIds,
+      tenantId
     )
     if (!reason) return { startAt, endAt }
     candidate = new Date(candidate.getTime() + SUGGESTION_STEP_MINUTES * 60_000)
@@ -110,7 +116,8 @@ const findNextAvailableLineStart = async (
 export const scheduleConfirmedOrderLines = async (
   orderLines: ResolvedOrderLine[],
   customerId: string,
-  excludedAppointmentIds: string[] = []
+  excludedAppointmentIds: string[] = [],
+  tenantId: string
 ) => {
   const scheduledLines: ResolvedOrderLine[] = []
   let cursor = orderLines[0]?.startAt ? new Date(orderLines[0].startAt) : new Date()
@@ -129,14 +136,16 @@ export const scheduleConfirmedOrderLines = async (
           endAt: lineEnd,
         },
         customerId,
-        excludedAppointmentIds
+        excludedAppointmentIds,
+        tenantId
       )
       if (reason) {
         const suggestion = await findNextAvailableLineStart(
           line,
           customerId,
           excludedAppointmentIds,
-          new Date(lineStart.getTime() + SUGGESTION_STEP_MINUTES * 60_000)
+          new Date(lineStart.getTime() + SUGGESTION_STEP_MINUTES * 60_000),
+          tenantId
         )
         throw new AvailabilityConflictError(reason, suggestion?.startAt)
       }
@@ -149,7 +158,8 @@ export const scheduleConfirmedOrderLines = async (
       line,
       customerId,
       excludedAppointmentIds,
-      lineStart
+      lineStart,
+      tenantId
     )
     if (!nextSlot) {
       throw new AvailabilityConflictError(
@@ -167,4 +177,3 @@ export const scheduleConfirmedOrderLines = async (
 
   return scheduledLines
 }
-

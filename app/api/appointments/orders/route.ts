@@ -137,7 +137,7 @@ export async function POST(request: Request) {
     })
     const scheduledLines =
       resolved.status === "CONFIRMED"
-        ? await scheduleConfirmedOrderLines(resolved.lines, resolved.customerId)
+        ? await scheduleConfirmedOrderLines(resolved.lines, resolved.customerId, [], tenantId)
         : resolved.lines
 
     const order = await prisma.$transaction(async (tx) => {
