@@ -96,6 +96,7 @@ export default function StaffProfilePage() {
         eligibleServiceIds: selectedIds,
         staffProfile: {
           managerUserId: profile.managerUserId,
+          schedulingMode: profile.schedulingMode,
           documents: profile.documents.map((doc) => ({
             id: doc.id,
             type: doc.type,

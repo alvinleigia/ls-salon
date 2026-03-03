@@ -1,4 +1,4 @@
-# http://platform.localhost:3000/ - Email: default.admin@ls-salon.test Password: password123
+# http://platform.localhost:3000/ - Email: alvinaraujo@gmail.com Password: password123
 # http://storefront1.localhost:3000/ - Email: storefront1.admin@ls-salon.test Password: password123
 # Base Conventions
 
@@ -152,11 +152,18 @@ This is the baseline for new modules (API + UI) in this codebase.
 - Manage staff eligibility in the staff profile page (not in the general user create/edit form).
 - Staff profile includes documents list (type/number/link/validity), and certifications list (with issue + expiry dates).
 - Staff scheduling uses shift schedules (start date + shift blocks) and staff schedule assignments with date ranges.
+- Staff profiles support scheduling modes:
+  - `STANDARD`: schedule/assignment driven (default).
+  - `FLEXIBLE`: supports two layers:
+    - recurring base pattern (`cycleLengthWeeks`, `validFrom`, optional `validTo`) via `/api/shifts/flexible-patterns`.
+    - week-specific override plan (`week -> days -> slots -> breaks`) via `/api/shifts/flexible-week-plans`.
+    - availability should resolve as: weekly override -> recurring pattern -> legacy date slots (backward compatibility only).
 - Shift schedules use week off day 1 and optional week off day 2 with week-of-month selection.
 - Do not allow schedules or assignments to start in the past.
 - Repeat day counts skip week off dates; shift blocks loop in order indefinitely, and assignments control when a schedule applies.
 - A single global default shift schedule can be marked and applies to staff without explicit schedules.
 - Roster displays only shift schedules; if no staff schedule and no default schedule, show empty.
+- Roster should merge sources in precedence order: leave -> override -> flexible weekly override -> flexible recurring pattern -> assigned/default schedule.
 - Roster overrides apply shift templates or mark a date range unavailable for a staff member (skip holidays/week off optional).
 - Shift overrides must not conflict with booked appointments. Require a resolution action (cancel, reassign, or reschedule) before applying changes.
 - Leave definition day-length policy should use only:

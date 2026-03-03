@@ -39,6 +39,7 @@ export type UserProfile = UserCore & {
   updatedAt: string
   staffProfile?: {
     managerUserId?: string | null
+    schedulingMode?: "STANDARD" | "FLEXIBLE"
     manager?: {
       id: string
       name: string | null
@@ -104,6 +105,7 @@ export type StaffUser = UserCore & {
   eligibleServiceIds?: string[]
   staffProfile?: {
     managerUserId?: string | null
+    schedulingMode?: "STANDARD" | "FLEXIBLE"
     manager?: {
       id: string
       name: string | null
@@ -116,6 +118,7 @@ export type StaffUser = UserCore & {
 
 export type StaffProfileForm = {
   managerUserId: string
+  schedulingMode: "STANDARD" | "FLEXIBLE"
   certifications: {
     id?: string
     title: string

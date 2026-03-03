@@ -161,6 +161,7 @@ export async function PATCH(
         staffProfile: {
           select: {
             managerUserId: true,
+            schedulingMode: true,
             manager: {
               select: {
                 id: true,
@@ -207,6 +208,7 @@ export async function PATCH(
 
       if (targetRole === "STAFF" && staffProfileInput) {
         const managerUserId = staffProfileInput.managerUserId?.trim() || null
+        const schedulingMode = staffProfileInput.schedulingMode ?? "STANDARD"
         if (managerUserId) {
           const managerUser = await tx.user.findUnique({
             where: { id: managerUserId },
@@ -230,8 +232,8 @@ export async function PATCH(
 
         const profile = await tx.staffProfile.upsert({
           where: { userId: id },
-          update: { managerUserId },
-          create: { userId: id, managerUserId },
+          update: { managerUserId, schedulingMode },
+          create: { userId: id, managerUserId, schedulingMode },
         })
 
         if (staffProfileInput.documents) {
@@ -371,6 +373,7 @@ export async function GET(
       staffProfile: {
         select: {
           managerUserId: true,
+          schedulingMode: true,
           manager: {
             select: {
               id: true,

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma"
 import { toISODate } from "@/lib/date"
 import type { ShiftSchedule, ShiftTemplateRow } from "@/types/shifts"
+import { Weekday } from "@prisma/client"
 
 type ZonedDateParts = {
   year: number
@@ -11,8 +12,13 @@ type ZonedDateParts = {
 }
 
 type AvailabilityCheckResult =
-  | { ok: true; templateId: string }
+  | { ok: true; templateId: string | null }
   | { ok: false; reason: string }
+
+type WorkingSegment = {
+  start: number
+  end: number
+}
 
 const toMinutes = (value: string) => {
   const [hours, minutes] = value.split(":").map(Number)
@@ -108,7 +114,81 @@ const getZonedDateParts = (value: Date, timeZone: string): ZonedDateParts => {
   }
 }
 
-const resolveTemplateForDate = async (
+const buildSegmentsFromTimes = (
+  startTime: string,
+  endTime: string,
+  breaks: Array<{ startTime: string; endTime: string }>
+): WorkingSegment[] => {
+  const sortedBreaks = [...(breaks ?? [])].sort(
+    (a, b) => toMinutes(a.startTime) - toMinutes(b.startTime)
+  )
+  const segments: WorkingSegment[] = []
+  let cursor = toMinutes(startTime)
+  const end = toMinutes(endTime)
+  for (const breakPeriod of sortedBreaks) {
+    const breakStart = toMinutes(breakPeriod.startTime)
+    const breakEnd = toMinutes(breakPeriod.endTime)
+    if (breakStart > cursor) {
+      segments.push({ start: cursor, end: breakStart })
+    }
+    cursor = breakEnd
+  }
+  if (cursor < end) {
+    segments.push({ start: cursor, end })
+  }
+  return segments
+}
+
+const weekdayByIndex: Weekday[] = [
+  Weekday.SUNDAY,
+  Weekday.MONDAY,
+  Weekday.TUESDAY,
+  Weekday.WEDNESDAY,
+  Weekday.THURSDAY,
+  Weekday.FRIDAY,
+  Weekday.SATURDAY,
+]
+
+const getWeekStartMondayKey = (dateKey: string) => {
+  const date = new Date(`${dateKey}T00:00:00.000Z`)
+  const day = date.getUTCDay()
+  const offset = day === 0 ? -6 : 1 - day
+  date.setUTCDate(date.getUTCDate() + offset)
+  return toISODate(date)
+}
+
+const buildSegmentsFromSlotWithBreaks = (
+  slots: Array<{
+    startTime: string
+    endTime: string
+    breaks?: Array<{ startTime: string; endTime: string }>
+  }>
+) => {
+  const segments: WorkingSegment[] = []
+  const sortedSlots = [...slots].sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime))
+  for (const slot of sortedSlots) {
+    const slotStart = toMinutes(slot.startTime)
+    const slotEnd = toMinutes(slot.endTime)
+    const breaks = [...(slot.breaks ?? [])].sort(
+      (a, b) => toMinutes(a.startTime) - toMinutes(b.startTime)
+    )
+    let cursor = slotStart
+    for (const currentBreak of breaks) {
+      const breakStart = toMinutes(currentBreak.startTime)
+      const breakEnd = toMinutes(currentBreak.endTime)
+      if (breakStart > cursor) {
+        segments.push({ start: cursor, end: breakStart })
+      }
+      cursor = Math.max(cursor, breakEnd)
+    }
+    if (cursor < slotEnd) {
+      segments.push({ start: cursor, end: slotEnd })
+    }
+  }
+  return segments
+}
+
+const resolveWorkingAvailabilityForDate = async (
   staffProfileId: string,
   dateKey: string,
   tenantId?: string
@@ -125,9 +205,148 @@ const resolveTemplateForDate = async (
   })
   if (override) {
     if (!override.templateId || !override.template) {
-      return { template: null as ShiftTemplateRow | null, reason: "Staff is unavailable on this date." }
+      return {
+        template: null as ShiftTemplateRow | null,
+        segments: [] as WorkingSegment[],
+        reason: "Staff is unavailable on this date.",
+      }
     }
-    return { template: override.template as unknown as ShiftTemplateRow, reason: "" }
+    return {
+      template: override.template as unknown as ShiftTemplateRow,
+      segments: buildSegmentsFromTimes(
+        override.template.startTime,
+        override.template.endTime,
+        override.template.breaks ?? []
+      ),
+      reason: "",
+    }
+  }
+
+  const staffProfile = await prisma.staffProfile.findFirst({
+    where: {
+      id: staffProfileId,
+      ...(tenantId ? { user: { tenantId } } : {}),
+    },
+    select: { schedulingMode: true },
+  })
+  if (!staffProfile) {
+    return {
+      template: null as ShiftTemplateRow | null,
+      segments: [] as WorkingSegment[],
+      reason: "Staff profile not found.",
+    }
+  }
+
+  if (staffProfile.schedulingMode === "FLEXIBLE") {
+    const weekStartDate = getWeekStartMondayKey(dateKey)
+    const weekday = weekdayByIndex[new Date(`${dateKey}T00:00:00.000Z`).getUTCDay()]
+
+    const weeklyPlan = await prisma.staffFlexibleWeekPlan.findUnique({
+      where: {
+        staffProfileId_weekStartDate: {
+          staffProfileId,
+          weekStartDate: new Date(`${weekStartDate}T00:00:00.000Z`),
+        },
+      },
+      include: {
+        days: {
+          include: {
+            slots: {
+              include: { breaks: true },
+              orderBy: { sortOrder: "asc" },
+            },
+          },
+        },
+      },
+    })
+    const weeklyDay = weeklyPlan?.days.find((day) => day.day === weekday)
+    if (weeklyDay) {
+      if (weeklyDay.isOff) {
+        return {
+          template: null as ShiftTemplateRow | null,
+          segments: [] as WorkingSegment[],
+          reason: "This day is marked off in the weekly flexible plan.",
+        }
+      }
+      if (weeklyDay.slots.length) {
+        return {
+          template: null as ShiftTemplateRow | null,
+          segments: buildSegmentsFromSlotWithBreaks(weeklyDay.slots),
+          reason: "",
+        }
+      }
+    }
+
+    const dayDate = new Date(`${dateKey}T00:00:00.000Z`)
+    const recurringPattern = await prisma.staffFlexiblePattern.findFirst({
+      where: {
+        staffProfileId,
+        isActive: true,
+        validFrom: { lte: dayDate },
+        OR: [{ validTo: null }, { validTo: { gte: dayDate } }],
+      },
+      include: {
+        weeks: {
+          include: {
+            days: {
+              include: {
+                slots: {
+                  include: { breaks: true },
+                  orderBy: { sortOrder: "asc" },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ validFrom: "desc" }, { createdAt: "desc" }],
+    })
+    if (recurringPattern) {
+      const diffDays = Math.floor(
+        (new Date(`${dateKey}T00:00:00.000Z`).getTime() -
+          new Date(toISODate(recurringPattern.validFrom) + "T00:00:00.000Z").getTime()) /
+          86400000
+      )
+      const weekOffset = Math.floor(Math.max(0, diffDays) / 7)
+      const weekIndex = (weekOffset % recurringPattern.cycleLengthWeeks) + 1
+      const patternWeek = recurringPattern.weeks.find((week) => week.weekIndex === weekIndex)
+      const patternDay = patternWeek?.days.find((day) => day.day === weekday)
+      if (patternDay?.isOff) {
+        return {
+          template: null as ShiftTemplateRow | null,
+          segments: [] as WorkingSegment[],
+          reason: "This day is off in the recurring flexible pattern.",
+        }
+      }
+      if (patternDay?.slots.length) {
+        return {
+          template: null as ShiftTemplateRow | null,
+          segments: buildSegmentsFromSlotWithBreaks(patternDay.slots),
+          reason: "",
+        }
+      }
+    }
+
+    const slots = await prisma.staffFlexibleAvailability.findMany({
+      where: { staffProfileId, date: dateValue },
+      orderBy: { sortOrder: "asc" },
+      select: { startTime: true, endTime: true },
+    })
+    if (!slots.length) {
+      return {
+        template: null as ShiftTemplateRow | null,
+        segments: [] as WorkingSegment[],
+        reason: "No flexible slots configured for this date.",
+      }
+    }
+    return {
+      template: null as ShiftTemplateRow | null,
+      segments: slots.map((slot) => ({
+        start: toMinutes(slot.startTime),
+        end: toMinutes(slot.endTime),
+      })),
+      reason: "",
+    }
   }
 
   const assignment = await prisma.staffScheduleAssignment.findFirst({
@@ -168,7 +387,11 @@ const resolveTemplateForDate = async (
     }))
 
   if (!schedule) {
-    return { template: null as ShiftTemplateRow | null, reason: "No shift schedule assigned for this staff." }
+    return {
+      template: null as ShiftTemplateRow | null,
+      segments: [] as WorkingSegment[],
+      reason: "No shift schedule assigned for this staff.",
+    }
   }
 
   const templateId = resolveTemplateForScheduleDate(
@@ -176,13 +399,29 @@ const resolveTemplateForDate = async (
     dateKey
   )
   if (!templateId) {
-    return { template: null as ShiftTemplateRow | null, reason: "This date is a week off / non-working day." }
+    return {
+      template: null as ShiftTemplateRow | null,
+      segments: [] as WorkingSegment[],
+      reason: "This date is a week off / non-working day.",
+    }
   }
   const block = schedule.blocks.find((item) => item.templateId === templateId)
   if (!block?.template) {
-    return { template: null as ShiftTemplateRow | null, reason: "Shift template not found for this date." }
+    return {
+      template: null as ShiftTemplateRow | null,
+      segments: [] as WorkingSegment[],
+      reason: "Shift template not found for this date.",
+    }
   }
-  return { template: block.template as unknown as ShiftTemplateRow, reason: "" }
+  return {
+    template: block.template as unknown as ShiftTemplateRow,
+    segments: buildSegmentsFromTimes(
+      block.template.startTime,
+      block.template.endTime,
+      block.template.breaks ?? []
+    ),
+    reason: "",
+  }
 }
 
 export const checkStaffAppointmentAvailability = async (
@@ -228,8 +467,12 @@ export const checkStaffAppointmentAvailability = async (
     }
   }
 
-  const { template, reason } = await resolveTemplateForDate(staffProfileId, dateKey, tenantId)
-  if (!template) {
+  const { template, segments, reason } = await resolveWorkingAvailabilityForDate(
+    staffProfileId,
+    dateKey,
+    tenantId
+  )
+  if (!segments.length) {
     return { ok: false, reason }
   }
 
@@ -237,25 +480,6 @@ export const checkStaffAppointmentAvailability = async (
   const endMinutes = zonedEnd.hour * 60 + zonedEnd.minute
   if (endMinutes <= startMinutes) {
     return { ok: false, reason: "Invalid appointment time range." }
-  }
-
-  const breaks = [...(template.breaks ?? [])].sort(
-    (a, b) => toMinutes(a.startTime) - toMinutes(b.startTime)
-  )
-
-  const segments: Array<{ start: number; end: number }> = []
-  let cursor = toMinutes(template.startTime)
-  for (const breakPeriod of breaks) {
-    const breakStart = toMinutes(breakPeriod.startTime)
-    const breakEnd = toMinutes(breakPeriod.endTime)
-    if (breakStart > cursor) {
-      segments.push({ start: cursor, end: breakStart })
-    }
-    cursor = breakEnd
-  }
-  const shiftEnd = toMinutes(template.endTime)
-  if (cursor < shiftEnd) {
-    segments.push({ start: cursor, end: shiftEnd })
   }
 
   const isInsideShift = segments.some(
@@ -269,5 +493,5 @@ export const checkStaffAppointmentAvailability = async (
     }
   }
 
-  return { ok: true, templateId: template.id }
+  return { ok: true, templateId: template?.id ?? null }
 }

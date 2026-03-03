@@ -198,7 +198,7 @@ const buildRosterHistoryRows = async (
 
   const dates = enumerateDates(parsedStart, parsedEnd)
   const staffSet = new Set(uniqueStaffIds)
-  const [assignments, defaultSchedule, overrides, leaves] = await Promise.all([
+  const [assignments, defaultSchedule, overrides, leaves, staffProfiles, flexibleSlots] = await Promise.all([
     tx.staffScheduleAssignment.findMany({
       where: {
         staffProfileId: { in: uniqueStaffIds },
@@ -261,6 +261,23 @@ const buildRosterHistoryRows = async (
       },
       orderBy: [{ startDate: "asc" }, { createdAt: "asc" }],
     }),
+    tx.staffProfile.findMany({
+      where: { id: { in: uniqueStaffIds } },
+      select: { id: true, schedulingMode: true },
+    }),
+    tx.staffFlexibleAvailability.findMany({
+      where: {
+        staffProfileId: { in: uniqueStaffIds },
+        date: { gte: parsedStart, lte: parsedEnd },
+      },
+      orderBy: [{ date: "asc" }, { sortOrder: "asc" }],
+      select: {
+        staffProfileId: true,
+        date: true,
+        startTime: true,
+        endTime: true,
+      },
+    }),
   ])
 
   const assignmentByStaff = new Map<string, typeof assignments>()
@@ -289,6 +306,19 @@ const buildRosterHistoryRows = async (
       }
       cursor.setDate(cursor.getDate() + 1)
     }
+  }
+
+  const schedulingModeByStaff = new Map(staffProfiles.map((item) => [item.id, item.schedulingMode]))
+
+  const flexibleSlotMap = new Map<
+    string,
+    Array<{ startTime: string; endTime: string }>
+  >()
+  for (const slot of flexibleSlots) {
+    const key = `${slot.staffProfileId}:${toDateKey(slot.date)}`
+    const existing = flexibleSlotMap.get(key) ?? []
+    existing.push({ startTime: slot.startTime, endTime: slot.endTime })
+    flexibleSlotMap.set(key, existing)
   }
 
   const rows: {
@@ -385,6 +415,48 @@ const buildRosterHistoryRows = async (
       }
 
       const template = baseTemplateMap[dateKey] ?? null
+      if (schedulingModeByStaff.get(staffProfileId) === "FLEXIBLE") {
+        const slots = flexibleSlotMap.get(`${staffProfileId}:${dateKey}`) ?? []
+        if (!slots.length) {
+          rows.push({
+            staffProfileId,
+            date: new Date(day),
+            source: "OFF",
+            templateId: null,
+            templateName: null,
+            startTime: null,
+            endTime: null,
+            paidMinutes: 0,
+            leaveRequestId: null,
+            leaveDefinitionCode: null,
+            leaveDefinitionName: null,
+            leaveReason: null,
+          })
+          continue
+        }
+        const sortedSlots = [...slots].sort(
+          (a, b) => parseMinutes(a.startTime) - parseMinutes(b.startTime)
+        )
+        const paidMinutes = sortedSlots.reduce(
+          (sum, slot) => sum + Math.max(0, parseMinutes(slot.endTime) - parseMinutes(slot.startTime)),
+          0
+        )
+        rows.push({
+          staffProfileId,
+          date: new Date(day),
+          source: "SCHEDULE",
+          templateId: null,
+          templateName: "Flexible",
+          startTime: sortedSlots[0]?.startTime ?? null,
+          endTime: sortedSlots[sortedSlots.length - 1]?.endTime ?? null,
+          paidMinutes,
+          leaveRequestId: null,
+          leaveDefinitionCode: null,
+          leaveDefinitionName: null,
+          leaveReason: null,
+        })
+        continue
+      }
       if (!template) {
         rows.push({
           staffProfileId,

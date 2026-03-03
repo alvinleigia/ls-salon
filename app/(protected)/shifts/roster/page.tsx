@@ -101,6 +101,21 @@ type RecurringDraftWeek = {
   days: FlexibleDraftDay[]
 }
 
+type RecurringImpactPreview = {
+  mode: "UPDATE" | "CLONE"
+  patternId: string
+  window: {
+    startDate: string
+    endDate: string | null
+    truncatedAt: string | null
+    isOpenEnded: boolean
+  }
+  estimatedBookedHoursInWindow: number
+  affectedAppointmentsCount: number
+  overlappingActivePatternsCount: number
+  notes: string[]
+}
+
 const getWeekStartMondayKey = (value: Date) => {
   const date = new Date(value)
   const day = date.getDay()
@@ -163,6 +178,9 @@ export default function RosterPage() {
     WEEKDAY_ORDER.map((day) => createEmptyFlexibleDraftDay(day))
   )
   const [recurringPatternId, setRecurringPatternId] = React.useState<string>("")
+  const [recurringImpactMode, setRecurringImpactMode] = React.useState<"UPDATE" | "CLONE">("UPDATE")
+  const [recurringImpactPreview, setRecurringImpactPreview] = React.useState<RecurringImpactPreview | null>(null)
+  const [recurringImpactLoading, setRecurringImpactLoading] = React.useState(false)
   const [recurringPatternName, setRecurringPatternName] = React.useState("")
   const [recurringValidFrom, setRecurringValidFrom] = React.useState("")
   const [recurringValidTo, setRecurringValidTo] = React.useState("")
@@ -1170,6 +1188,8 @@ export default function RosterPage() {
       setRecurringCycleLength(recurringDraft.cycleLength)
       setRecurringSelectedWeekIndex(1)
       setRecurringDraftWeeks(recurringDraft.weeks)
+      setRecurringImpactMode("UPDATE")
+      setRecurringImpactPreview(null)
       setOverrideOpen(true)
     },
     [getFlexibleDraftForWeek, getRecurringDraftFromPattern, isPastDate, staffSchedulingModeMap]
@@ -1533,6 +1553,7 @@ export default function RosterPage() {
               : "Recurring flexible pattern updated."
           )
         }
+        setRecurringImpactPreview(null)
         setOverrideOpen(false)
         await loadFlexiblePatterns()
         await loadFlexibleWeekPlans()
@@ -1598,6 +1619,83 @@ export default function RosterPage() {
     recurringValidFrom,
     recurringValidTo,
     useFlexibleSlot,
+  ])
+
+  const previewRecurringImpact = React.useCallback(async () => {
+    if (!recurringPatternId) {
+      toast.error("Impact preview is available after a recurring pattern exists.")
+      return
+    }
+    if (!recurringValidFrom) {
+      toast.error("Pattern start date is required.")
+      return
+    }
+    if (recurringValidTo && recurringValidFrom > recurringValidTo) {
+      toast.error("Pattern start date must be on or before end date.")
+      return
+    }
+
+    setRecurringImpactLoading(true)
+    try {
+      const response = await fetch("/api/shifts/flexible-patterns/impact-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: recurringImpactMode,
+          patternId: recurringPatternId,
+          validFrom: recurringValidFrom,
+          validTo: recurringValidTo || "",
+          activate: true,
+          cycleLengthWeeks: recurringCycleLength,
+          weeks: recurringDraftWeeks.map((week) => ({
+            weekIndex: week.weekIndex,
+            days: week.days.map((day) => ({
+              day: day.day,
+              isOff: day.isOff,
+              slots: day.slots.map((slot) => ({
+                startTime: slot.startTime,
+                endTime: slot.endTime,
+                breaks: slot.breaks.map((slotBreak) => ({
+                  startTime: slotBreak.startTime,
+                  endTime: slotBreak.endTime,
+                })),
+              })),
+            })),
+          })),
+        }),
+      })
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.error || "Failed to preview recurring impact.")
+      }
+      const payload = (await response.json()) as { preview?: RecurringImpactPreview }
+      setRecurringImpactPreview(payload.preview ?? null)
+    } catch (error) {
+      console.error(error)
+      toast.error(error instanceof Error ? error.message : "Unable to preview recurring impact.")
+    } finally {
+      setRecurringImpactLoading(false)
+    }
+  }, [
+    recurringCycleLength,
+    recurringDraftWeeks,
+    recurringImpactMode,
+    recurringPatternId,
+    recurringValidFrom,
+    recurringValidTo,
+  ])
+
+  React.useEffect(() => {
+    if (!recurringImpactPreview) return
+    setRecurringImpactPreview(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    recurringPatternName,
+    recurringValidFrom,
+    recurringValidTo,
+    recurringCycleLength,
+    recurringDraftWeeks,
+    recurringImpactMode,
   ])
 
   const clearOverride = React.useCallback(async () => {
@@ -2212,8 +2310,16 @@ export default function RosterPage() {
         </div>
       </div>
       )}
-      <Dialog open={overrideOpen} onOpenChange={setOverrideOpen}>
-        <DialogContent className="max-w-md">
+      <Dialog
+        open={overrideOpen}
+        onOpenChange={(open) => {
+          setOverrideOpen(open)
+          if (!open) {
+            setRecurringImpactPreview(null)
+          }
+        }}
+      >
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>{useFlexibleSlot ? "Edit flexible availability" : "Change shift"}</DialogTitle>
             <DialogDescription>
@@ -2264,6 +2370,8 @@ export default function RosterPage() {
                       setRecurringCycleLength(recurringDraft.cycleLength)
                       setRecurringSelectedWeekIndex(1)
                       setRecurringDraftWeeks(recurringDraft.weeks)
+                      setRecurringImpactMode("UPDATE")
+                      setRecurringImpactPreview(null)
                     }
                   }
                 }}
@@ -2557,6 +2665,60 @@ export default function RosterPage() {
                 />
               </div>
             </div>
+            {useFlexibleSlot &&
+            flexibleEditorMode === "RECURRING_PATTERN" &&
+            Boolean(recurringPatternId) ? (
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Preview mode</Label>
+                    <select
+                      className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      value={recurringImpactMode}
+                      onChange={(event) => {
+                        setRecurringImpactMode(event.target.value as "UPDATE" | "CLONE")
+                        setRecurringImpactPreview(null)
+                      }}
+                    >
+                      <option value="UPDATE">Update current pattern</option>
+                      <option value="CLONE">Save as new pattern</option>
+                    </select>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void previewRecurringImpact()}
+                    disabled={recurringImpactLoading}
+                  >
+                    {recurringImpactLoading ? "Previewing..." : "Preview impact"}
+                  </Button>
+                </div>
+                {recurringImpactPreview ? (
+                  <div className="space-y-1 text-sm">
+                    <div className="font-medium">Impact preview</div>
+                    <div className="text-muted-foreground">
+                      Window: {formatDateForDisplay(recurringImpactPreview.window.startDate, settings.dateFormat)} -{" "}
+                      {recurringImpactPreview.window.endDate
+                        ? formatDateForDisplay(recurringImpactPreview.window.endDate, settings.dateFormat)
+                        : "Open ended"}
+                      {recurringImpactPreview.window.truncatedAt
+                        ? ` (previewed to ${formatDateForDisplay(recurringImpactPreview.window.truncatedAt, settings.dateFormat)})`
+                        : ""}
+                    </div>
+                    <div>Estimated available hours: {recurringImpactPreview.estimatedBookedHoursInWindow}</div>
+                    <div>Active appointments in window: {recurringImpactPreview.affectedAppointmentsCount}</div>
+                    <div>
+                      Overlapping active patterns: {recurringImpactPreview.overlappingActivePatternsCount}
+                    </div>
+                    {recurringImpactPreview.notes.map((note) => (
+                      <div key={note} className="text-xs text-muted-foreground">
+                        - {note}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {!useFlexibleSlot ? (
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -2586,7 +2748,7 @@ export default function RosterPage() {
             </label>
             ) : null}
           </div>
-          <DialogFooter className="pt-2">
+          <DialogFooter className="pt-2 sm:flex-wrap">
             <Button variant="outline" onClick={() => setOverrideOpen(false)}>
               Cancel
             </Button>

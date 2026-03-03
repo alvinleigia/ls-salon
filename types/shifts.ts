@@ -6,6 +6,9 @@ export type StaffOption = {
   name: string | null
   email: string
   image?: string | null
+  staffProfile?: {
+    schedulingMode?: "STANDARD" | "FLEXIBLE"
+  } | null
 }
 
 export type ShiftTemplateBreak = {
@@ -101,6 +104,104 @@ export type ShiftOverride = {
   staffProfileId: string
   date: string
   templateId: string | null
+}
+
+export type StaffFlexibleSlot = {
+  id: string
+  staffId: string | null
+  staffProfileId: string
+  date: string
+  startTime: string
+  endTime: string
+  sortOrder: number
+}
+
+export type StaffFlexibleWeekBreak = {
+  id: string
+  startTime: string
+  endTime: string
+  sortOrder: number
+}
+
+export type StaffFlexibleWeekSlot = {
+  id: string
+  startTime: string
+  endTime: string
+  sortOrder: number
+  breaks: StaffFlexibleWeekBreak[]
+}
+
+export type StaffFlexibleWeekDay = {
+  id: string
+  day: Weekday
+  isOff: boolean
+  sortOrder: number
+  slots: StaffFlexibleWeekSlot[]
+}
+
+export type StaffFlexibleWeekPlan = {
+  id: string
+  staffId: string | null
+  staffProfileId: string
+  weekStartDate: string
+  days: StaffFlexibleWeekDay[]
+}
+
+export type StaffFlexiblePatternBreak = {
+  id: string
+  startTime: string
+  endTime: string
+  sortOrder: number
+}
+
+export type StaffFlexiblePatternSlot = {
+  id: string
+  startTime: string
+  endTime: string
+  sortOrder: number
+  breaks: StaffFlexiblePatternBreak[]
+}
+
+export type StaffFlexiblePatternDay = {
+  id: string
+  day: Weekday
+  isOff: boolean
+  sortOrder: number
+  slots: StaffFlexiblePatternSlot[]
+}
+
+export type StaffFlexiblePatternWeek = {
+  id: string
+  weekIndex: number
+  days: StaffFlexiblePatternDay[]
+}
+
+export type StaffFlexiblePattern = {
+  id: string
+  staffId: string | null
+  staffProfileId: string
+  name: string | null
+  cycleLengthWeeks: number
+  validFrom: string
+  validTo: string | null
+  isActive: boolean
+  weeks: StaffFlexiblePatternWeek[]
+}
+
+export type StaffFlexiblePatternListItem = {
+  id: string
+  staffId: string | null
+  staffProfileId: string
+  staffName: string | null
+  staffEmail: string
+  name: string | null
+  cycleLengthWeeks: number
+  validFrom: string
+  validTo: string | null
+  isActive: boolean
+  isCurrentlyEffective: boolean
+  createdAt: string
+  updatedAt: string
 }
 
 export type RosterHistoryDay = {

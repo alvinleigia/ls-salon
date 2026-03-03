@@ -81,21 +81,37 @@ export function StaffFormFields({
             Manager used for leave approvals and reporting hierarchy.
           </p>
         </div>
-        <div className="mt-4">
-          <FormField id="manager-user-id" label="Manager">
-            <SearchableSelect
-              id="manager-user-id"
-              value={profile.managerUserId}
+      <div className="mt-4">
+        <FormField id="manager-user-id" label="Manager">
+          <SearchableSelect
+            id="manager-user-id"
+            value={profile.managerUserId}
               onChange={(value) =>
                 setProfile((prev) => ({ ...prev, managerUserId: value }))
               }
               options={managerOptions}
               placeholder="Select manager"
               searchPlaceholder="Search manager..."
-            />
-          </FormField>
-        </div>
+          />
+        </FormField>
+        <FormField id="scheduling-mode" label="Scheduling mode" className="mt-3">
+          <select
+            id="scheduling-mode"
+            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={profile.schedulingMode}
+            onChange={(event) =>
+              setProfile((prev) => ({
+                ...prev,
+                schedulingMode: event.target.value as "STANDARD" | "FLEXIBLE",
+              }))
+            }
+          >
+            <option value="STANDARD">Standard (schedule based)</option>
+            <option value="FLEXIBLE">Flexible (date-wise slots)</option>
+          </select>
+        </FormField>
       </div>
+    </div>
 
       <div className="rounded-xl border bg-card p-6">
         <div className="space-y-2">

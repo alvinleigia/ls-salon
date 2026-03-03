@@ -211,6 +211,11 @@ enum StaffRosterDaySource {
   OFF
 }
 
+enum StaffSchedulingMode {
+  STANDARD
+  FLEXIBLE
+}
+
 enum StockMovementType {
   PURCHASE_RECEIPT
   ADJUSTMENT_ADD
@@ -803,12 +808,16 @@ model StaffProfile {
   id                    String                      @id @default(cuid())
   userId                String                      @unique
   managerUserId         String?
+  schedulingMode        StaffSchedulingMode         @default(STANDARD)
   user                  User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
   manager               User?                       @relation("StaffProfileManager", fields: [managerUserId], references: [id], onDelete: SetNull)
   appointments          Appointment[]
   appointmentOrderLines AppointmentOrderLine[]
   certifications        StaffCertification[]
   documents             StaffDocument[]
+  flexibleSlots         StaffFlexibleAvailability[]
+  flexibleWeekPlans     StaffFlexibleWeekPlan[]
+  flexiblePatterns      StaffFlexiblePattern[]
   scheduleAssignments   StaffScheduleAssignment[]
   shiftOverrides        StaffShiftOverride[]
   leaveGroupAssignments LeaveGroupStaffAssignment[]
@@ -969,6 +978,158 @@ model StaffShiftOverride {
   @@index([staffProfileId])
   @@index([date])
   @@index([templateId])
+}
+
+model StaffFlexibleAvailability {
+  id             String       @id @default(cuid())
+  staffProfileId String
+  date           DateTime     @db.Date
+  startTime      String
+  endTime        String
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([staffProfileId, date, sortOrder])
+  @@index([staffProfileId])
+  @@index([date])
+}
+
+model StaffFlexibleWeekPlan {
+  id             String                 @id @default(cuid())
+  staffProfileId String
+  weekStartDate  DateTime               @db.Date
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  staffProfile   StaffProfile           @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  days           StaffFlexibleWeekDay[]
+
+  @@unique([staffProfileId, weekStartDate])
+  @@index([staffProfileId])
+  @@index([weekStartDate])
+}
+
+model StaffFlexibleWeekDay {
+  id         String                  @id @default(cuid())
+  planId     String
+  day        Weekday
+  isOff      Boolean                 @default(false)
+  sortOrder  Int                     @default(0)
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+  plan       StaffFlexibleWeekPlan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+  slots      StaffFlexibleWeekSlot[]
+
+  @@unique([planId, day])
+  @@index([planId])
+  @@index([day])
+}
+
+model StaffFlexibleWeekSlot {
+  id         String                    @id @default(cuid())
+  dayId      String
+  startTime  String
+  endTime    String
+  sortOrder  Int                       @default(0)
+  createdAt  DateTime                  @default(now())
+  updatedAt  DateTime                  @updatedAt
+  day        StaffFlexibleWeekDay      @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  breaks     StaffFlexibleWeekBreak[]
+
+  @@unique([dayId, sortOrder])
+  @@index([dayId])
+}
+
+model StaffFlexibleWeekBreak {
+  id         String                @id @default(cuid())
+  slotId     String
+  startTime  String
+  endTime    String
+  sortOrder  Int                   @default(0)
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+  slot       StaffFlexibleWeekSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  @@unique([slotId, sortOrder])
+  @@index([slotId])
+}
+
+model StaffFlexiblePattern {
+  id               String                    @id @default(cuid())
+  staffProfileId   String
+  name             String?
+  cycleLengthWeeks Int                       @default(1)
+  validFrom        DateTime                  @db.Date
+  validTo          DateTime?                 @db.Date
+  isActive         Boolean                   @default(true)
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  staffProfile     StaffProfile              @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  weeks            StaffFlexiblePatternWeek[]
+
+  @@index([staffProfileId])
+  @@index([validFrom])
+  @@index([validTo])
+  @@index([isActive])
+}
+
+model StaffFlexiblePatternWeek {
+  id        String                    @id @default(cuid())
+  patternId String
+  weekIndex Int
+  createdAt DateTime                  @default(now())
+  updatedAt DateTime                  @updatedAt
+  pattern   StaffFlexiblePattern      @relation(fields: [patternId], references: [id], onDelete: Cascade)
+  days      StaffFlexiblePatternDay[]
+
+  @@unique([patternId, weekIndex])
+  @@index([patternId])
+}
+
+model StaffFlexiblePatternDay {
+  id        String                     @id @default(cuid())
+  weekId    String
+  day       Weekday
+  isOff     Boolean                    @default(false)
+  sortOrder Int                        @default(0)
+  createdAt DateTime                   @default(now())
+  updatedAt DateTime                   @updatedAt
+  week      StaffFlexiblePatternWeek   @relation(fields: [weekId], references: [id], onDelete: Cascade)
+  slots     StaffFlexiblePatternSlot[]
+
+  @@unique([weekId, day])
+  @@index([weekId])
+  @@index([day])
+}
+
+model StaffFlexiblePatternSlot {
+  id        String                       @id @default(cuid())
+  dayId     String
+  startTime String
+  endTime   String
+  sortOrder Int                          @default(0)
+  createdAt DateTime                     @default(now())
+  updatedAt DateTime                     @updatedAt
+  day       StaffFlexiblePatternDay      @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  breaks    StaffFlexiblePatternBreak[]
+
+  @@unique([dayId, sortOrder])
+  @@index([dayId])
+}
+
+model StaffFlexiblePatternBreak {
+  id        String                    @id @default(cuid())
+  slotId    String
+  startTime String
+  endTime   String
+  sortOrder Int                       @default(0)
+  createdAt DateTime                  @default(now())
+  updatedAt DateTime                  @updatedAt
+  slot      StaffFlexiblePatternSlot  @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  @@unique([slotId, sortOrder])
+  @@index([slotId])
 }
 
 model Account {

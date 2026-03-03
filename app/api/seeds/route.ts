@@ -1513,7 +1513,58 @@ const seedShifts = async (tenantId: string, tenantSlug: string) => {
     select: { id: true },
     take: 5,
   })
+  let flexibleSlotCount = 0
   if (staffProfiles.length > 0) {
+    const standardStaffProfiles = staffProfiles.slice(0, Math.max(0, staffProfiles.length - 1))
+    const flexibleStaffProfile = staffProfiles[staffProfiles.length - 1] ?? null
+
+    await prisma.staffProfile.updateMany({
+      where: { id: { in: staffProfiles.map((profile) => profile.id) } },
+      data: { schedulingMode: "STANDARD" },
+    })
+    await prisma.staffFlexibleAvailability.deleteMany({
+      where: { staffProfileId: { in: staffProfiles.map((profile) => profile.id) } },
+    })
+
+    if (flexibleStaffProfile) {
+      await prisma.staffProfile.update({
+        where: { id: flexibleStaffProfile.id },
+        data: { schedulingMode: "FLEXIBLE" },
+      })
+      const slotDays = 28
+      const slotStart = new Date(startDate)
+      for (let dayOffset = 0; dayOffset < slotDays; dayOffset += 1) {
+        const day = new Date(slotStart)
+        day.setDate(slotStart.getDate() + dayOffset)
+        const weekday = day.getDay()
+        const dateIso = day.toISOString().slice(0, 10)
+        const dateValue = new Date(`${dateIso}T00:00:00.000Z`)
+        // Flexible contracted pattern: Mon/Wed/Fri full-ish, Tue/Thu short, weekend off.
+        const slotsForDay: Array<{ startTime: string; endTime: string }> =
+          weekday === 1 || weekday === 3 || weekday === 5
+            ? [
+                { startTime: "10:00", endTime: "14:00" },
+                { startTime: "15:00", endTime: "19:00" },
+              ]
+            : weekday === 2 || weekday === 4
+              ? [{ startTime: "11:00", endTime: "15:00" }]
+              : []
+        if (!slotsForDay.length) continue
+        for (let index = 0; index < slotsForDay.length; index += 1) {
+          await prisma.staffFlexibleAvailability.create({
+            data: {
+              staffProfileId: flexibleStaffProfile.id,
+              date: dateValue,
+              startTime: slotsForDay[index].startTime,
+              endTime: slotsForDay[index].endTime,
+              sortOrder: index,
+            },
+          })
+          flexibleSlotCount += 1
+        }
+      }
+    }
+
     const existing = await prisma.shiftSchedule.findFirst({
       where: { tenantId, name: "Seed Staff Schedule", isDefault: false },
       select: { id: true },
@@ -1533,7 +1584,7 @@ const seedShifts = async (tenantId: string, tenantSlug: string) => {
           },
           assignments: {
             deleteMany: {},
-            create: staffProfiles.map((profile) => ({
+            create: standardStaffProfiles.map((profile) => ({
               staffProfileId: profile.id,
               startDate,
               endDate: null,
@@ -1555,7 +1606,7 @@ const seedShifts = async (tenantId: string, tenantSlug: string) => {
             create: [{ templateId: morningTemplateId, repeatDays: 7, sortOrder: 0 }],
           },
           assignments: {
-            create: staffProfiles.map((profile) => ({
+            create: standardStaffProfiles.map((profile) => ({
               staffProfileId: profile.id,
               startDate,
               endDate: null,
@@ -1566,7 +1617,7 @@ const seedShifts = async (tenantId: string, tenantSlug: string) => {
     }
   }
 
-  return { count: shiftTemplateSeeds.length + 2 }
+  return { count: shiftTemplateSeeds.length + 2 + flexibleSlotCount }
 }
 
 const seedLeaves = async (tenantId: string, tenantSlug: string) => {
@@ -1751,6 +1802,9 @@ const clearData = async (tenantId: string) => {
     counts.staffShiftOverrides = (await tx.staffShiftOverride.deleteMany({
       where: { staffProfile: { user: { tenantId } } },
     })).count
+    counts.staffFlexibleAvailability = (await tx.staffFlexibleAvailability.deleteMany({
+      where: { staffProfile: { user: { tenantId } } },
+    })).count
     counts.staffScheduleAssignments = (await tx.staffScheduleAssignment.deleteMany({
       where: { staffProfile: { user: { tenantId } } },
     })).count
@@ -1833,6 +1887,7 @@ const previewClearData = async (tenantId: string) => {
     inventoryCategories,
     staffRosterHistoryDays,
     staffShiftOverrides,
+    staffFlexibleAvailability,
     staffScheduleAssignments,
     shiftScheduleBlocks,
     shiftSchedules,
@@ -1866,6 +1921,7 @@ const previewClearData = async (tenantId: string) => {
     prisma.inventoryCategory.count({ where: { tenantId } }),
     prisma.staffRosterHistoryDay.count({ where: { staffProfile: { user: { tenantId } } } }),
     prisma.staffShiftOverride.count({ where: { staffProfile: { user: { tenantId } } } }),
+    prisma.staffFlexibleAvailability.count({ where: { staffProfile: { user: { tenantId } } } }),
     prisma.staffScheduleAssignment.count({ where: { staffProfile: { user: { tenantId } } } }),
     prisma.shiftScheduleBlock.count({ where: { schedule: { tenantId } } }),
     prisma.shiftSchedule.count({ where: { tenantId } }),
@@ -1910,6 +1966,7 @@ const previewClearData = async (tenantId: string) => {
       inventoryCategories,
       staffRosterHistoryDays,
       staffShiftOverrides,
+      staffFlexibleAvailability,
       staffScheduleAssignments,
       shiftScheduleBlocks,
       shiftSchedules,
@@ -2026,6 +2083,7 @@ const countModuleData = async (tenantId: string, modules: Set<ClearModule>) => {
   if (modules.has("shifts")) {
     counts.staffRosterHistoryDays = await prisma.staffRosterHistoryDay.count({ where: { staffProfile: { user: { tenantId } } } })
     counts.staffShiftOverrides = await prisma.staffShiftOverride.count({ where: { staffProfile: { user: { tenantId } } } })
+    counts.staffFlexibleAvailability = await prisma.staffFlexibleAvailability.count({ where: { staffProfile: { user: { tenantId } } } })
     counts.staffScheduleAssignments = await prisma.staffScheduleAssignment.count({ where: { staffProfile: { user: { tenantId } } } })
     counts.shiftScheduleBlocks = await prisma.shiftScheduleBlock.count({ where: { schedule: { tenantId } } })
     counts.shiftSchedules = await prisma.shiftSchedule.count({ where: { tenantId } })
@@ -2105,6 +2163,7 @@ const clearModulesData = async (tenantId: string, modules: Set<ClearModule>) => 
       } else if (moduleKey === "shifts") {
         counts.staffRosterHistoryDays = (await tx.staffRosterHistoryDay.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
         counts.staffShiftOverrides = (await tx.staffShiftOverride.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
+        counts.staffFlexibleAvailability = (await tx.staffFlexibleAvailability.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
         counts.staffScheduleAssignments = (await tx.staffScheduleAssignment.deleteMany({ where: { staffProfile: { user: { tenantId } } } })).count
         counts.shiftScheduleBlocks = (await tx.shiftScheduleBlock.deleteMany({ where: { schedule: { tenantId } } })).count
         counts.shiftSchedules = (await tx.shiftSchedule.deleteMany({ where: { tenantId } })).count

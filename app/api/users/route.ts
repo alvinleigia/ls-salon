@@ -121,6 +121,11 @@ export async function GET(request: Request) {
           country: true,
           role: true,
           createdAt: true,
+          staffProfile: {
+            select: {
+              schedulingMode: true,
+            },
+          },
         },
         where,
         orderBy,
@@ -264,6 +269,11 @@ export async function POST(request: Request) {
         country: true,
         role: true,
         createdAt: true,
+        staffProfile: {
+          select: {
+            schedulingMode: true,
+          },
+        },
       },
     })
 

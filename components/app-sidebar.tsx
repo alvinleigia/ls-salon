@@ -279,6 +279,12 @@ export function AppSidebar() {
               icon: CalendarClockIcon,
               isActive: (current) => current === "/shifts/roster",
             },
+            {
+              title: "Recurring plans",
+              href: "/shifts/recurring",
+              icon: ClockIcon,
+              isActive: (current) => current === "/shifts/recurring",
+            },
           ],
         }
       )
