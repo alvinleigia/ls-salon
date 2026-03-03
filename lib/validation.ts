@@ -185,6 +185,7 @@ export const updateUserSchema = addCountryStateValidation(z.object({
         )
         .optional(),
       managerUserId: z.string().trim().min(1).optional().or(z.literal("")),
+      schedulingMode: z.enum(["STANDARD", "FLEXIBLE"]).optional(),
     })
     .optional(),
 }))
@@ -716,6 +717,340 @@ export const shiftOverrideSchema = z
   })
 
 export type ShiftOverrideInput = z.infer<typeof shiftOverrideSchema>
+
+export const flexibleSlotSchema = z
+  .object({
+    staffId: z.string().trim().min(1),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    slots: z
+      .array(
+        z.object({
+          startTime: z.string().regex(/^\d{2}:\d{2}$/),
+          endTime: z.string().regex(/^\d{2}:\d{2}$/),
+          sortOrder: z.coerce.number().int().min(0).optional(),
+        })
+      )
+      .min(1),
+  })
+  .superRefine((values, ctx) => {
+    const withMinutes = values.slots
+      .map((slot, index) => ({
+        index,
+        start: toMinutes(slot.startTime),
+        end: toMinutes(slot.endTime),
+      }))
+      .sort((a, b) => a.start - b.start)
+
+    withMinutes.forEach((slot) => {
+      if (slot.start >= slot.end) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Slot start time must be before end time.",
+          path: ["slots", slot.index, "startTime"],
+        })
+      }
+    })
+
+    for (let index = 0; index < withMinutes.length - 1; index += 1) {
+      if (withMinutes[index].end > withMinutes[index + 1].start) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Slots cannot overlap.",
+          path: ["slots"],
+        })
+        break
+      }
+    }
+  })
+
+export type FlexibleSlotInput = z.infer<typeof flexibleSlotSchema>
+
+const flexibleWeekPlanBreakSchema = z.object({
+  startTime: z.string().regex(/^\d{2}:\d{2}$/),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/),
+  sortOrder: z.coerce.number().int().min(0).optional(),
+})
+
+const flexibleWeekPlanSlotSchema = z.object({
+  startTime: z.string().regex(/^\d{2}:\d{2}$/),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/),
+  sortOrder: z.coerce.number().int().min(0).optional(),
+  breaks: z.array(flexibleWeekPlanBreakSchema).optional().default([]),
+})
+
+const flexibleWeekPlanDaySchema = z.object({
+  day: weekdaySchema,
+  isOff: z.boolean().optional().default(false),
+  sortOrder: z.coerce.number().int().min(0).optional(),
+  slots: z.array(flexibleWeekPlanSlotSchema).optional().default([]),
+})
+
+export const flexibleWeekPlanSchema = z
+  .object({
+    staffId: z.string().trim().min(1),
+    weekStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    days: z.array(flexibleWeekPlanDaySchema).length(7),
+  })
+  .superRefine((values, ctx) => {
+    const daySet = new Set(values.days.map((day) => day.day))
+    if (daySet.size !== 7) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide all seven weekdays exactly once.",
+        path: ["days"],
+      })
+      return
+    }
+
+    values.days.forEach((day, dayIndex) => {
+      if (day.isOff) {
+        if (day.slots.length > 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Off day cannot contain slots.",
+            path: ["days", dayIndex, "slots"],
+          })
+        }
+        return
+      }
+
+      const slotRanges = day.slots
+        .map((slot, slotIndex) => ({
+          slot,
+          slotIndex,
+          start: toMinutes(slot.startTime),
+          end: toMinutes(slot.endTime),
+        }))
+        .sort((a, b) => a.start - b.start)
+
+      slotRanges.forEach(({ start, end, slotIndex }) => {
+        if (start >= end) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Slot start time must be before end time.",
+            path: ["days", dayIndex, "slots", slotIndex, "startTime"],
+          })
+        }
+      })
+
+      for (let slotIndex = 0; slotIndex < slotRanges.length - 1; slotIndex += 1) {
+        if (slotRanges[slotIndex].end > slotRanges[slotIndex + 1].start) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Slots cannot overlap within a day.",
+            path: ["days", dayIndex, "slots"],
+          })
+          break
+        }
+      }
+
+      slotRanges.forEach(({ slot, slotIndex, start, end }) => {
+        const breakRanges = slot.breaks
+          .map((breakItem, breakIndex) => ({
+            breakItem,
+            breakIndex,
+            start: toMinutes(breakItem.startTime),
+            end: toMinutes(breakItem.endTime),
+          }))
+          .sort((a, b) => a.start - b.start)
+
+        breakRanges.forEach(({ breakIndex, start: breakStart, end: breakEnd }) => {
+          if (breakStart >= breakEnd) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Break start time must be before end time.",
+              path: ["days", dayIndex, "slots", slotIndex, "breaks", breakIndex, "startTime"],
+            })
+          }
+          if (breakStart < start || breakEnd > end) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Break must be within slot time range.",
+              path: ["days", dayIndex, "slots", slotIndex, "breaks", breakIndex],
+            })
+          }
+        })
+
+        for (let breakIndex = 0; breakIndex < breakRanges.length - 1; breakIndex += 1) {
+          if (breakRanges[breakIndex].end > breakRanges[breakIndex + 1].start) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Breaks cannot overlap within a slot.",
+              path: ["days", dayIndex, "slots", slotIndex, "breaks"],
+            })
+            break
+          }
+        }
+      })
+    })
+  })
+
+export type FlexibleWeekPlanInput = z.infer<typeof flexibleWeekPlanSchema>
+
+const flexiblePatternBreakSchema = z.object({
+  startTime: z.string().regex(/^\d{2}:\d{2}$/),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/),
+  sortOrder: z.coerce.number().int().min(0).optional(),
+})
+
+const flexiblePatternSlotSchema = z.object({
+  startTime: z.string().regex(/^\d{2}:\d{2}$/),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/),
+  sortOrder: z.coerce.number().int().min(0).optional(),
+  breaks: z.array(flexiblePatternBreakSchema).optional().default([]),
+})
+
+const flexiblePatternDaySchema = z.object({
+  day: weekdaySchema,
+  isOff: z.boolean().optional().default(false),
+  sortOrder: z.coerce.number().int().min(0).optional(),
+  slots: z.array(flexiblePatternSlotSchema).optional().default([]),
+})
+
+const flexiblePatternWeekSchema = z.object({
+  weekIndex: z.coerce.number().int().min(1),
+  days: z.array(flexiblePatternDaySchema).length(7),
+})
+
+export const flexiblePatternSchema = z
+  .object({
+    patternId: z.string().trim().min(1).optional(),
+    staffId: z.string().trim().min(1),
+    name: z.string().trim().max(120).optional().or(z.literal("")),
+    cycleLengthWeeks: z.coerce.number().int().min(1).max(12),
+    validFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    validTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
+    isActive: z.boolean().optional().default(true),
+    weeks: z.array(flexiblePatternWeekSchema),
+  })
+  .superRefine((values, ctx) => {
+    if (values.validTo && values.validFrom > values.validTo) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "validFrom must be on or before validTo.",
+        path: ["validFrom"],
+      })
+    }
+    if (values.weeks.length !== values.cycleLengthWeeks) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "weeks length must match cycleLengthWeeks.",
+        path: ["weeks"],
+      })
+    }
+    const weekIndexSet = new Set(values.weeks.map((week) => week.weekIndex))
+    if (weekIndexSet.size !== values.weeks.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Duplicate weekIndex values are not allowed.",
+        path: ["weeks"],
+      })
+    }
+    for (let index = 1; index <= values.cycleLengthWeeks; index += 1) {
+      if (!weekIndexSet.has(index)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `weekIndex ${index} is missing.`,
+          path: ["weeks"],
+        })
+      }
+    }
+
+    values.weeks.forEach((week, weekArrayIndex) => {
+      const daySet = new Set(week.days.map((day) => day.day))
+      if (daySet.size !== 7) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Each week must provide all weekdays exactly once.",
+          path: ["weeks", weekArrayIndex, "days"],
+        })
+        return
+      }
+
+      week.days.forEach((day, dayIndex) => {
+        if (day.isOff) {
+          if (day.slots.length > 0) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Off day cannot contain slots.",
+              path: ["weeks", weekArrayIndex, "days", dayIndex, "slots"],
+            })
+          }
+          return
+        }
+
+        const slotRanges = day.slots
+          .map((slot, slotIndex) => ({
+            slot,
+            slotIndex,
+            start: toMinutes(slot.startTime),
+            end: toMinutes(slot.endTime),
+          }))
+          .sort((a, b) => a.start - b.start)
+
+        slotRanges.forEach(({ start, end, slotIndex }) => {
+          if (start >= end) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Slot start time must be before end time.",
+              path: ["weeks", weekArrayIndex, "days", dayIndex, "slots", slotIndex, "startTime"],
+            })
+          }
+        })
+
+        for (let slotIndex = 0; slotIndex < slotRanges.length - 1; slotIndex += 1) {
+          if (slotRanges[slotIndex].end > slotRanges[slotIndex + 1].start) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Slots cannot overlap within a day.",
+              path: ["weeks", weekArrayIndex, "days", dayIndex, "slots"],
+            })
+            break
+          }
+        }
+
+        slotRanges.forEach(({ slot, slotIndex, start, end }) => {
+          const breakRanges = slot.breaks
+            .map((breakItem, breakIndex) => ({
+              breakIndex,
+              start: toMinutes(breakItem.startTime),
+              end: toMinutes(breakItem.endTime),
+            }))
+            .sort((a, b) => a.start - b.start)
+
+          breakRanges.forEach(({ breakIndex, start: breakStart, end: breakEnd }) => {
+            if (breakStart >= breakEnd) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "Break start time must be before end time.",
+                path: ["weeks", weekArrayIndex, "days", dayIndex, "slots", slotIndex, "breaks", breakIndex, "startTime"],
+              })
+            }
+            if (breakStart < start || breakEnd > end) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "Break must be within slot time range.",
+                path: ["weeks", weekArrayIndex, "days", dayIndex, "slots", slotIndex, "breaks", breakIndex],
+              })
+            }
+          })
+
+          for (let breakIndex = 0; breakIndex < breakRanges.length - 1; breakIndex += 1) {
+            if (breakRanges[breakIndex].end > breakRanges[breakIndex + 1].start) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "Breaks cannot overlap within a slot.",
+                path: ["weeks", weekArrayIndex, "days", dayIndex, "slots", slotIndex, "breaks"],
+              })
+              break
+            }
+          }
+        })
+      })
+    })
+  })
+
+export type FlexiblePatternInput = z.infer<typeof flexiblePatternSchema>
 
 export const appointmentCreateSchema = z.object({
   customerId: z.string().trim().min(1),

@@ -34,7 +34,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { TimePicker } from "@/components/ui/time-picker"
 import type { LeaveRosterItem } from "@/types/leaves"
-import type { AppSettingsPayload } from "@/types/scheduling"
+import type { AppSettingsPayload, Weekday } from "@/types/scheduling"
 import type {
   AppointmentConflict,
   AvailabilityEvent,
@@ -42,6 +42,9 @@ import type {
   ShiftOverride,
   ShiftSchedule,
   ShiftTemplateRow,
+  StaffFlexibleSlot,
+  StaffFlexiblePattern,
+  StaffFlexibleWeekPlan,
   StaffOption,
   StaffScheduleAssignment,
 } from "@/types/shifts"
@@ -55,6 +58,68 @@ import {
   buildTemplateMap,
   formatDateKey,
 } from "./roster-model"
+
+const WEEKDAY_BY_INDEX: Weekday[] = [
+  "SUNDAY",
+  "MONDAY",
+  "TUESDAY",
+  "WEDNESDAY",
+  "THURSDAY",
+  "FRIDAY",
+  "SATURDAY",
+]
+
+const WEEKDAY_ORDER: Weekday[] = [
+  "MONDAY",
+  "TUESDAY",
+  "WEDNESDAY",
+  "THURSDAY",
+  "FRIDAY",
+  "SATURDAY",
+  "SUNDAY",
+]
+
+type FlexibleDraftBreak = {
+  startTime: string
+  endTime: string
+}
+
+type FlexibleDraftSlot = {
+  startTime: string
+  endTime: string
+  breaks: FlexibleDraftBreak[]
+}
+
+type FlexibleDraftDay = {
+  day: Weekday
+  isOff: boolean
+  slots: FlexibleDraftSlot[]
+}
+
+type RecurringDraftWeek = {
+  weekIndex: number
+  days: FlexibleDraftDay[]
+}
+
+const getWeekStartMondayKey = (value: Date) => {
+  const date = new Date(value)
+  const day = date.getDay()
+  const offset = day === 0 ? -6 : 1 - day
+  date.setDate(date.getDate() + offset)
+  date.setHours(0, 0, 0, 0)
+  return toISODate(date)
+}
+
+const toMinutes = (value: string) => {
+  const [hours, minutes] = value.split(":").map((part) => Number(part))
+  return (Number.isNaN(hours) ? 0 : hours) * 60 + (Number.isNaN(minutes) ? 0 : minutes)
+}
+
+const createEmptyFlexibleDraftDay = (day: Weekday): FlexibleDraftDay => ({
+  day,
+  isOff: true,
+  slots: [],
+})
 
 export default function RosterPage() {
   const searchParams = useSearchParams()
@@ -76,6 +141,9 @@ export default function RosterPage() {
   >({})
   const [defaultSchedule, setDefaultSchedule] = React.useState<ShiftSchedule | null>(null)
   const [overrides, setOverrides] = React.useState<ShiftOverride[]>([])
+  const [flexibleSlots, setFlexibleSlots] = React.useState<StaffFlexibleSlot[]>([])
+  const [flexibleWeekPlans, setFlexibleWeekPlans] = React.useState<StaffFlexibleWeekPlan[]>([])
+  const [flexiblePatterns, setFlexiblePatterns] = React.useState<StaffFlexiblePattern[]>([])
   const [approvedLeaves, setApprovedLeaves] = React.useState<LeaveRosterItem[]>([])
   const [historyDays, setHistoryDays] = React.useState<RosterHistoryDay[]>([])
   const approvedLeavesRequestVersionRef = React.useRef(0)
@@ -86,6 +154,22 @@ export default function RosterPage() {
   const [overrideTemplateId, setOverrideTemplateId] = React.useState<string>("")
   const [overrideSkipWeekOff, setOverrideSkipWeekOff] = React.useState(false)
   const [overrideUnavailable, setOverrideUnavailable] = React.useState(false)
+  const [useFlexibleSlot, setUseFlexibleSlot] = React.useState(false)
+  const [flexibleEditorMode, setFlexibleEditorMode] = React.useState<"WEEK_OVERRIDE" | "RECURRING_PATTERN">(
+    "WEEK_OVERRIDE"
+  )
+  const [flexibleDraftDays, setFlexibleDraftDays] = React.useState<FlexibleDraftDay[]>(
+    WEEKDAY_ORDER.map((day) => createEmptyFlexibleDraftDay(day))
+  )
+  const [recurringPatternId, setRecurringPatternId] = React.useState<string>("")
+  const [recurringPatternName, setRecurringPatternName] = React.useState("")
+  const [recurringValidFrom, setRecurringValidFrom] = React.useState("")
+  const [recurringValidTo, setRecurringValidTo] = React.useState("")
+  const [recurringCycleLength, setRecurringCycleLength] = React.useState(1)
+  const [recurringSelectedWeekIndex, setRecurringSelectedWeekIndex] = React.useState(1)
+  const [recurringDraftWeeks, setRecurringDraftWeeks] = React.useState<RecurringDraftWeek[]>([
+    { weekIndex: 1, days: WEEKDAY_ORDER.map((day) => createEmptyFlexibleDraftDay(day)) },
+  ])
   const [conflictsOpen, setConflictsOpen] = React.useState(false)
   const [conflicts, setConflicts] = React.useState<AppointmentConflict[]>([])
   const [conflictAction, setConflictAction] = React.useState<
@@ -286,6 +370,110 @@ export default function RosterPage() {
     void loadOverrides()
   }, [loadOverrides])
 
+  const loadFlexibleSlots = React.useCallback(async () => {
+    if (!availabilityDates.length || !staff.length) return
+    const start = toISODate(availabilityDates[0])
+    const end = toISODate(availabilityDates[availabilityDates.length - 1])
+    const staffIds =
+      staffFilter === "all" ? staff.map((member) => member.id) : [staffFilter]
+    if (!staffIds.length) return
+    try {
+      const response = await fetch(
+        `/api/shifts/flexible-slots?startDate=${start}&endDate=${end}&staffIds=${staffIds.join(",")}`,
+        { cache: "no-store" }
+      )
+      if (!response.ok) {
+        throw new Error("Failed to load flexible slots.")
+      }
+      const data = (await response.json()) as { items?: StaffFlexibleSlot[] }
+      setFlexibleSlots(data.items ?? [])
+    } catch (error) {
+      console.error(error)
+      setFlexibleSlots([])
+      toast.error("Unable to load flexible staff slots.")
+    }
+  }, [availabilityDates, staff, staffFilter])
+
+  React.useEffect(() => {
+    void loadFlexibleSlots()
+  }, [loadFlexibleSlots])
+
+  const loadFlexibleWeekPlans = React.useCallback(async () => {
+    if (!availabilityDates.length || !staff.length) return
+    const staffIds =
+      staffFilter === "all"
+        ? staff.map((member) => member.id)
+        : [staffFilter]
+    if (!staffIds.length) return
+
+    const weekStartKeys = Array.from(
+      new Set(availabilityDates.map((value) => getWeekStartMondayKey(value)))
+    )
+    if (!weekStartKeys.length) {
+      setFlexibleWeekPlans([])
+      return
+    }
+
+    try {
+      const responses = await Promise.all(
+        weekStartKeys.map((weekStartDate) =>
+          fetch(
+            `/api/shifts/flexible-week-plans?weekStartDate=${weekStartDate}&staffIds=${staffIds.join(",")}`,
+            { cache: "no-store" }
+          )
+        )
+      )
+      const payloads = await Promise.all(
+        responses.map(async (response) => {
+          if (!response.ok) return []
+          const data = (await response.json()) as { items?: StaffFlexibleWeekPlan[] }
+          return data.items ?? []
+        })
+      )
+      setFlexibleWeekPlans(payloads.flat())
+    } catch (error) {
+      console.error(error)
+      setFlexibleWeekPlans([])
+      toast.error("Unable to load flexible weekly plans.")
+    }
+  }, [availabilityDates, staff, staffFilter])
+
+  React.useEffect(() => {
+    void loadFlexibleWeekPlans()
+  }, [loadFlexibleWeekPlans])
+
+  const loadFlexiblePatterns = React.useCallback(async () => {
+    if (!availabilityDates.length || !staff.length) return
+    const staffIds =
+      staffFilter === "all"
+        ? staff.map((member) => member.id)
+        : [staffFilter]
+    if (!staffIds.length) return
+
+    const startDate = toISODate(availabilityDates[0])
+    const endDate = toISODate(availabilityDates[availabilityDates.length - 1])
+
+    try {
+      const response = await fetch(
+        `/api/shifts/flexible-patterns?staffIds=${staffIds.join(",")}&startDate=${startDate}&endDate=${endDate}`,
+        { cache: "no-store" }
+      )
+      if (!response.ok) {
+        throw new Error("Failed to load flexible patterns.")
+      }
+      const data = (await response.json()) as { items?: StaffFlexiblePattern[] }
+      setFlexiblePatterns(data.items ?? [])
+    } catch (error) {
+      console.error(error)
+      setFlexiblePatterns([])
+      toast.error("Unable to load flexible recurring patterns.")
+    }
+  }, [availabilityDates, staff, staffFilter])
+
+  React.useEffect(() => {
+    void loadFlexiblePatterns()
+  }, [loadFlexiblePatterns])
+
   const loadApprovedLeaves = React.useCallback(async () => {
     if (!availabilityDates.length || !staff.length) return
     const start = toISODate(availabilityDates[0])
@@ -362,6 +550,14 @@ export default function RosterPage() {
     [templates]
   )
 
+  const staffSchedulingModeMap = React.useMemo(() => {
+    const map: Record<string, "STANDARD" | "FLEXIBLE"> = {}
+    for (const member of staff) {
+      map[member.id] = member.staffProfile?.schedulingMode === "FLEXIBLE" ? "FLEXIBLE" : "STANDARD"
+    }
+    return map
+  }, [staff])
+
   const scheduleMaps = React.useMemo(() => {
     const maps: Record<string, Record<string, string | null>> = {}
     const viewEnd = availabilityDates[availabilityDates.length - 1]
@@ -402,6 +598,60 @@ export default function RosterPage() {
     }
     return map
   }, [overrides])
+
+  const flexibleSlotMap = React.useMemo(() => {
+    const map: Record<string, Record<string, Array<{ startTime: string; endTime: string }>>> = {}
+    for (const slot of flexibleSlots) {
+      if (!slot.staffId) continue
+      if (!map[slot.staffId]) {
+        map[slot.staffId] = {}
+      }
+      if (!map[slot.staffId][slot.date]) {
+        map[slot.staffId][slot.date] = []
+      }
+      map[slot.staffId][slot.date].push({
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+      })
+    }
+
+    for (const staffId of Object.keys(map)) {
+      for (const dateKey of Object.keys(map[staffId])) {
+        map[staffId][dateKey].sort((a, b) => a.startTime.localeCompare(b.startTime))
+      }
+    }
+    return map
+  }, [flexibleSlots])
+
+  const flexibleWeekPlanMap = React.useMemo(() => {
+    const map: Record<string, Record<string, StaffFlexibleWeekPlan>> = {}
+    for (const plan of flexibleWeekPlans) {
+      if (!plan.staffId) continue
+      if (!map[plan.staffId]) {
+        map[plan.staffId] = {}
+      }
+      map[plan.staffId][plan.weekStartDate] = plan
+    }
+    return map
+  }, [flexibleWeekPlans])
+
+  const activePatternByStaffId = React.useMemo(() => {
+    const map: Record<string, StaffFlexiblePattern | undefined> = {}
+    for (const pattern of flexiblePatterns) {
+      if (!pattern.staffId) continue
+      const existing = map[pattern.staffId]
+      if (!existing) {
+        map[pattern.staffId] = pattern
+        continue
+      }
+      const existingFrom = new Date(`${existing.validFrom}T00:00:00.000Z`).getTime()
+      const nextFrom = new Date(`${pattern.validFrom}T00:00:00.000Z`).getTime()
+      if (nextFrom > existingFrom) {
+        map[pattern.staffId] = pattern
+      }
+    }
+    return map
+  }, [flexiblePatterns])
 
   const leaveMap = React.useMemo(() => {
     const map: Record<string, Record<string, LeaveRosterItem>> = {}
@@ -463,6 +713,9 @@ export default function RosterPage() {
       if (override !== undefined) {
         return override ? templateMap[override] ?? null : null
       }
+      if ((staffSchedulingModeMap[staffId] ?? "STANDARD") === "FLEXIBLE") {
+        return null
+      }
       const scheduleMap = scheduleMaps[staffId]
       if (scheduleMap && Object.prototype.hasOwnProperty.call(scheduleMap, dateKey)) {
         const templateId = scheduleMap[dateKey]
@@ -470,7 +723,7 @@ export default function RosterPage() {
       }
       return null
     },
-    [formatDateKey, getHistoryDay, overrideMap, scheduleMaps, templateMap]
+    [formatDateKey, getHistoryDay, overrideMap, scheduleMaps, staffSchedulingModeMap, templateMap]
   )
 
   const getStaffPeriodsForDate = React.useCallback(
@@ -497,6 +750,102 @@ export default function RosterPage() {
         const template = templateMap[override]
         return template ? buildShiftSegments(template) : []
       }
+
+      const schedulingMode = staffSchedulingModeMap[staffId] ?? "STANDARD"
+      if (schedulingMode === "FLEXIBLE") {
+        const weekStartDate = getWeekStartMondayKey(value)
+        const weekday = WEEKDAY_BY_INDEX[value.getDay()]
+        const dayPlan = flexibleWeekPlanMap[staffId]?.[weekStartDate]?.days.find(
+          (day) => day.day === weekday
+        )
+        if (dayPlan?.isOff) {
+          return []
+        }
+        if (dayPlan?.slots?.length) {
+          return dayPlan.slots.flatMap((slot) => {
+            const breaks = slot.breaks
+              .slice()
+              .sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime))
+            const segments: Array<{ startTime: string; endTime: string }> = []
+            let cursor = toMinutes(slot.startTime)
+            const slotEnd = toMinutes(slot.endTime)
+
+            for (const currentBreak of breaks) {
+              const breakStart = toMinutes(currentBreak.startTime)
+              const breakEnd = toMinutes(currentBreak.endTime)
+              if (breakStart > cursor) {
+                segments.push({
+                  startTime: `${String(Math.floor(cursor / 60)).padStart(2, "0")}:${String(cursor % 60).padStart(2, "0")}`,
+                  endTime: `${String(Math.floor(breakStart / 60)).padStart(2, "0")}:${String(breakStart % 60).padStart(2, "0")}`,
+                })
+              }
+              cursor = Math.max(cursor, breakEnd)
+            }
+
+            if (cursor < slotEnd) {
+              segments.push({
+                startTime: `${String(Math.floor(cursor / 60)).padStart(2, "0")}:${String(cursor % 60).padStart(2, "0")}`,
+                endTime: `${String(Math.floor(slotEnd / 60)).padStart(2, "0")}:${String(slotEnd % 60).padStart(2, "0")}`,
+              })
+            }
+
+            return segments
+          })
+        }
+
+        const recurringPattern = activePatternByStaffId[staffId]
+        if (recurringPattern) {
+          const dateKeyUtc = toISODate(value)
+          const validFrom = new Date(`${recurringPattern.validFrom}T00:00:00.000Z`).getTime()
+          const validTo = recurringPattern.validTo
+            ? new Date(`${recurringPattern.validTo}T23:59:59.999Z`).getTime()
+            : Number.POSITIVE_INFINITY
+          const dateValue = new Date(`${dateKeyUtc}T00:00:00.000Z`).getTime()
+          if (dateValue >= validFrom && dateValue <= validTo) {
+            const weekOffset = Math.floor(Math.max(0, (dateValue - validFrom) / 86400000) / 7)
+            const weekIndex = (weekOffset % recurringPattern.cycleLengthWeeks) + 1
+            const patternWeek = recurringPattern.weeks.find((week) => week.weekIndex === weekIndex)
+            const patternDay = patternWeek?.days.find((day) => day.day === weekday)
+            if (patternDay?.isOff) {
+              return []
+            }
+            if (patternDay?.slots?.length) {
+              return patternDay.slots.flatMap((slot) => {
+                const breaks = slot.breaks
+                  .slice()
+                  .sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime))
+                const segments: Array<{ startTime: string; endTime: string }> = []
+                let cursor = toMinutes(slot.startTime)
+                const slotEnd = toMinutes(slot.endTime)
+
+                for (const currentBreak of breaks) {
+                  const breakStart = toMinutes(currentBreak.startTime)
+                  const breakEnd = toMinutes(currentBreak.endTime)
+                  if (breakStart > cursor) {
+                    segments.push({
+                      startTime: `${String(Math.floor(cursor / 60)).padStart(2, "0")}:${String(cursor % 60).padStart(2, "0")}`,
+                      endTime: `${String(Math.floor(breakStart / 60)).padStart(2, "0")}:${String(breakStart % 60).padStart(2, "0")}`,
+                    })
+                  }
+                  cursor = Math.max(cursor, breakEnd)
+                }
+
+                if (cursor < slotEnd) {
+                  segments.push({
+                    startTime: `${String(Math.floor(cursor / 60)).padStart(2, "0")}:${String(cursor % 60).padStart(2, "0")}`,
+                    endTime: `${String(Math.floor(slotEnd / 60)).padStart(2, "0")}:${String(slotEnd % 60).padStart(2, "0")}`,
+                  })
+                }
+
+                return segments
+              })
+            }
+          }
+        }
+
+        const legacyFlexible = flexibleSlotMap[staffId]?.[dateKey]
+        return legacyFlexible?.length ? legacyFlexible : []
+      }
       const scheduleMap = scheduleMaps[staffId]
       if (scheduleMap && Object.prototype.hasOwnProperty.call(scheduleMap, dateKey)) {
         const templateId = scheduleMap[dateKey]
@@ -508,7 +857,18 @@ export default function RosterPage() {
       }
       return []
     },
-    [buildShiftSegments, formatDateKey, getHistoryDay, overrideMap, scheduleMaps, templateMap]
+    [
+      buildShiftSegments,
+      activePatternByStaffId,
+      flexibleWeekPlanMap,
+      flexibleSlotMap,
+      formatDateKey,
+      getHistoryDay,
+      overrideMap,
+      scheduleMaps,
+      staffSchedulingModeMap,
+      templateMap,
+    ]
   )
 
   const staffWeeklyHours = React.useMemo(() => {
@@ -632,7 +992,7 @@ export default function RosterPage() {
         const periods = getStaffPeriodsForDate(day, member.id)
         if (!periods.length) continue
         const template = getStaffTemplateForDate(day, member.id)
-        const label = template?.name ?? "Working hours"
+        const label = template?.name ?? "Flexible shift"
         const start = new Date(day)
         start.setHours(0, 0, 0, 0)
         const end = new Date(start)
@@ -653,8 +1013,8 @@ export default function RosterPage() {
           EndTime: end,
           IsAllDay: true,
           staffId: member.id,
-          templateStart: template?.startTime,
-          templateEnd: template?.endTime,
+          templateStart: template?.startTime ?? periods[0]?.startTime,
+          templateEnd: template?.endTime ?? periods[periods.length - 1]?.endTime,
           templateBreaks: breaks.length ? breaks : undefined,
           CategoryColor: template ? templateColorMap[template.id] : undefined,
         })
@@ -675,6 +1035,111 @@ export default function RosterPage() {
 
   const isPastDate = React.useCallback((value: Date) => toISODate(value) < toISODate(new Date()), [])
 
+  const getFlexibleDraftForWeek = React.useCallback(
+    (staffId: string, weekStartDate: string): FlexibleDraftDay[] => {
+      const existing = flexibleWeekPlanMap[staffId]?.[weekStartDate]
+      if (!existing) {
+        return WEEKDAY_ORDER.map((day) => createEmptyFlexibleDraftDay(day))
+      }
+      return WEEKDAY_ORDER.map((day) => {
+        const existingDay = existing.days.find((item) => item.day === day)
+        if (!existingDay) {
+          return createEmptyFlexibleDraftDay(day)
+        }
+        return {
+          day,
+          isOff: existingDay.isOff,
+          slots: existingDay.slots.map((slot) => ({
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+            breaks: slot.breaks.map((slotBreak) => ({
+              startTime: slotBreak.startTime,
+              endTime: slotBreak.endTime,
+            })),
+          })),
+        }
+      })
+    },
+    [flexibleWeekPlanMap]
+  )
+
+  const createEmptyRecurringWeeks = React.useCallback(
+    (cycleLength: number): RecurringDraftWeek[] =>
+      Array.from({ length: cycleLength }, (_, index) => ({
+        weekIndex: index + 1,
+        days: WEEKDAY_ORDER.map((day) => createEmptyFlexibleDraftDay(day)),
+      })),
+    []
+  )
+
+  const getRecurringDraftFromPattern = React.useCallback(
+    (staffId: string) => {
+      const pattern = activePatternByStaffId[staffId]
+      if (!pattern) {
+        return {
+          patternId: "",
+          patternName: "",
+          validFrom: "",
+          validTo: "",
+          cycleLength: 1,
+          weeks: createEmptyRecurringWeeks(1),
+        }
+      }
+      const weeks: RecurringDraftWeek[] = Array.from(
+        { length: pattern.cycleLengthWeeks },
+        (_, index) => {
+          const weekIndex = index + 1
+          const existingWeek = pattern.weeks.find((week) => week.weekIndex === weekIndex)
+          return {
+            weekIndex,
+            days: WEEKDAY_ORDER.map((day) => {
+              const existingDay = existingWeek?.days.find((item) => item.day === day)
+              if (!existingDay) {
+                return createEmptyFlexibleDraftDay(day)
+              }
+              return {
+                day,
+                isOff: existingDay.isOff,
+                slots: existingDay.slots.map((slot) => ({
+                  startTime: slot.startTime,
+                  endTime: slot.endTime,
+                  breaks: slot.breaks.map((slotBreak) => ({
+                    startTime: slotBreak.startTime,
+                    endTime: slotBreak.endTime,
+                  })),
+                })),
+              }
+            }),
+          }
+        }
+      )
+      return {
+        patternId: pattern.id,
+        patternName: pattern.name ?? "",
+        validFrom: pattern.validFrom,
+        validTo: pattern.validTo ?? "",
+        cycleLength: pattern.cycleLengthWeeks,
+        weeks,
+      }
+    },
+    [activePatternByStaffId, createEmptyRecurringWeeks]
+  )
+
+  const currentEditableDays = React.useMemo(() => {
+    if (flexibleEditorMode === "WEEK_OVERRIDE") {
+      return flexibleDraftDays
+    }
+    return (
+      recurringDraftWeeks.find((week) => week.weekIndex === recurringSelectedWeekIndex)?.days ??
+      WEEKDAY_ORDER.map((day) => createEmptyFlexibleDraftDay(day))
+    )
+  }, [
+    flexibleDraftDays,
+    flexibleEditorMode,
+    recurringDraftWeeks,
+    recurringSelectedWeekIndex,
+  ])
+
   const openOverrideEditor = React.useCallback(
     (staffId: string, dateValue: Date) => {
       if (isPastDate(dateValue)) {
@@ -682,15 +1147,31 @@ export default function RosterPage() {
         return
       }
       const dateKey = toISODate(dateValue)
+      const weekStartDate = getWeekStartMondayKey(dateValue)
+      const weekEndDate = new Date(`${weekStartDate}T00:00:00.000Z`)
+      weekEndDate.setDate(weekEndDate.getDate() + 6)
+      const weekEndDateKey = toISODate(weekEndDate)
+      const schedulingMode = staffSchedulingModeMap[staffId] ?? "STANDARD"
       setOverrideStaffId(staffId)
-      setOverrideStartDate(dateKey)
-      setOverrideEndDate(dateKey)
+      setOverrideStartDate(schedulingMode === "FLEXIBLE" ? weekStartDate : dateKey)
+      setOverrideEndDate(schedulingMode === "FLEXIBLE" ? weekEndDateKey : dateKey)
       setOverrideTemplateId("")
       setOverrideSkipWeekOff(false)
       setOverrideUnavailable(false)
+      setUseFlexibleSlot(schedulingMode === "FLEXIBLE")
+      setFlexibleEditorMode("WEEK_OVERRIDE")
+      setFlexibleDraftDays(getFlexibleDraftForWeek(staffId, weekStartDate))
+      const recurringDraft = getRecurringDraftFromPattern(staffId)
+      setRecurringPatternId(recurringDraft.patternId)
+      setRecurringPatternName(recurringDraft.patternName)
+      setRecurringValidFrom(recurringDraft.validFrom || weekStartDate)
+      setRecurringValidTo(recurringDraft.validTo)
+      setRecurringCycleLength(recurringDraft.cycleLength)
+      setRecurringSelectedWeekIndex(1)
+      setRecurringDraftWeeks(recurringDraft.weeks)
       setOverrideOpen(true)
     },
-    [isPastDate]
+    [getFlexibleDraftForWeek, getRecurringDraftFromPattern, isPastDate, staffSchedulingModeMap]
   )
 
   const quickInfoContent = React.useCallback((props: Record<string, unknown>) => {
@@ -949,12 +1430,12 @@ export default function RosterPage() {
     }
   }, [openOverrideEditor, resolveStaffIdForGroup, viewDates.length])
 
-  const submitOverride = React.useCallback(async () => {
+  const submitOverride = React.useCallback(async (saveAsNewPattern = false) => {
     if (!overrideStaffId) {
       toast.error("Select a staff member.")
       return
     }
-    if (!overrideUnavailable && !overrideTemplateId) {
+    if (!useFlexibleSlot && !overrideUnavailable && !overrideTemplateId) {
       toast.error("Select a shift template.")
       return
     }
@@ -967,6 +1448,98 @@ export default function RosterPage() {
       return
     }
     try {
+      if (useFlexibleSlot) {
+        if (flexibleEditorMode === "RECURRING_PATTERN") {
+          if (!recurringValidFrom) {
+            toast.error("Pattern start date is required.")
+            return
+          }
+          if (recurringValidTo && recurringValidFrom > recurringValidTo) {
+            toast.error("Pattern start date must be on or before end date.")
+            return
+          }
+        }
+        if (flexibleEditorMode === "WEEK_OVERRIDE") {
+          const response = await fetch("/api/shifts/flexible-week-plans", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              staffId: overrideStaffId,
+              weekStartDate: overrideStartDate,
+              days: flexibleDraftDays.map((day, dayIndex) => ({
+                day: day.day,
+                isOff: day.isOff,
+                sortOrder: dayIndex,
+                slots: day.slots.map((slot, slotIndex) => ({
+                  startTime: slot.startTime,
+                  endTime: slot.endTime,
+                  sortOrder: slotIndex,
+                  breaks: slot.breaks.map((slotBreak, breakIndex) => ({
+                    startTime: slotBreak.startTime,
+                    endTime: slotBreak.endTime,
+                    sortOrder: breakIndex,
+                  })),
+                })),
+              })),
+            }),
+          })
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}))
+            throw new Error(error.error || "Failed to save flexible weekly plan.")
+          }
+          toast.success("Flexible weekly override saved.")
+        } else {
+          const response = await fetch("/api/shifts/flexible-patterns", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              patternId: saveAsNewPattern ? undefined : recurringPatternId || undefined,
+              staffId: overrideStaffId,
+              name: recurringPatternName,
+              cycleLengthWeeks: recurringCycleLength,
+              validFrom: recurringValidFrom,
+              validTo: recurringValidTo || "",
+              isActive: true,
+              weeks: recurringDraftWeeks.map((week) => ({
+                weekIndex: week.weekIndex,
+                days: week.days.map((day, dayIndex) => ({
+                  day: day.day,
+                  isOff: day.isOff,
+                  sortOrder: dayIndex,
+                  slots: day.slots.map((slot, slotIndex) => ({
+                    startTime: slot.startTime,
+                    endTime: slot.endTime,
+                    sortOrder: slotIndex,
+                    breaks: slot.breaks.map((slotBreak, breakIndex) => ({
+                      startTime: slotBreak.startTime,
+                      endTime: slotBreak.endTime,
+                      sortOrder: breakIndex,
+                    })),
+                  })),
+                })),
+              })),
+            }),
+          })
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}))
+            throw new Error(error.error || "Failed to save recurring flexible pattern.")
+          }
+          const data = (await response.json()) as { item?: { id?: string } }
+          setRecurringPatternId(data.item?.id ?? "")
+          toast.success(
+            saveAsNewPattern
+              ? "Recurring flexible pattern saved as new."
+              : "Recurring flexible pattern updated."
+          )
+        }
+        setOverrideOpen(false)
+        await loadFlexiblePatterns()
+        await loadFlexibleWeekPlans()
+        await loadFlexibleSlots()
+        await loadOverrides()
+        return
+      }
+
       const response = await fetch("/api/shifts/overrides", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -996,6 +1569,7 @@ export default function RosterPage() {
       }
       toast.success("Shift override saved.")
       setOverrideOpen(false)
+      await loadFlexibleSlots()
       await loadOverrides()
     } catch (error) {
       console.error(error)
@@ -1004,13 +1578,25 @@ export default function RosterPage() {
       )
     }
   }, [
+    loadFlexibleSlots,
+    loadFlexiblePatterns,
+    loadFlexibleWeekPlans,
     loadOverrides,
+    flexibleDraftDays,
+    flexibleEditorMode,
     overrideEndDate,
     overrideSkipWeekOff,
     overrideStaffId,
     overrideStartDate,
     overrideTemplateId,
     overrideUnavailable,
+    recurringCycleLength,
+    recurringDraftWeeks,
+    recurringPatternId,
+    recurringPatternName,
+    recurringValidFrom,
+    recurringValidTo,
+    useFlexibleSlot,
   ])
 
   const clearOverride = React.useCallback(async () => {
@@ -1023,6 +1609,54 @@ export default function RosterPage() {
       return
     }
     try {
+      if (useFlexibleSlot) {
+        if (flexibleEditorMode === "WEEK_OVERRIDE") {
+          const response = await fetch("/api/shifts/flexible-week-plans", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              staffId: overrideStaffId,
+              weekStartDate: overrideStartDate,
+              days: WEEKDAY_ORDER.map((day, dayIndex) => ({
+                day,
+                isOff: true,
+                sortOrder: dayIndex,
+                slots: [],
+              })),
+            }),
+          })
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}))
+            throw new Error(error.error || "Failed to clear flexible weekly plan.")
+          }
+          toast.success("Flexible weekly override cleared.")
+        } else {
+          if (!recurringPatternId) {
+            toast.error("No active recurring pattern to clear.")
+            return
+          }
+          const response = await fetch("/api/shifts/flexible-patterns", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              patternId: recurringPatternId,
+            }),
+          })
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}))
+            throw new Error(error.error || "Failed to deactivate recurring flexible pattern.")
+          }
+          setRecurringPatternId("")
+          toast.success("Recurring flexible pattern deactivated.")
+        }
+        setOverrideOpen(false)
+        await loadFlexiblePatterns()
+        await loadFlexibleWeekPlans()
+        await loadFlexibleSlots()
+        await loadOverrides()
+        return
+      }
+
       const response = await fetch("/api/shifts/overrides", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
@@ -1043,6 +1677,7 @@ export default function RosterPage() {
       }
       toast.success("Overrides cleared.")
       setOverrideOpen(false)
+      await loadFlexibleSlots()
       await loadOverrides()
     } catch (error) {
       console.error(error)
@@ -1050,7 +1685,171 @@ export default function RosterPage() {
         error instanceof Error ? error.message : "Unable to clear overrides."
       )
     }
-  }, [loadOverrides, overrideEndDate, overrideStaffId, overrideStartDate])
+  }, [
+    loadFlexibleSlots,
+    loadFlexiblePatterns,
+    loadFlexibleWeekPlans,
+    loadOverrides,
+    flexibleEditorMode,
+    overrideEndDate,
+    overrideStaffId,
+    overrideStartDate,
+    recurringPatternId,
+    useFlexibleSlot,
+  ])
+
+  const applyDraftDayUpdate = React.useCallback(
+    (updater: (days: FlexibleDraftDay[]) => FlexibleDraftDay[]) => {
+      if (flexibleEditorMode === "WEEK_OVERRIDE") {
+        setFlexibleDraftDays((prev) => updater(prev))
+        return
+      }
+      setRecurringDraftWeeks((prev) =>
+        prev.map((week) =>
+          week.weekIndex === recurringSelectedWeekIndex
+            ? { ...week, days: updater(week.days) }
+            : week
+        )
+      )
+    },
+    [flexibleEditorMode, recurringSelectedWeekIndex]
+  )
+
+  const setFlexibleDayOff = React.useCallback(
+    (day: Weekday, isOff: boolean) => {
+      applyDraftDayUpdate((days) =>
+        days.map((item) =>
+          item.day === day
+            ? {
+                ...item,
+                isOff,
+                slots: isOff ? [] : item.slots.length ? item.slots : [{ startTime: "10:00", endTime: "14:00", breaks: [] }],
+              }
+            : item
+        )
+      )
+    },
+    [applyDraftDayUpdate]
+  )
+
+  const addFlexibleDaySlot = React.useCallback(
+    (day: Weekday) => {
+      applyDraftDayUpdate((days) =>
+        days.map((item) =>
+          item.day === day
+            ? {
+                ...item,
+                isOff: false,
+                slots: [...item.slots, { startTime: "10:00", endTime: "14:00", breaks: [] }],
+              }
+            : item
+        )
+      )
+    },
+    [applyDraftDayUpdate]
+  )
+
+  const removeFlexibleDaySlot = React.useCallback(
+    (day: Weekday, slotIndex: number) => {
+      applyDraftDayUpdate((days) =>
+        days.map((item) =>
+          item.day === day
+            ? { ...item, slots: item.slots.filter((_, index) => index !== slotIndex) }
+            : item
+        )
+      )
+    },
+    [applyDraftDayUpdate]
+  )
+
+  const updateFlexibleDaySlot = React.useCallback(
+    (day: Weekday, slotIndex: number, patch: Partial<FlexibleDraftSlot>) => {
+      applyDraftDayUpdate((days) =>
+        days.map((item) =>
+          item.day === day
+            ? {
+                ...item,
+                slots: item.slots.map((slot, index) => (index === slotIndex ? { ...slot, ...patch } : slot)),
+              }
+            : item
+        )
+      )
+    },
+    [applyDraftDayUpdate]
+  )
+
+  const addFlexibleSlotBreak = React.useCallback(
+    (day: Weekday, slotIndex: number) => {
+      applyDraftDayUpdate((days) =>
+        days.map((item) =>
+          item.day === day
+            ? {
+                ...item,
+                slots: item.slots.map((slot, index) =>
+                  index === slotIndex
+                    ? {
+                        ...slot,
+                        breaks: [...slot.breaks, { startTime: "12:00", endTime: "13:00" }],
+                      }
+                    : slot
+                ),
+              }
+            : item
+        )
+      )
+    },
+    [applyDraftDayUpdate]
+  )
+
+  const removeFlexibleSlotBreak = React.useCallback(
+    (day: Weekday, slotIndex: number, breakIndex: number) => {
+      applyDraftDayUpdate((days) =>
+        days.map((item) =>
+          item.day === day
+            ? {
+                ...item,
+                slots: item.slots.map((slot, index) =>
+                  index === slotIndex
+                    ? { ...slot, breaks: slot.breaks.filter((_, i) => i !== breakIndex) }
+                    : slot
+                ),
+              }
+            : item
+        )
+      )
+    },
+    [applyDraftDayUpdate]
+  )
+
+  const updateFlexibleSlotBreak = React.useCallback(
+    (
+      day: Weekday,
+      slotIndex: number,
+      breakIndex: number,
+      patch: Partial<FlexibleDraftBreak>
+    ) => {
+      applyDraftDayUpdate((days) =>
+        days.map((item) =>
+          item.day === day
+            ? {
+                ...item,
+                slots: item.slots.map((slot, index) =>
+                  index === slotIndex
+                    ? {
+                        ...slot,
+                        breaks: slot.breaks.map((slotBreak, i) =>
+                          i === breakIndex ? { ...slotBreak, ...patch } : slotBreak
+                        ),
+                      }
+                    : slot
+                ),
+              }
+            : item
+        )
+      )
+    },
+    [applyDraftDayUpdate]
+  )
 
   const resolveConflicts = React.useCallback(async () => {
     if (!conflicts.length) {
@@ -1282,7 +2081,7 @@ export default function RosterPage() {
                         )
                       }
 
-                      if (!periods.length || !template) {
+                      if (!periods.length) {
                         return (
                           <td
                             key={`${member.id}-${dateKey}`}
@@ -1301,11 +2100,15 @@ export default function RosterPage() {
                           onClick={() => openOverrideEditor(member.id, day)}
                         >
                           <div className="rounded bg-sky-600 px-2 py-1 text-xs font-medium text-white">
-                            {template.name}
+                            {template?.name ?? "Flexible shift"}
                           </div>
                           <div className="mt-1 text-xs text-muted-foreground">
-                            {formatTimeFrom24h(template.startTime, settings)} -{" "}
-                            {formatTimeFrom24h(template.endTime, settings)}
+                            {periods
+                              .map(
+                                (period) =>
+                                  `${formatTimeFrom24h(period.startTime, settings)} - ${formatTimeFrom24h(period.endTime, settings)}`
+                              )
+                              .join(", ")}
                           </div>
                         </td>
                       )
@@ -1411,9 +2214,11 @@ export default function RosterPage() {
       <Dialog open={overrideOpen} onOpenChange={setOverrideOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Change shift</DialogTitle>
+            <DialogTitle>{useFlexibleSlot ? "Edit flexible availability" : "Change shift"}</DialogTitle>
             <DialogDescription>
-              Apply a shift template to a date range for this staff member.
+              {useFlexibleSlot
+                ? "Configure weekly overrides or recurring custom patterns for flexible staff."
+                : "Apply a shift template to a date range for this staff member."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1431,6 +2236,43 @@ export default function RosterPage() {
               />
             </div>
             <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Mode</Label>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={useFlexibleSlot ? "FLEXIBLE" : "TEMPLATE"}
+                onChange={(event) => {
+                  const nextFlexible = event.target.value === "FLEXIBLE"
+                  setUseFlexibleSlot(nextFlexible)
+                  if (nextFlexible) {
+                    setOverrideUnavailable(false)
+                    setOverrideTemplateId("")
+                    setOverrideSkipWeekOff(false)
+                    const weekStartDate = getWeekStartMondayKey(new Date(`${overrideStartDate}T00:00:00.000Z`))
+                    const weekEndDate = new Date(`${weekStartDate}T00:00:00.000Z`)
+                    weekEndDate.setDate(weekEndDate.getDate() + 6)
+                    setOverrideStartDate(weekStartDate)
+                    setOverrideEndDate(toISODate(weekEndDate))
+                    setFlexibleEditorMode("WEEK_OVERRIDE")
+                    if (overrideStaffId) {
+                      setFlexibleDraftDays(getFlexibleDraftForWeek(overrideStaffId, weekStartDate))
+                      const recurringDraft = getRecurringDraftFromPattern(overrideStaffId)
+                      setRecurringPatternId(recurringDraft.patternId)
+                      setRecurringPatternName(recurringDraft.patternName)
+                      setRecurringValidFrom(recurringDraft.validFrom || weekStartDate)
+                      setRecurringValidTo(recurringDraft.validTo)
+                      setRecurringCycleLength(recurringDraft.cycleLength)
+                      setRecurringSelectedWeekIndex(1)
+                      setRecurringDraftWeeks(recurringDraft.weeks)
+                    }
+                  }
+                }}
+              >
+                <option value="TEMPLATE">Template/Unavailable override</option>
+                <option value="FLEXIBLE">Flexible weekly plan</option>
+              </select>
+            </div>
+            {!useFlexibleSlot ? (
+            <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">Shift template</Label>
               <SearchableSelect
                 value={overrideTemplateId}
@@ -1444,27 +2286,277 @@ export default function RosterPage() {
                   )}-${formatTimeFrom24h(template.endTime, settings)})`,
                 }))}
                 onChange={(nextValue) => setOverrideTemplateId(nextValue)}
-                disabled={overrideUnavailable}
+                disabled={overrideUnavailable || useFlexibleSlot}
               />
             </div>
+            ) : null}
+            {useFlexibleSlot ? (
+              <div className="space-y-3 rounded-md border p-3">
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Flexible plan type</Label>
+                  <select
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={flexibleEditorMode}
+                    onChange={(event) =>
+                      setFlexibleEditorMode(
+                        event.target.value as "WEEK_OVERRIDE" | "RECURRING_PATTERN"
+                      )
+                    }
+                  >
+                    <option value="WEEK_OVERRIDE">Weekly override (current week)</option>
+                    <option value="RECURRING_PATTERN">Recurring base pattern</option>
+                  </select>
+                </div>
+                {flexibleEditorMode === "RECURRING_PATTERN" ? (
+                  <div className="grid gap-2 rounded-md border p-2 sm:grid-cols-2">
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label className="text-[10px] text-muted-foreground">Pattern name</Label>
+                      <Input
+                        value={recurringPatternName}
+                        onChange={(event) => setRecurringPatternName(event.target.value)}
+                        placeholder="Optional pattern name"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground">Valid from</Label>
+                      <Input
+                        type="date"
+                        value={recurringValidFrom}
+                        onChange={(event) => setRecurringValidFrom(event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground">Valid to</Label>
+                      <Input
+                        type="date"
+                        value={recurringValidTo}
+                        onChange={(event) => setRecurringValidTo(event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground">Cycle weeks</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={12}
+                        value={recurringCycleLength}
+                        onChange={(event) => {
+                          const nextLength = Math.max(1, Math.min(12, Number(event.target.value) || 1))
+                          setRecurringCycleLength(nextLength)
+                          setRecurringDraftWeeks((prev) => {
+                            const next = [...prev]
+                            if (next.length < nextLength) {
+                              for (let index = next.length; index < nextLength; index += 1) {
+                                next.push({
+                                  weekIndex: index + 1,
+                                  days: WEEKDAY_ORDER.map((day) => createEmptyFlexibleDraftDay(day)),
+                                })
+                              }
+                            }
+                            if (next.length > nextLength) {
+                              next.splice(nextLength)
+                            }
+                            return next.map((week, index) => ({ ...week, weekIndex: index + 1 }))
+                          })
+                          setRecurringSelectedWeekIndex((prev) => Math.min(prev, nextLength))
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground">Editing week</Label>
+                      <select
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        value={recurringSelectedWeekIndex}
+                        onChange={(event) =>
+                          setRecurringSelectedWeekIndex(Number(event.target.value) || 1)
+                        }
+                      >
+                        {Array.from({ length: recurringCycleLength }, (_, index) => (
+                          <option key={`recurring-week-${index + 1}`} value={index + 1}>
+                            Week {index + 1}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="text-xs text-muted-foreground">
+                  {flexibleEditorMode === "WEEK_OVERRIDE"
+                    ? "Define weekly override availability (multiple slots and breaks supported)."
+                    : "Define recurring week pattern (multiple slots and breaks supported)."}
+                </div>
+                <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
+                  {currentEditableDays.map((day) => (
+                    <div key={day.day} className="rounded-md border p-2">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-sm font-medium">{day.day}</div>
+                        <label className="flex items-center gap-2 text-xs">
+                          <input
+                            type="checkbox"
+                            checked={day.isOff}
+                            onChange={(event) => setFlexibleDayOff(day.day, event.target.checked)}
+                          />
+                          Off
+                        </label>
+                      </div>
+                      {day.isOff ? null : (
+                        <div className="space-y-2">
+                          {day.slots.map((slot, slotIndex) => (
+                            <div key={`${day.day}-slot-${slotIndex}`} className="rounded border p-2">
+                              <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                                <div>
+                                  <Label className="text-[10px] text-muted-foreground">Start</Label>
+                                  <TimePicker
+                                    value={slot.startTime}
+                                    timeFormat={settings.timeFormat ?? "H24"}
+                                    onChange={(value) =>
+                                      updateFlexibleDaySlot(day.day, slotIndex, { startTime: value })
+                                    }
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-[10px] text-muted-foreground">End</Label>
+                                  <TimePicker
+                                    value={slot.endTime}
+                                    timeFormat={settings.timeFormat ?? "H24"}
+                                    onChange={(value) =>
+                                      updateFlexibleDaySlot(day.day, slotIndex, { endTime: value })
+                                    }
+                                  />
+                                </div>
+                                <div className="flex items-end">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => removeFlexibleDaySlot(day.day, slotIndex)}
+                                  >
+                                    Remove
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="mt-2 space-y-2">
+                                {slot.breaks.map((slotBreak, breakIndex) => (
+                                  <div
+                                    key={`${day.day}-slot-${slotIndex}-break-${breakIndex}`}
+                                    className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]"
+                                  >
+                                    <div>
+                                      <Label className="text-[10px] text-muted-foreground">Break start</Label>
+                                      <TimePicker
+                                        value={slotBreak.startTime}
+                                        timeFormat={settings.timeFormat ?? "H24"}
+                                        onChange={(value) =>
+                                          updateFlexibleSlotBreak(day.day, slotIndex, breakIndex, {
+                                            startTime: value,
+                                          })
+                                        }
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-[10px] text-muted-foreground">Break end</Label>
+                                      <TimePicker
+                                        value={slotBreak.endTime}
+                                        timeFormat={settings.timeFormat ?? "H24"}
+                                        onChange={(value) =>
+                                          updateFlexibleSlotBreak(day.day, slotIndex, breakIndex, {
+                                            endTime: value,
+                                          })
+                                        }
+                                      />
+                                    </div>
+                                    <div className="flex items-end">
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => removeFlexibleSlotBreak(day.day, slotIndex, breakIndex)}
+                                      >
+                                        Remove break
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => addFlexibleSlotBreak(day.day, slotIndex)}
+                                >
+                                  Add break
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                          <Button type="button" variant="outline" size="sm" onClick={() => addFlexibleDaySlot(day.day)}>
+                            Add slot
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Start date</Label>
+                <Label className="text-xs text-muted-foreground">
+                  {useFlexibleSlot
+                    ? flexibleEditorMode === "WEEK_OVERRIDE"
+                      ? "Week start date"
+                      : "Pattern start date"
+                    : "Start date"}
+                </Label>
                 <Input
                   type="date"
-                  value={overrideStartDate}
-                  onChange={(event) => setOverrideStartDate(event.target.value)}
+                  value={
+                    useFlexibleSlot
+                      ? flexibleEditorMode === "WEEK_OVERRIDE"
+                        ? overrideStartDate
+                        : recurringValidFrom
+                      : overrideStartDate
+                  }
+                  onChange={(event) => {
+                    const value = event.target.value
+                    if (useFlexibleSlot && flexibleEditorMode === "RECURRING_PATTERN") {
+                      setRecurringValidFrom(value)
+                      return
+                    }
+                    setOverrideStartDate(value)
+                  }}
+                  disabled={useFlexibleSlot && flexibleEditorMode === "WEEK_OVERRIDE"}
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">End date</Label>
+                <Label className="text-xs text-muted-foreground">
+                  {useFlexibleSlot
+                    ? flexibleEditorMode === "WEEK_OVERRIDE"
+                      ? "Week end date"
+                      : "Pattern end date"
+                    : "End date"}
+                </Label>
                 <Input
                   type="date"
-                  value={overrideEndDate}
-                  onChange={(event) => setOverrideEndDate(event.target.value)}
+                  value={
+                    useFlexibleSlot
+                      ? flexibleEditorMode === "WEEK_OVERRIDE"
+                        ? overrideEndDate
+                        : recurringValidTo
+                      : overrideEndDate
+                  }
+                  onChange={(event) => {
+                    const value = event.target.value
+                    if (useFlexibleSlot && flexibleEditorMode === "RECURRING_PATTERN") {
+                      setRecurringValidTo(value)
+                      return
+                    }
+                    setOverrideEndDate(value)
+                  }}
+                  disabled={useFlexibleSlot && flexibleEditorMode === "WEEK_OVERRIDE"}
                 />
               </div>
             </div>
+            {!useFlexibleSlot ? (
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -1476,26 +2568,50 @@ export default function RosterPage() {
                     setOverrideTemplateId("")
                   }
                 }}
+                disabled={useFlexibleSlot}
               />
               Mark as unavailable
             </label>
+            ) : null}
+            {!useFlexibleSlot ? (
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={overrideSkipWeekOff}
                 onChange={(event) => setOverrideSkipWeekOff(event.target.checked)}
+                disabled={useFlexibleSlot}
               />
               Skip holidays / week off
             </label>
+            ) : null}
           </div>
           <DialogFooter className="pt-2">
             <Button variant="outline" onClick={() => setOverrideOpen(false)}>
               Cancel
             </Button>
             <Button variant="outline" onClick={clearOverride}>
-              Clear override
+              {useFlexibleSlot
+                ? flexibleEditorMode === "WEEK_OVERRIDE"
+                  ? "Clear weekly override"
+                  : "Deactivate recurring pattern"
+                : "Clear override"}
             </Button>
-            <Button onClick={submitOverride}>Save override</Button>
+            {useFlexibleSlot &&
+            flexibleEditorMode === "RECURRING_PATTERN" &&
+            Boolean(recurringPatternId) ? (
+              <Button variant="outline" onClick={() => submitOverride(true)}>
+                Save as new pattern
+              </Button>
+            ) : null}
+            <Button onClick={() => submitOverride(false)}>
+              {useFlexibleSlot
+                ? flexibleEditorMode === "WEEK_OVERRIDE"
+                  ? "Save weekly override"
+                  : recurringPatternId
+                    ? "Update recurring pattern"
+                    : "Save recurring pattern"
+                : "Save override"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
