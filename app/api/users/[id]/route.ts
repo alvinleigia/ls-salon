@@ -13,6 +13,17 @@ import { updateUserSchema } from "@/lib/validation"
 import { canManageUsers, type Role } from "@/lib/permissions"
 import { requireTenantSession } from "@/lib/tenant-auth"
 
+const getTodayUtc = () => new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`)
+
+const getCurrentWeekStartMondayUtc = (value: Date) => {
+  const monday = new Date(value)
+  const day = monday.getUTCDay()
+  const delta = day === 0 ? -6 : 1 - day
+  monday.setUTCDate(monday.getUTCDate() + delta)
+  monday.setUTCHours(0, 0, 0, 0)
+  return monday
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -209,6 +220,8 @@ export async function PATCH(
       if (targetRole === "STAFF" && staffProfileInput) {
         const managerUserId = staffProfileInput.managerUserId?.trim() || null
         const schedulingMode = staffProfileInput.schedulingMode ?? "STANDARD"
+        const todayUtc = getTodayUtc()
+        const currentWeekStartUtc = getCurrentWeekStartMondayUtc(todayUtc)
         if (managerUserId) {
           const managerUser = await tx.user.findUnique({
             where: { id: managerUserId },
@@ -227,6 +240,59 @@ export async function PATCH(
           })
           if (!managerInTenant) {
             throw new Error("Selected manager does not belong to this tenant.")
+          }
+        }
+
+        const existingProfile = await tx.staffProfile.findUnique({
+          where: { userId: id },
+          select: { id: true, schedulingMode: true },
+        })
+
+        if (existingProfile && existingProfile.schedulingMode !== schedulingMode) {
+          if (schedulingMode === "FLEXIBLE") {
+            const overlappingAssignment = await tx.staffScheduleAssignment.findFirst({
+              where: {
+                staffProfileId: existingProfile.id,
+                OR: [{ endDate: null }, { endDate: { gte: todayUtc } }],
+              },
+              select: { id: true },
+            })
+            if (overlappingAssignment) {
+              throw new Error(
+                "Cannot switch to Flexible while active/future shift schedule assignments exist. Remove schedule assignments first."
+              )
+            }
+          } else {
+            const [activePattern, currentOrFutureWeekPlan, currentOrFutureSlot] = await Promise.all([
+              tx.staffFlexiblePattern.findFirst({
+                where: {
+                  staffProfileId: existingProfile.id,
+                  isActive: true,
+                  OR: [{ validTo: null }, { validTo: { gte: todayUtc } }],
+                },
+                select: { id: true },
+              }),
+              tx.staffFlexibleWeekPlan.findFirst({
+                where: {
+                  staffProfileId: existingProfile.id,
+                  weekStartDate: { gte: currentWeekStartUtc },
+                },
+                select: { id: true },
+              }),
+              tx.staffFlexibleAvailability.findFirst({
+                where: {
+                  staffProfileId: existingProfile.id,
+                  date: { gte: todayUtc },
+                },
+                select: { id: true },
+              }),
+            ])
+
+            if (activePattern || currentOrFutureWeekPlan || currentOrFutureSlot) {
+              throw new Error(
+                "Cannot switch to Standard while active/future flexible availability exists. Clear flexible plans/slots first."
+              )
+            }
           }
         }
 

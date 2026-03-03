@@ -254,7 +254,7 @@ export async function POST(request: Request) {
   }
 
   const staffProfiles = await prisma.staffProfile.findMany({
-    where: { userId: { in: staffIds }, user: { tenantId } },
+    where: { userId: { in: staffIds }, user: { tenantId }, schedulingMode: "STANDARD" },
     select: { id: true, userId: true },
   })
 
@@ -264,16 +264,29 @@ export async function POST(request: Request) {
   if (missingStaffIds.length) {
     const staffUsers = await prisma.user.findMany({
       where: { id: { in: missingStaffIds }, role: "STAFF", tenantId },
-      select: { id: true },
+      select: { id: true, staffProfile: { select: { schedulingMode: true } } },
     })
+    const flexibleStaffIds = staffUsers
+      .filter((user) => user.staffProfile?.schedulingMode === "FLEXIBLE")
+      .map((user) => user.id)
+    if (flexibleStaffIds.length) {
+      const response = NextResponse.json(
+        { error: "Flexible-mode staff cannot be assigned to shift schedules." },
+        { status: 409 }
+      )
+      logApiRequestSuccess(logContext, 409, { reason: "flexible_staff_not_allowed" })
+      return withRequestId(response, logContext.requestId)
+    }
     if (staffUsers.length) {
       const createdProfiles = await Promise.all(
-        staffUsers.map((user) =>
+        staffUsers
+          .filter((user) => !user.staffProfile)
+          .map((user) =>
           prisma.staffProfile.create({
             data: { userId: user.id },
             select: { id: true, userId: true },
           })
-        )
+          )
       )
       for (const profile of createdProfiles) {
         staffProfilesMap.set(profile.userId, profile)

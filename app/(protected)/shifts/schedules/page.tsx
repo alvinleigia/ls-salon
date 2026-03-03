@@ -148,6 +148,17 @@ export default function ShiftSchedulesPage() {
 
   const [newSchedule, setNewSchedule] = React.useState<ShiftScheduleForm>(defaultForm)
   const [editSchedule, setEditSchedule] = React.useState<ShiftScheduleForm>(defaultForm)
+  const standardStaffOptions = React.useMemo(
+    () =>
+      staffOptions.filter(
+        (staff) => (staff.staffProfile?.schedulingMode ?? "STANDARD") === "STANDARD"
+      ),
+    [staffOptions]
+  )
+  const standardStaffIdSet = React.useMemo(
+    () => new Set(standardStaffOptions.map((staff) => staff.id)),
+    [standardStaffOptions]
+  )
 
   const {
     errors: createErrors,
@@ -250,7 +261,8 @@ export default function ShiftSchedulesPage() {
   )
 
   const createSchedule = async () => {
-    if (!newSchedule.isDefault && !newSchedule.staffIds.length) {
+    const normalizedStaffIds = newSchedule.staffIds.filter((staffId) => standardStaffIdSet.has(staffId))
+    if (!newSchedule.isDefault && !normalizedStaffIds.length) {
       toast.error("Select at least one staff member.")
       return
     }
@@ -259,7 +271,10 @@ export default function ShiftSchedulesPage() {
     const response = await fetch("/api/shifts/schedules", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newSchedule),
+      body: JSON.stringify({
+        ...newSchedule,
+        staffIds: normalizedStaffIds,
+      }),
     })
 
     if (!response.ok) {
@@ -291,11 +306,15 @@ export default function ShiftSchedulesPage() {
         ? toDateInputValue(assignments[0].endDate)
         : ""
       setEditingSchedule(schedule)
+      const editableStaffIds = assignments
+        .map((assignment) => assignment.staffProfile?.user?.id)
+        .filter((staffId): staffId is string => Boolean(staffId && standardStaffIdSet.has(staffId)))
+      if (assignments.length && !editableStaffIds.length && !schedule.isDefault) {
+        toast.warning("This schedule had flexible staff assignments. Flexible staff are excluded from shift schedules.")
+      }
       setEditSchedule({
         name: schedule.name ?? "",
-        staffIds: assignments
-          .map((assignment) => assignment.staffProfile?.user?.id)
-          .filter(Boolean) as string[],
+        staffIds: editableStaffIds,
         isDefault: Boolean(schedule.isDefault),
         startDate: toDateInputValue(schedule.startDate),
         assignmentStartDate: assignmentStart || toDateInputValue(schedule.startDate),
@@ -315,12 +334,13 @@ export default function ShiftSchedulesPage() {
       })
       setEditOpen(true)
     },
-    [clearEditErrors]
+    [clearEditErrors, standardStaffIdSet]
   )
 
   const saveEdit = async () => {
     if (!editingSchedule) return
-    if (!editSchedule.isDefault && !editSchedule.staffIds.length) {
+    const normalizedStaffIds = editSchedule.staffIds.filter((staffId) => standardStaffIdSet.has(staffId))
+    if (!editSchedule.isDefault && !normalizedStaffIds.length) {
       toast.error("Select a staff member.")
       return
     }
@@ -328,7 +348,10 @@ export default function ShiftSchedulesPage() {
     const response = await fetch(`/api/shifts/schedules/${editingSchedule.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editSchedule),
+      body: JSON.stringify({
+        ...editSchedule,
+        staffIds: normalizedStaffIds,
+      }),
     })
 
     if (!response.ok) {
@@ -427,6 +450,9 @@ export default function ShiftSchedulesPage() {
             <span>{summarizeAssignments(row.original)}</span>
             <span className="text-xs text-muted-foreground">
               {summarizeAssignmentRange(row.original, formatDate)}
+            </span>
+            <span className="text-[11px] uppercase tracking-wide text-muted-foreground/80">
+              Standard only
             </span>
           </div>
         ),
@@ -583,7 +609,7 @@ export default function ShiftSchedulesPage() {
               searchPlaceholder="Search staff..."
               options={[
                 { value: "all", label: "All staff" },
-                ...staffOptions.map((staff) => ({
+                ...standardStaffOptions.map((staff) => ({
                   value: staff.id,
                   label: staff.name?.trim() || staff.email,
                 })),
@@ -646,7 +672,7 @@ export default function ShiftSchedulesPage() {
               errors={createErrors}
               allowMultiStaff
               today={today}
-              staffOptions={staffOptions}
+              staffOptions={standardStaffOptions}
               templates={templates}
             />
           </div>
@@ -684,7 +710,7 @@ export default function ShiftSchedulesPage() {
               errors={editErrors}
               allowMultiStaff
               today={today}
-              staffOptions={staffOptions}
+              staffOptions={standardStaffOptions}
               templates={templates}
             />
           </div>

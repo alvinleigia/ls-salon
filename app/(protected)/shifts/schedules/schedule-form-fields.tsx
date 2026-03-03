@@ -140,8 +140,13 @@ export function ScheduleFormFields({
                 staffIds: nextValue ? [nextValue] : [],
               }))
             }
-          />
+            />
         )}
+        {!form.isDefault ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Flexible-mode staff are managed in flexible weekly/recurring plans, not shift schedules.
+          </p>
+        ) : null}
       </FormField>
       {!form.isDefault ? (
         <div className="grid gap-4 sm:grid-cols-2">
