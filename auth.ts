@@ -43,6 +43,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             image: user.image,
             role: user.role,
             tenantId: user.tenantId,
+            tenantSlug: tenant.slug,
           }
         })
       },
@@ -55,6 +56,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user) {
         token.role = (user as { role?: string }).role
         token.tenantId = (user as { tenantId?: string }).tenantId
+        token.tenantSlug = (user as { tenantSlug?: string }).tenantSlug
+      } else if (token.tenantId && !token.tenantSlug) {
+        const tenant = await prisma.tenant.findUnique({
+          where: { id: token.tenantId as string },
+          select: { slug: true },
+        })
+        token.tenantSlug = tenant?.slug
       }
       return token
     },
@@ -63,6 +71,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.id = token.sub ?? session.user.id
         ;(session.user as { role?: string }).role = token.role as string | undefined
         ;(session.user as { tenantId?: string }).tenantId = token.tenantId as
+          | string
+          | undefined
+        ;(session.user as { tenantSlug?: string }).tenantSlug = token.tenantSlug as
           | string
           | undefined
       }

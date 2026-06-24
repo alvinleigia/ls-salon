@@ -79,10 +79,14 @@ export function AppSidebar() {
   const user = session?.user
   const role = (user as { role?: Role })?.role
   const canManage = canManageUsers(role ?? null)
+  const sessionTenantSlug = (user as { tenantSlug?: string | null } | undefined)?.tenantSlug
+    ?.trim()
+    .toLowerCase()
 
   const platformTenantSlug = process.env.NEXT_PUBLIC_PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
 
   const tenantSlug = React.useMemo(() => {
+    if (sessionTenantSlug) return sessionTenantSlug
     if (typeof window === "undefined") return null
     const hostname = window.location.hostname.toLowerCase()
     if (hostname === "localhost") return platformTenantSlug
@@ -91,7 +95,7 @@ export function AppSidebar() {
       return slug || null
     }
     return null
-  }, [pathname, platformTenantSlug])
+  }, [platformTenantSlug, sessionTenantSlug])
 
   const isPlatformSuperAdmin = role === "ADMIN" && tenantSlug === platformTenantSlug
   const [openSections, setOpenSections] = React.useState<Record<string, boolean>>({})
