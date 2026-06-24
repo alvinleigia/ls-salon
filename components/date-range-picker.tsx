@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { CalendarIcon } from "lucide-react"
-import type { DateRange, SelectRangeEventHandler } from "react-day-picker"
+import type { DateRange, OnSelectHandler } from "react-day-picker"
 
 import { cn } from "@/lib/utils"
 import { useDateFormatter } from "@/hooks/use-date-formatter"
@@ -47,7 +47,7 @@ export function DateRangePicker({
       ? `${formatDate(value.from)} - ${formatDate(value.to)}`
       : formatDate(value.from)
     : placeholder
-  const handleCalendarSelect: SelectRangeEventHandler = (nextRange, selectedDay) => {
+  const handleCalendarSelect: OnSelectHandler<DateRange | undefined> = (nextRange, selectedDay) => {
     if (value?.from && value?.to && selectedDay) {
       onChange({ from: selectedDay, to: undefined })
       return

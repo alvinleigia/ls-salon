@@ -13,7 +13,6 @@
     "bootstrap:admin": "node scripts/bootstrap-admin.mjs"
   },
   "dependencies": {
-    "@auth/prisma-adapter": "^2.11.1",
     "@pdf-lib/fontkit": "^1.1.1",
     "@prisma/adapter-pg": "^6.19.2",
     "@prisma/client": "^6.19.2",
@@ -40,7 +39,7 @@
     "pdf-lib": "^1.17.1",
     "pg": "^8.18.0",
     "react": "19.2.3",
-    "react-day-picker": "^8.10.1",
+    "react-day-picker": "^10.0.1",
     "react-dom": "19.2.3",
     "recharts": "^3.7.0",
     "sonner": "^2.0.7",
