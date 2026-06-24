@@ -1,7 +1,48 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { PrismaClient } = require("@prisma/client");
+const { PrismaPg } = require("@prisma/adapter-pg");
+const { Pool } = require("pg");
 
-const prisma = new PrismaClient();
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+const originalConnect = pool.connect.bind(pool);
+pool.connect = (callback) => {
+  const applyBypass = (client) =>
+    client.query("SELECT set_config('app.rls_bypass', 'on', false)");
+
+  if (typeof callback === "function") {
+    originalConnect(async (error, client, done) => {
+      if (error || !client) {
+        callback(error, client, done);
+        return;
+      }
+      try {
+        await applyBypass(client);
+        callback(undefined, client, done);
+      } catch (settingsError) {
+        done(settingsError);
+        callback(settingsError, client, done);
+      }
+    });
+    return;
+  }
+
+  return originalConnect().then(async (client) => {
+    try {
+      await applyBypass(client);
+      return client;
+    } catch (error) {
+      client.release(error);
+      throw error;
+    }
+  });
+};
+
+const prisma = new PrismaClient({
+  adapter: new PrismaPg(pool, { disposeExternalPool: true }),
+});
 
 const categories = [
   {

@@ -11,7 +11,7 @@ const getTenantSlugFromHost = (hostHeader: string | null) => {
   const hostname = hostHeader.split(":")[0]?.trim().toLowerCase()
   if (!hostname) return null
 
-  if (hostname === "localhost") return "default"
+  if (hostname === "localhost") return PLATFORM_TENANT_SLUG
   if (hostname.endsWith(".localhost")) {
     const slug = hostname.slice(0, -".localhost".length)
     return slug || null

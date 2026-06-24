@@ -11,6 +11,8 @@ export default defineConfig({
   },
   engine: "classic",
   datasource: {
-    url: env("DATABASE_URL"),
+    // Runtime uses DATABASE_URL. When available, DIRECT_URL can be used by
+    // Prisma CLI/migrations to connect straight to the database.
+    url: process.env.DIRECT_URL?.trim() || env("DATABASE_URL"),
   },
 });

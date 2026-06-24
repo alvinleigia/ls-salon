@@ -8,7 +8,7 @@ import {
   logApiRequestSuccess,
   withRequestId,
 } from "@/lib/api-logging"
-import { prisma } from "@/lib/prisma"
+import { enterTenantDbContext, prisma } from "@/lib/prisma"
 import { forgotPasswordSchema } from "@/lib/validation"
 import { mailer, mailFrom } from "@/lib/mailer"
 import { resetPasswordEmail } from "@/lib/emails/reset-password"
@@ -61,6 +61,7 @@ export async function POST(request: Request) {
       logApiRequestSuccess(logContext, 404, { reason: "tenant_not_found" })
       return withRequestId(response, logContext.requestId)
     }
+    enterTenantDbContext(tenant.id)
 
     const { email } = parsed.data
     const ip = getClientIp(request)

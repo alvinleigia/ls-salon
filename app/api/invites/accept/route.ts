@@ -8,7 +8,7 @@ import {
   logApiRequestSuccess,
   withRequestId,
 } from "@/lib/api-logging"
-import { prisma } from "@/lib/prisma"
+import { enterTenantDbContext, prisma } from "@/lib/prisma"
 import { acceptInviteSchema } from "@/lib/validation"
 import { resolveTenantFromRequest } from "@/lib/tenancy"
 
@@ -41,6 +41,7 @@ export async function POST(request: Request) {
       logApiRequestSuccess(logContext, 404, { reason: "tenant_not_found" })
       return withRequestId(response, logContext.requestId)
     }
+    enterTenantDbContext(tenant.id)
 
     const invite = await prisma.invitation.findFirst({ where: { token, tenantId: tenant.id } })
     if (!invite || invite.acceptedAt || invite.expiresAt < new Date()) {

@@ -10,7 +10,7 @@ import {
 } from "@/lib/api-logging"
 import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import { canManageTenants, type Role } from "@/lib/permissions"
-import { prisma } from "@/lib/prisma"
+import { enterRlsBypassDbContext, prisma } from "@/lib/prisma"
 import { requireTenantSession } from "@/lib/tenant-auth"
 import { updateTenantAdminSchema } from "@/lib/validation"
 
@@ -32,6 +32,8 @@ const ensureProvisioningAccess = async (request: Request) => {
   if (!sessionTenant || sessionTenant.slug !== PLATFORM_TENANT_SLUG) {
     return { error: NextResponse.json({ error: "Forbidden." }, { status: 403 }) }
   }
+
+  enterRlsBypassDbContext()
 
   return { context: tenantSession.context }
 }

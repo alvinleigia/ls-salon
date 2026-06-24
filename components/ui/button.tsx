@@ -83,21 +83,21 @@ const derivePlainTextChildren = (children: React.ReactNode): string | null => {
 
 const iconForLabel = (label: string) => {
   const value = label.toLowerCase()
-  if (value.startsWith("add") || value.startsWith("new") || value.startsWith("create")) return Plus
-  if (value.startsWith("save") || value.startsWith("update")) return Save
-  if (value.startsWith("edit")) return Pencil
-  if (value.startsWith("delete") || value.startsWith("remove")) return Trash2
-  if (value.startsWith("cancel") || value.startsWith("close")) return X
-  if (value.startsWith("back")) return ArrowLeft
-  if (value.startsWith("search")) return Search
-  if (value.startsWith("filter")) return Filter
-  if (value.startsWith("apply") || value.startsWith("confirm") || value.startsWith("mark")) return Check
-  if (value.startsWith("send") || value.startsWith("submit") || value.startsWith("invite")) return Send
-  if (value.startsWith("email")) return Mail
-  if (value.startsWith("copy")) return Copy
-  if (value.startsWith("reset")) return RotateCcw
-  if (value.startsWith("revoke")) return Ban
-  if (value.startsWith("view")) return Eye
+  if (value.startsWith("add") || value.startsWith("new") || value.startsWith("create")) return <Plus className="h-4 w-4" />
+  if (value.startsWith("save") || value.startsWith("update")) return <Save className="h-4 w-4" />
+  if (value.startsWith("edit")) return <Pencil className="h-4 w-4" />
+  if (value.startsWith("delete") || value.startsWith("remove")) return <Trash2 className="h-4 w-4" />
+  if (value.startsWith("cancel") || value.startsWith("close")) return <X className="h-4 w-4" />
+  if (value.startsWith("back")) return <ArrowLeft className="h-4 w-4" />
+  if (value.startsWith("search")) return <Search className="h-4 w-4" />
+  if (value.startsWith("filter")) return <Filter className="h-4 w-4" />
+  if (value.startsWith("apply") || value.startsWith("confirm") || value.startsWith("mark")) return <Check className="h-4 w-4" />
+  if (value.startsWith("send") || value.startsWith("submit") || value.startsWith("invite")) return <Send className="h-4 w-4" />
+  if (value.startsWith("email")) return <Mail className="h-4 w-4" />
+  if (value.startsWith("copy")) return <Copy className="h-4 w-4" />
+  if (value.startsWith("reset")) return <RotateCcw className="h-4 w-4" />
+  if (value.startsWith("revoke")) return <Ban className="h-4 w-4" />
+  if (value.startsWith("view")) return <Eye className="h-4 w-4" />
   return null
 }
 
@@ -121,7 +121,7 @@ function Button({
   }) {
   const Comp = asChild ? Slot : "button"
   const plainText = derivePlainTextChildren(children)
-  const AutoIcon = autoIcon && plainText ? iconForLabel(plainText) : null
+  const autoIconNode = autoIcon && plainText ? iconForLabel(plainText) : null
 
   if (asChild) {
     return (
@@ -149,7 +149,7 @@ function Button({
       {...props}
     >
       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-      {!loading && AutoIcon ? <AutoIcon className="h-4 w-4" /> : null}
+      {!loading ? autoIconNode : null}
       {loading && loadingText ? loadingText : children}
     </Comp>
   )

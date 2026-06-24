@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import { enterTenantDbContext } from "@/lib/prisma"
 import { resolveTenantFromRequest } from "@/lib/tenancy"
 
 export type TenantSessionContext = {
@@ -23,6 +24,8 @@ export const requireTenantSession = async (request: Request) => {
   if (!sessionTenantId || sessionTenantId !== tenant.id) {
     return { error: NextResponse.json({ error: "Invalid tenant context." }, { status: 403 }) }
   }
+
+  enterTenantDbContext(tenant.id)
 
   return {
     context: {

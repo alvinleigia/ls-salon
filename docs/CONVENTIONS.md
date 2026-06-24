@@ -23,6 +23,9 @@ This is the baseline for new modules (API + UI) in this codebase.
 ## Multi-tenant SaaS
 - Tenant context is derived from host/subdomain (`lib/tenancy.ts`); API routes should use `requireTenantSession` (`lib/tenant-auth.ts`) for tenant-safe authorization.
 - All tenant-domain reads/writes must filter by `tenantId`; avoid cross-tenant lookups even for internal helper queries.
+- Database isolation is also enforced with Postgres row-level security (RLS) for tenant-owned tables.
+- Tenant-scoped API/auth entrypoints must establish DB context through `lib/prisma.ts` helpers (`requireTenantSession`, `enterTenantDbContext`, `enterRlsBypassDbContext`) before issuing Prisma queries.
+- Use RLS bypass context only for narrowly scoped platform/provisioning flows that intentionally cross tenant boundaries.
 - Keep one shared database with strict tenant scoping in Prisma queries and model uniqueness constraints (`@@unique([tenantId, ...])` where applicable).
 - Platform operations (tenant provisioning, status lifecycle, admin reset) are centralized under `/api/tenants*` and must validate platform-tenant scope (`PLATFORM_ADMIN_TENANT_SLUG`).
 - Tenant management UI lives under `/settings/tenants` and is only visible/accessible for platform admin users.

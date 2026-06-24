@@ -1,36 +1,100 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LS Salon
 
-## Getting Started
+Multi-tenant salon SaaS built with Next.js, Prisma, Postgres, and tenant-scoped host routing.
 
-First, run the development server:
+## Local setup
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Create your local env file from `.env.example`.
+
+Recommended local values:
+- `DATABASE_URL` should point to a local Postgres database you create first.
+- `APP_ROOT_DOMAIN=localhost` enables generated links such as `tenant-slug.localhost:3000`.
+- `PLATFORM_ADMIN_*` values control the bootstrap tenant and first admin login.
+
+For Supabase instead of local Postgres:
+- use the `Session pooler` connection string on port `5432` for `DATABASE_URL`
+- optionally use the `Direct connection` string on port `5432` for `DIRECT_URL`
+- do not use the transaction pooler on port `6543` for normal app runtime
+- see `docs/SUPABASE_SETUP.md`
+
+3. Create the database named in `DATABASE_URL`.
+
+4. Run the Prisma migration:
+
+```bash
+npm run db:migrate
+```
+
+5. Bootstrap the platform tenant and platform admin:
+
+```bash
+npm run bootstrap:admin
+```
+
+6. Start the app:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Local tenant URLs
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+With `APP_ROOT_DOMAIN=localhost`:
+- Platform tenant: `http://localhost:3000/`
+- Provisioned tenant example: `http://storefront1.localhost:3000/`
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+This codebase resolves tenant context from the request host. Normal tenant data is stored in shared tables and isolated with both:
+- app-level `tenantId` filtering
+- Postgres row-level security (RLS)
 
-## Learn More
+## Required environment variables
 
-To learn more about Next.js, take a look at the following resources:
+Required:
+- `DATABASE_URL`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Recommended:
+- `AUTH_SECRET`
+- `APP_ROOT_DOMAIN`
+- `PLATFORM_ADMIN_TENANT_SLUG`
+- `PLATFORM_ADMIN_EMAIL`
+- `PLATFORM_ADMIN_PASSWORD`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Optional:
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASS`
+- `MAIL_FROM`
+- `INVOICE_FONT_PATH`
+- `INVOICE_HEADER_LINES`
+- `NEXT_PUBLIC_SYNCFUSION_LICENSE_KEY`
 
-## Deploy on Vercel
+## Notes for this repo
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Multi-tenant conventions live in `docs/CONVENTIONS.md`.
+- Prisma schema lives in `prisma/schema.prisma`.
+- Tenant-safe Prisma context is handled in `lib/prisma.ts`.
+- Platform provisioning APIs intentionally use a tightly scoped RLS bypass path.
+- Supabase setup notes live in `docs/SUPABASE_SETUP.md`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Current status
+
+The project folder is restored and the missing tracked config files are back.
+
+What still blocks a full local run is environment setup:
+- there is currently no `.env`
+- `DATABASE_URL` is required during build/runtime
+
+After creating `.env` and pointing `DATABASE_URL` at a live Postgres database, the next safe step is:
+
+```bash
+npm run db:migrate
+npm run bootstrap:admin
+npm run dev
+```
