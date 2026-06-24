@@ -353,7 +353,7 @@ export function AppSidebar() {
           <SidebarGroupLabel></SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => {
+              {!isPlatformSuperAdmin && navItems.map((item) => {
                 const active = pathname === item.href
                 return (
                   <SidebarMenuItem key={item.href}>
