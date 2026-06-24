@@ -29,7 +29,7 @@ export const getTenantSlugFromHost = (hostHeader: string | null | undefined) => 
 
   const rootDomain = process.env.APP_ROOT_DOMAIN?.trim().toLowerCase()
   if (!rootDomain) return null
-  if (hostname === rootDomain) return null
+  if (hostname === rootDomain) return PLATFORM_TENANT_SLUG
   if (!hostname.endsWith(`.${rootDomain}`)) return null
 
   const slug = hostname.slice(0, -(`.${rootDomain}`.length))
