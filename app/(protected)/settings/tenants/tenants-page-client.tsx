@@ -32,12 +32,14 @@ type TenantRow = {
   slug: string
   status: TenantStatus
   userCount: number
+  customDomain: string | null
   createdAt: string
 }
 
 type TenantCreateFormValues = {
   name: string
   slug: string
+  customDomain: string
   adminName: string
   adminEmail: string
   adminPassword: string
@@ -55,6 +57,7 @@ type TenantAdminEditValues = {
 const defaultFormValues: TenantCreateFormValues = {
   name: "",
   slug: "",
+  customDomain: "",
   adminName: "",
   adminEmail: "",
   adminPassword: "",
@@ -75,7 +78,29 @@ const formatDateTime = (value: string) => {
   return date.toLocaleString()
 }
 
-export default function TenantsPageClient() {
+const tenantDomainHelpText =
+  "Leave this blank to use the default tenant subdomain. Add a custom domain only after its DNS is pointed to this app."
+
+const tenantDomainDnsHelpText =
+  "For a custom domain, point that hostname to Vercel first. Use a CNAME for subdomains like app.client.com, or Vercel's apex-domain setup for root domains like client.com."
+
+const getTenantAccessUrl = (tenant: TenantRow, rootDomain: string) => {
+  if (tenant.customDomain) {
+    return `https://${tenant.customDomain}`
+  }
+
+  if (rootDomain) {
+    return `https://${tenant.slug}.${rootDomain}`
+  }
+
+  return tenant.slug
+}
+
+type TenantsPageClientProps = {
+  rootDomain: string
+}
+
+export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps) {
   const [items, setItems] = React.useState<TenantRow[]>([])
   const [totalRows, setTotalRows] = React.useState(0)
   const [loading, setLoading] = React.useState(true)
@@ -85,6 +110,7 @@ export default function TenantsPageClient() {
   const [pagination, setPagination] = React.useState<PaginationState>({ pageIndex: 0, pageSize: 10 })
   const [createOpen, setCreateOpen] = React.useState(false)
   const [editAdminOpen, setEditAdminOpen] = React.useState(false)
+  const [editDomainOpen, setEditDomainOpen] = React.useState(false)
   const [resetAllOpen, setResetAllOpen] = React.useState(false)
   const [resetAllConfirmation, setResetAllConfirmation] = React.useState("")
   const [keepPlatformTenantOnReset, setKeepPlatformTenantOnReset] = React.useState(true)
@@ -93,7 +119,10 @@ export default function TenantsPageClient() {
   const [adminResettingId, setAdminResettingId] = React.useState<string | null>(null)
   const [adminLoadingTenantId, setAdminLoadingTenantId] = React.useState<string | null>(null)
   const [adminSavingTenantId, setAdminSavingTenantId] = React.useState<string | null>(null)
+  const [domainSavingTenantId, setDomainSavingTenantId] = React.useState<string | null>(null)
   const [editingTenantId, setEditingTenantId] = React.useState<string | null>(null)
+  const [domainTenant, setDomainTenant] = React.useState<TenantRow | null>(null)
+  const [domainValue, setDomainValue] = React.useState("")
   const [pendingStatusChange, setPendingStatusChange] = React.useState<{
     tenant: TenantRow
     status: TenantStatus
@@ -109,6 +138,11 @@ export default function TenantsPageClient() {
     errors: adminErrors,
     setErrorsFromResponse: setAdminErrorsFromResponse,
     clearErrors: clearAdminErrors,
+  } = useFormErrors()
+  const {
+    errors: domainErrors,
+    setErrorsFromResponse: setDomainErrorsFromResponse,
+    clearErrors: clearDomainErrors,
   } = useFormErrors()
 
   const loadTenants = React.useCallback(async () => {
@@ -284,6 +318,41 @@ export default function TenantsPageClient() {
     await loadTenants()
   }
 
+  const openDomainEditor = (tenant: TenantRow) => {
+    clearDomainErrors()
+    setDomainTenant(tenant)
+    setDomainValue(tenant.customDomain ?? "")
+    setEditDomainOpen(true)
+  }
+
+  const saveTenantDomain = async () => {
+    if (!domainTenant) return
+    setDomainSavingTenantId(domainTenant.id)
+    clearDomainErrors()
+    const response = await fetch(`/api/tenants/${domainTenant.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customDomain: domainValue }),
+    })
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string
+      details?: { fieldErrors?: Record<string, string[]> }
+    }
+    if (!response.ok) {
+      setDomainErrorsFromResponse(data)
+      toast.error(data.error ?? "Unable to update tenant domain.")
+      setDomainSavingTenantId(null)
+      return
+    }
+
+    toast.success("Tenant domain updated.")
+    setDomainSavingTenantId(null)
+    setEditDomainOpen(false)
+    setDomainTenant(null)
+    setDomainValue("")
+    await loadTenants()
+  }
+
   const resetAllTenants = async () => {
     if (resetAllConfirmation !== "RESET") {
       toast.error("Type RESET to continue.")
@@ -341,6 +410,29 @@ export default function TenantsPageClient() {
         accessorFn: (row) => row.status,
       },
       {
+        id: "customDomain",
+        meta: { label: "Custom domain" },
+        header: "Custom domain",
+        accessorFn: (row) => row.customDomain ?? "-",
+      },
+      {
+        id: "accessUrl",
+        meta: { label: "Access URL" },
+        header: "Access URL",
+        cell: ({ row }) => {
+          const tenant = row.original
+          const accessUrl = getTenantAccessUrl(tenant, rootDomain)
+          const accessMode = tenant.customDomain ? "Custom domain" : "Default subdomain"
+
+          return (
+            <div className="space-y-1">
+              <div className="font-medium">{accessUrl}</div>
+              <div className="text-xs text-muted-foreground">{accessMode}</div>
+            </div>
+          )
+        },
+      },
+      {
         id: "users",
         meta: { label: "Users" },
         header: "Users",
@@ -361,7 +453,8 @@ export default function TenantsPageClient() {
           const canMutate =
             lifecycleUpdatingId !== tenant.id &&
             adminResettingId !== tenant.id &&
-            adminLoadingTenantId !== tenant.id
+            adminLoadingTenantId !== tenant.id &&
+            domainSavingTenantId !== tenant.id
           return (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -395,6 +488,9 @@ export default function TenantsPageClient() {
                 <DropdownMenuItem onSelect={() => void openEditAdmin(tenant)}>
                   Edit admin details
                 </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => openDomainEditor(tenant)}>
+                  Edit custom domain
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void sendAdminReset(tenant)}>
                   Send admin reset
                 </DropdownMenuItem>
@@ -404,7 +500,7 @@ export default function TenantsPageClient() {
         },
       },
     ],
-    [adminLoadingTenantId, adminResettingId, lifecycleUpdatingId]
+    [adminLoadingTenantId, adminResettingId, domainSavingTenantId, lifecycleUpdatingId, rootDomain]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -445,7 +541,7 @@ export default function TenantsPageClient() {
         </Button>
       </div>
 
-      <DataTableToolbar table={table} searchPlaceholder="Search name or slug">
+      <DataTableToolbar table={table} searchPlaceholder="Search name, slug or domain">
         <div className="flex items-end gap-2">
           <FormField id="tenant-status" label="Status">
             <select
@@ -498,6 +594,10 @@ export default function TenantsPageClient() {
             <DialogTitle>New tenant</DialogTitle>
           </DialogHeader>
           <div className="grid gap-3">
+            <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">
+              If no custom domain is added, this tenant will use the standard slug-based URL.
+              You can add or change the custom domain later.
+            </div>
             <FormField id="tenant-name" label="Tenant name" error={errors.name}>
               <Input
                 id="tenant-name"
@@ -519,6 +619,27 @@ export default function TenantsPageClient() {
                 }
                 placeholder="example-tenant"
               />
+            </FormField>
+            <FormField
+              id="tenant-custom-domain"
+              label="Custom domain (optional)"
+              error={errors.customDomain}
+            >
+              <div className="space-y-2">
+                <Input
+                  id="tenant-custom-domain"
+                  value={formValues.customDomain}
+                  onChange={(event) =>
+                    setFormValues((prev) => ({
+                      ...prev,
+                      customDomain: event.target.value.toLowerCase(),
+                    }))
+                  }
+                  placeholder="cheron.com"
+                />
+                <p className="text-xs text-muted-foreground">{tenantDomainHelpText}</p>
+                <p className="text-xs text-muted-foreground">{tenantDomainDnsHelpText}</p>
+              </div>
             </FormField>
             <FormField id="admin-name" label="Admin name" error={errors.adminName}>
               <Input
@@ -560,6 +681,58 @@ export default function TenantsPageClient() {
             </Button>
             <Button onClick={() => void createTenant()} loading={creating} loadingText="Creating...">
               Create tenant
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={editDomainOpen}
+        onOpenChange={(open) => {
+          setEditDomainOpen(open)
+          if (!open) {
+            setDomainTenant(null)
+            setDomainValue("")
+            clearDomainErrors()
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit custom domain</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">
+              Leave this blank to use the default tenant subdomain instead of a branded custom
+              domain.
+            </div>
+            <FormField
+              id="tenant-domain"
+              label="Custom domain"
+              error={domainErrors.customDomain}
+            >
+              <div className="space-y-2">
+                <Input
+                  id="tenant-domain"
+                  value={domainValue}
+                  onChange={(event) => setDomainValue(event.target.value.toLowerCase())}
+                  placeholder="cheron.com"
+                />
+                <p className="text-xs text-muted-foreground">{tenantDomainHelpText}</p>
+                <p className="text-xs text-muted-foreground">{tenantDomainDnsHelpText}</p>
+              </div>
+            </FormField>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDomainOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void saveTenantDomain()}
+              loading={Boolean(domainTenant && domainSavingTenantId === domainTenant.id)}
+              loadingText="Saving..."
+            >
+              Save domain
             </Button>
           </DialogFooter>
         </DialogContent>

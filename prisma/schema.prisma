@@ -294,6 +294,7 @@ model Tenant {
   name        String
   slug        String       @unique
   status      TenantStatus @default(ACTIVE)
+  domains     TenantDomain[]
   users       User[]
   invitations Invitation[]
   settings    AppSetting[]
@@ -318,6 +319,17 @@ model Tenant {
   updatedAt   DateTime     @updatedAt
 
   @@index([status])
+}
+
+model TenantDomain {
+  id        String   @id @default(cuid())
+  tenantId  String
+  hostname  String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
 }
 
 model ServiceCategory {

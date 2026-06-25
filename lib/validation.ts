@@ -1409,6 +1409,18 @@ export type BulkReviewLeaveRequestsInput = z.infer<typeof bulkReviewLeaveRequest
 export type CancelLeaveRequestInput = z.infer<typeof cancelLeaveRequestSchema>
 export type RevokeLeaveRequestInput = z.infer<typeof revokeLeaveRequestSchema>
 
+const tenantHostnameSchema = z
+  .string()
+  .trim()
+  .min(4)
+  .max(253)
+  .regex(
+    /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i,
+    "Enter a valid domain like cheron.com."
+  )
+
+const optionalTenantHostnameSchema = tenantHostnameSchema.optional().or(z.literal(""))
+
 export const createTenantSchema = z.object({
   name: z.string().trim().min(2).max(120),
   slug: z
@@ -1420,10 +1432,14 @@ export const createTenantSchema = z.object({
   adminName: z.string().trim().min(1).max(100),
   adminEmail: z.string().trim().email(),
   adminPassword: z.string().trim().min(8).max(100),
+  customDomain: optionalTenantHostnameSchema,
 })
 
 export const updateTenantStatusSchema = z.object({
-  status: z.enum(["ACTIVE", "SUSPENDED", "ARCHIVED"]),
+  status: z.enum(["ACTIVE", "SUSPENDED", "ARCHIVED"]).optional(),
+  customDomain: optionalTenantHostnameSchema,
+}).refine((value) => Boolean(value.status || value.customDomain !== undefined), {
+  message: "At least one field is required.",
 })
 
 export const resetAllTenantsSchema = z.object({

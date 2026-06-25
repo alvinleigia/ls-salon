@@ -5,6 +5,7 @@ declare module "next-auth" {
     user: {
       id?: string
       tenantId?: string
+      tenantSlug?: string
       role?: "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
       name?: string | null
       email?: string | null
@@ -14,6 +15,7 @@ declare module "next-auth" {
 
   interface User {
     tenantId?: string
+    tenantSlug?: string
     role?: "ADMIN" | "MANAGER" | "STAFF" | "CUSTOMER"
   }
 }

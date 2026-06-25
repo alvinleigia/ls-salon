@@ -13,6 +13,7 @@ import {
 import { canManageTenants, type Role } from "@/lib/permissions"
 import { enterRlsBypassDbContext, prisma } from "@/lib/prisma"
 import { requireTenantSession } from "@/lib/tenant-auth"
+import { isManagedTenantHostname, normalizeHostname } from "@/lib/tenancy"
 import { createTenantSchema } from "@/lib/validation"
 import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 import type { ListResponse } from "@/types/api"
@@ -82,6 +83,7 @@ export async function GET(request: Request) {
         OR: [
           { name: { contains: q, mode: Prisma.QueryMode.insensitive } },
           { slug: { contains: q, mode: Prisma.QueryMode.insensitive } },
+          { domains: { some: { hostname: { contains: q, mode: Prisma.QueryMode.insensitive } } } },
         ],
       })
     }
@@ -101,6 +103,11 @@ export async function GET(request: Request) {
           slug: true,
           status: true,
           createdAt: true,
+          domains: {
+            orderBy: { createdAt: "asc" },
+            take: 1,
+            select: { hostname: true },
+          },
           _count: { select: { users: true } },
         },
       }),
@@ -112,6 +119,7 @@ export async function GET(request: Request) {
       slug: string
       status: "ACTIVE" | "SUSPENDED" | "ARCHIVED"
       userCount: number
+      customDomain: string | null
       createdAt: string
     }> = {
       items: items.map((item) => ({
@@ -120,6 +128,7 @@ export async function GET(request: Request) {
         slug: item.slug,
         status: item.status,
         userCount: item._count.users,
+        customDomain: item.domains[0]?.hostname ?? null,
         createdAt: item.createdAt.toISOString(),
       })),
       page,
@@ -170,10 +179,28 @@ export async function POST(request: Request) {
     const data = parsed.data
     const normalizedSlug = data.slug.trim().toLowerCase()
     const normalizedAdminEmail = data.adminEmail.trim().toLowerCase()
+    const normalizedCustomDomain = data.customDomain
+      ? normalizeHostname(data.customDomain)
+      : null
 
-    const [existingTenant, existingUser] = await Promise.all([
+    if (normalizedCustomDomain && isManagedTenantHostname(normalizedCustomDomain)) {
+      const response = NextResponse.json(
+        { error: "Custom domain must be outside the managed tenant root domain." },
+        { status: 409 }
+      )
+      logApiRequestSuccess(logContext, 409, { reason: "custom_domain_conflicts_with_managed_root" })
+      return withRequestId(response, logContext.requestId)
+    }
+
+    const [existingTenant, existingUser, existingDomain] = await Promise.all([
       prisma.tenant.findUnique({ where: { slug: normalizedSlug }, select: { id: true } }),
       prisma.user.findFirst({ where: { email: normalizedAdminEmail }, select: { id: true } }),
+      normalizedCustomDomain
+        ? prisma.tenantDomain.findUnique({
+            where: { hostname: normalizedCustomDomain },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
     ])
     if (existingTenant) {
       const response = NextResponse.json({ error: "Tenant slug already exists." }, { status: 409 })
@@ -183,6 +210,11 @@ export async function POST(request: Request) {
     if (existingUser) {
       const response = NextResponse.json({ error: "Admin email already exists." }, { status: 409 })
       logApiRequestSuccess(logContext, 409, { reason: "duplicate_admin_email" })
+      return withRequestId(response, logContext.requestId)
+    }
+    if (existingDomain) {
+      const response = NextResponse.json({ error: "Custom domain already exists." }, { status: 409 })
+      logApiRequestSuccess(logContext, 409, { reason: "duplicate_custom_domain" })
       return withRequestId(response, logContext.requestId)
     }
 
@@ -214,6 +246,15 @@ export async function POST(request: Request) {
         data: { tenantId: tenant.id },
       })
 
+      if (normalizedCustomDomain) {
+        await tx.tenantDomain.create({
+          data: {
+            tenantId: tenant.id,
+            hostname: normalizedCustomDomain,
+          },
+        })
+      }
+
       return { tenant, admin }
     })
     await recordDomainAuditEventSafe(prisma, {
@@ -229,11 +270,13 @@ export async function POST(request: Request) {
         adminUserId: created.admin.id,
         adminEmail: created.admin.email,
         adminRole: created.admin.role,
+        customDomain: normalizedCustomDomain,
       },
       after: {
         name: created.tenant.name,
         slug: created.tenant.slug,
         status: created.tenant.status,
+        customDomain: normalizedCustomDomain,
       },
     })
 
@@ -244,6 +287,7 @@ export async function POST(request: Request) {
           name: created.tenant.name,
           slug: created.tenant.slug,
           status: created.tenant.status,
+          customDomain: normalizedCustomDomain,
           createdAt: created.tenant.createdAt.toISOString(),
         },
         admin: {

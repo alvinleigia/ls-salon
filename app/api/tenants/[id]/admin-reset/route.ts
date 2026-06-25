@@ -41,10 +41,17 @@ const ensureProvisioningAccess = async (request: Request) => {
   return { context: tenantSession.context }
 }
 
-const buildTenantOrigin = (request: Request, tenantSlug: string) => {
+const buildTenantOrigin = (
+  request: Request,
+  tenantSlug: string,
+  customDomain?: string | null
+) => {
   const requestUrl = new URL(request.url)
   const protoHeader = request.headers.get("x-forwarded-proto")
   const protocol = protoHeader?.split(",")[0]?.trim() || requestUrl.protocol.replace(":", "")
+  if (customDomain) {
+    return `${protocol}://${customDomain}`
+  }
   const rootDomain = process.env.APP_ROOT_DOMAIN?.trim().toLowerCase()
   if (rootDomain) {
     return `${protocol}://${tenantSlug}.${rootDomain}`
@@ -82,7 +89,16 @@ export async function POST(
     const { id } = await params
     const tenant = await prisma.tenant.findUnique({
       where: { id },
-      select: { id: true, slug: true, status: true },
+      select: {
+        id: true,
+        slug: true,
+        status: true,
+        domains: {
+          orderBy: { createdAt: "asc" },
+          take: 1,
+          select: { hostname: true },
+        },
+      },
     })
     if (!tenant) {
       const response = NextResponse.json({ error: "Tenant not found." }, { status: 404 })
@@ -125,7 +141,11 @@ export async function POST(
       },
     })
 
-    const tenantOrigin = buildTenantOrigin(request, tenant.slug)
+    const tenantOrigin = buildTenantOrigin(
+      request,
+      tenant.slug,
+      tenant.domains[0]?.hostname ?? null
+    )
     const resetUrl = `${tenantOrigin}/auth/reset-password?token=${rawToken}`
 
     if (!mailFrom) {

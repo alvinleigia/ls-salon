@@ -26,5 +26,7 @@ export default async function SettingsTenantsPage() {
     redirect("/dashboard")
   }
 
-  return <TenantsPageClient />
+  const rootDomain = process.env.APP_ROOT_DOMAIN?.trim().toLowerCase() ?? ""
+
+  return <TenantsPageClient rootDomain={rootDomain} />
 }
