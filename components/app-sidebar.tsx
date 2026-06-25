@@ -51,7 +51,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { canInvite, canManageTenants, canManageUsers, type Role } from "@/lib/permissions"
+import { canInvite, canManageUsers, type Role } from "@/lib/permissions"
 import { cn } from "@/lib/utils"
 
 type SubNavItem = {
@@ -78,6 +78,9 @@ export function AppSidebar() {
   const pathname = usePathname()
   const user = session?.user
   const role = (user as { role?: Role })?.role
+  const platformAccessMode = (user as {
+    platformAccessMode?: "SUPER_ADMIN" | "ORG_MEMBER" | null
+  })?.platformAccessMode
   const canManage = canManageUsers(role ?? null)
   const sessionTenantSlug = (user as { tenantSlug?: string | null } | undefined)?.tenantSlug
     ?.trim()
@@ -97,7 +100,13 @@ export function AppSidebar() {
     return null
   }, [platformTenantSlug, sessionTenantSlug])
 
-  const isPlatformSuperAdmin = role === "ADMIN" && tenantSlug === platformTenantSlug
+  const isPlatformConsoleUser =
+    tenantSlug === platformTenantSlug &&
+    (platformAccessMode === "SUPER_ADMIN" || platformAccessMode === "ORG_MEMBER")
+  const isPlatformSuperAdmin =
+    role === "ADMIN" &&
+    tenantSlug === platformTenantSlug &&
+    platformAccessMode === "SUPER_ADMIN"
   const [openSections, setOpenSections] = React.useState<Record<string, boolean>>({})
   const [logoLoadFailed, setLogoLoadFailed] = React.useState(false)
 
@@ -294,16 +303,21 @@ export function AppSidebar() {
       )
     }
 
-    if (canManage) {
+    if (canManage || isPlatformConsoleUser) {
       list.push({
         key: "settings",
-        title: "Settings",
-        href: isPlatformSuperAdmin ? "/settings/tenants" : "/settings",
+        title: isPlatformConsoleUser ? "Parent Console" : "Settings",
+        href: isPlatformConsoleUser ? "/settings/organizations" : "/settings",
         icon: SettingsIcon,
         isActive: (current) => current.startsWith("/settings"),
-        items: isPlatformSuperAdmin
-          ? canManageTenants(role ?? null)
-            ? [
+        items: isPlatformConsoleUser
+          ? [
+                {
+                  title: "Organizations",
+                  href: "/settings/organizations",
+                  icon: Building2Icon,
+                  isActive: (current) => current === "/settings/organizations",
+                },
                 {
                   title: "Tenants",
                   href: "/settings/tenants",
@@ -311,7 +325,6 @@ export function AppSidebar() {
                   isActive: (current) => current === "/settings/tenants",
                 },
               ]
-            : []
           : [
               { title: "General", href: "/settings", icon: SettingsIcon, isActive: (current) => current === "/settings" },
               { title: "Taxes", href: "/settings/taxes", icon: TagIcon, isActive: (current) => current === "/settings/taxes" },
@@ -321,7 +334,7 @@ export function AppSidebar() {
     }
 
     return list
-  }, [canManage, isPlatformSuperAdmin, role])
+  }, [canManage, isPlatformConsoleUser, role])
 
   const menuButtonClass = (active: boolean) =>
     cn("transition-colors", active && "bg-sidebar-primary/20 text-sidebar-primary font-semibold")
@@ -353,7 +366,7 @@ export function AppSidebar() {
           <SidebarGroupLabel></SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {!isPlatformSuperAdmin && navItems.map((item) => {
+              {!isPlatformConsoleUser && navItems.map((item) => {
                 const active = pathname === item.href
                 return (
                   <SidebarMenuItem key={item.href}>

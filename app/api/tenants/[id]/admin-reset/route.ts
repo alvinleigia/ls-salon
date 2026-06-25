@@ -10,9 +10,8 @@ import {
 } from "@/lib/api-logging"
 import { resetPasswordEmail } from "@/lib/emails/reset-password"
 import { mailer, mailFrom } from "@/lib/mailer"
-import { canManageTenants, type Role } from "@/lib/permissions"
-import { enterRlsBypassDbContext, prisma } from "@/lib/prisma"
-import { requireTenantSession } from "@/lib/tenant-auth"
+import { requirePlatformConsoleAccess } from "@/lib/platform-console"
+import { prisma } from "@/lib/prisma"
 import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
 
 export const runtime = "nodejs"
@@ -20,26 +19,6 @@ export const runtime = "nodejs"
 const PLATFORM_TENANT_SLUG = (
   process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
 )
-
-const ensureProvisioningAccess = async (request: Request) => {
-  const tenantSession = await requireTenantSession(request)
-  if (tenantSession.error) return { error: tenantSession.error }
-  if (!canManageTenants(tenantSession.context.role as Role)) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
-  }
-
-  const sessionTenant = await prisma.tenant.findFirst({
-    where: { id: tenantSession.context.tenantId },
-    select: { id: true, slug: true },
-  })
-  if (!sessionTenant || sessionTenant.slug !== PLATFORM_TENANT_SLUG) {
-    return { error: NextResponse.json({ error: "Forbidden." }, { status: 403 }) }
-  }
-
-  enterRlsBypassDbContext()
-
-  return { context: tenantSession.context }
-}
 
 const buildTenantOrigin = (
   request: Request,
@@ -76,7 +55,7 @@ export async function POST(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const authorized = await ensureProvisioningAccess(request)
+  const authorized = await requirePlatformConsoleAccess(request)
   if (authorized.error) {
     logApiRequestSuccess(logContext, authorized.error.status, {
       reason: "unauthorized_or_platform_scope_failed",
@@ -93,6 +72,7 @@ export async function POST(
         id: true,
         slug: true,
         status: true,
+        organization: { select: { id: true } },
         domains: {
           orderBy: { createdAt: "asc" },
           take: 1,
@@ -111,6 +91,15 @@ export async function POST(
         { status: 409 }
       )
       logApiRequestSuccess(logContext, 409, { reason: "platform_tenant_restricted", tenantId: id })
+      return withRequestId(response, logContext.requestId)
+    }
+    if (
+      authorized.context.mode === "ORG_MEMBER" &&
+      (!tenant.organization?.id ||
+        !authorized.context.organizationIds.includes(tenant.organization.id))
+    ) {
+      const response = NextResponse.json({ error: "Forbidden." }, { status: 403 })
+      logApiRequestSuccess(logContext, 403, { reason: "tenant_scope_failed", tenantId: id })
       return withRequestId(response, logContext.requestId)
     }
 

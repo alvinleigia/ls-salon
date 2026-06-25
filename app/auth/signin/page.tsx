@@ -77,6 +77,9 @@ export default function SignInPage() {
               Sign in
             </Button>
           </form>
+          <p className="mt-3 text-center text-xs text-muted-foreground">
+            Invited parent-company users should use the reset flow first to set their password.
+          </p>
           <div className="mt-4 text-center text-sm text-muted-foreground">
             <button
               type="button"

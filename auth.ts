@@ -2,7 +2,8 @@ import NextAuth from "next-auth"
 import bcrypt from "bcryptjs"
 import Credentials from "next-auth/providers/credentials"
 
-import { prisma, runWithTenantDbContext } from "@/lib/prisma"
+import { prisma, runWithRlsBypassDbContext, runWithTenantDbContext } from "@/lib/prisma"
+import { resolvePlatformConsoleAccess } from "@/lib/platform-console"
 import { resolveTenantFromHostHeader } from "@/lib/tenancy"
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -36,6 +37,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const isValid = await bcrypt.compare(password, user.passwordHash)
           if (!isValid) return null
 
+          const platformAccess = await runWithRlsBypassDbContext(async () =>
+            resolvePlatformConsoleAccess({
+              tenantId: user.tenantId,
+              role: user.role,
+              sessionUserId: user.id,
+            })
+          )
+
           return {
             id: user.id,
             name: user.name,
@@ -44,6 +53,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             role: user.role,
             tenantId: user.tenantId,
             tenantSlug: tenant.slug,
+            platformAccessMode: platformAccess?.mode ?? null,
+            organizationIds: platformAccess?.organizationIds ?? [],
+            organizationRolesById: platformAccess?.organizationRolesById ?? {},
           }
         })
       },
@@ -57,12 +69,26 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.role = (user as { role?: string }).role
         token.tenantId = (user as { tenantId?: string }).tenantId
         token.tenantSlug = (user as { tenantSlug?: string }).tenantSlug
+        token.platformAccessMode = (user as { platformAccessMode?: string | null }).platformAccessMode
+        token.organizationIds = (user as { organizationIds?: string[] }).organizationIds ?? []
+        token.organizationRolesById = (user as { organizationRolesById?: Record<string, string> }).organizationRolesById ?? {}
       } else if (token.tenantId && !token.tenantSlug) {
         const tenant = await prisma.tenant.findUnique({
           where: { id: token.tenantId as string },
           select: { slug: true },
         })
         token.tenantSlug = tenant?.slug
+      } else if (token.tenantId && token.platformAccessMode === undefined) {
+        const platformAccess = await runWithRlsBypassDbContext(async () =>
+          resolvePlatformConsoleAccess({
+            tenantId: token.tenantId as string,
+            role: token.role as string | null,
+            sessionUserId: token.sub ?? null,
+          })
+        )
+        token.platformAccessMode = platformAccess?.mode ?? null
+        token.organizationIds = platformAccess?.organizationIds ?? []
+        token.organizationRolesById = platformAccess?.organizationRolesById ?? {}
       }
       return token
     },
@@ -76,6 +102,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         ;(session.user as { tenantSlug?: string }).tenantSlug = token.tenantSlug as
           | string
           | undefined
+        ;(session.user as { platformAccessMode?: string | null }).platformAccessMode =
+          (token.platformAccessMode as string | null | undefined) ?? null
+        ;(session.user as { organizationIds?: string[] }).organizationIds =
+          (token.organizationIds as string[] | undefined) ?? []
+        ;(session.user as { organizationRolesById?: Record<string, string> }).organizationRolesById =
+          (token.organizationRolesById as Record<string, string> | undefined) ?? {}
       }
       return session
     },

@@ -8,9 +8,8 @@ import {
   logApiRequestSuccess,
   withRequestId,
 } from "@/lib/api-logging"
-import { canManageTenants, type Role } from "@/lib/permissions"
-import { enterRlsBypassDbContext, prisma } from "@/lib/prisma"
-import { requireTenantSession } from "@/lib/tenant-auth"
+import { requirePlatformConsoleAccess } from "@/lib/platform-console"
+import { prisma } from "@/lib/prisma"
 import { isManagedTenantHostname, normalizeHostname } from "@/lib/tenancy"
 import { updateTenantStatusSchema } from "@/lib/validation"
 import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
@@ -19,26 +18,6 @@ const PLATFORM_TENANT_SLUG = (
   process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
 )
 
-const ensureProvisioningAccess = async (request: Request) => {
-  const tenantSession = await requireTenantSession(request)
-  if (tenantSession.error) return { error: tenantSession.error }
-  if (!canManageTenants(tenantSession.context.role as Role)) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
-  }
-
-  const sessionTenant = await prisma.tenant.findFirst({
-    where: { id: tenantSession.context.tenantId },
-    select: { id: true, slug: true },
-  })
-  if (!sessionTenant || sessionTenant.slug !== PLATFORM_TENANT_SLUG) {
-    return { error: NextResponse.json({ error: "Forbidden." }, { status: 403 }) }
-  }
-
-  enterRlsBypassDbContext()
-
-  return { context: tenantSession.context }
-}
-
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -46,7 +25,7 @@ export async function PATCH(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const authorized = await ensureProvisioningAccess(request)
+  const authorized = await requirePlatformConsoleAccess(request)
   if (authorized.error) {
     logApiRequestSuccess(logContext, authorized.error.status, {
       reason: "unauthorized_or_platform_scope_failed",
@@ -81,6 +60,12 @@ export async function PATCH(
         name: true,
         slug: true,
         status: true,
+        organization: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         domains: {
           orderBy: { createdAt: "asc" },
           take: 1,
@@ -101,15 +86,35 @@ export async function PATCH(
       logApiRequestSuccess(logContext, 409, { reason: "platform_tenant_restricted", tenantId: id })
       return withRequestId(response, logContext.requestId)
     }
+    if (
+      authorized.context.mode === "ORG_MEMBER" &&
+      (!tenant.organization?.id ||
+        !authorized.context.organizationIds.includes(tenant.organization.id))
+    ) {
+      const response = NextResponse.json({ error: "Forbidden." }, { status: 403 })
+      logApiRequestSuccess(logContext, 403, { reason: "tenant_scope_failed", tenantId: id })
+      return withRequestId(response, logContext.requestId)
+    }
 
     const currentCustomDomain = tenant.domains[0]?.hostname ?? null
+    const currentOrganizationId = tenant.organization?.id ?? null
+    const currentOrganizationName = tenant.organization?.name ?? null
     const hasStatusChange = Boolean(parsed.data.status && tenant.status !== parsed.data.status)
+    const normalizedOrganizationId =
+      parsed.data.organizationId === undefined
+        ? undefined
+        : parsed.data.organizationId?.trim()
+          ? parsed.data.organizationId.trim()
+          : null
     const normalizedCustomDomain =
       parsed.data.customDomain === undefined
         ? undefined
         : parsed.data.customDomain
           ? normalizeHostname(parsed.data.customDomain)
           : null
+    const hasOrganizationChange =
+      normalizedOrganizationId !== undefined &&
+      normalizedOrganizationId !== currentOrganizationId
     const hasCustomDomainChange =
       normalizedCustomDomain !== undefined && normalizedCustomDomain !== currentCustomDomain
 
@@ -125,13 +130,42 @@ export async function PATCH(
       return withRequestId(response, logContext.requestId)
     }
 
-    if (!hasStatusChange && !hasCustomDomainChange) {
+    if (!hasStatusChange && !hasCustomDomainChange && !hasOrganizationChange) {
       const response = NextResponse.json(
         { error: "Tenant already has these values." },
         { status: 409 }
       )
       logApiRequestSuccess(logContext, 409, { reason: "tenant_update_noop", tenantId: id })
       return withRequestId(response, logContext.requestId)
+    }
+
+    let nextOrganizationName = currentOrganizationName
+    if (hasOrganizationChange) {
+      if (authorized.context.mode !== "SUPER_ADMIN") {
+        const response = NextResponse.json(
+          { error: "Organization reassignment is restricted to platform super admins." },
+          { status: 403 }
+        )
+        logApiRequestSuccess(logContext, 403, {
+          reason: "organization_reassignment_requires_super_admin",
+          tenantId: id,
+        })
+        return withRequestId(response, logContext.requestId)
+      }
+      if (normalizedOrganizationId) {
+        const organization = await prisma.organization.findUnique({
+          where: { id: normalizedOrganizationId },
+          select: { id: true, name: true },
+        })
+        if (!organization) {
+          const response = NextResponse.json({ error: "Organization not found." }, { status: 404 })
+          logApiRequestSuccess(logContext, 404, { reason: "organization_not_found", tenantId: id })
+          return withRequestId(response, logContext.requestId)
+        }
+        nextOrganizationName = organization.name
+      } else {
+        nextOrganizationName = null
+      }
     }
 
     if (hasCustomDomainChange && normalizedCustomDomain) {
@@ -150,7 +184,15 @@ export async function PATCH(
       if (hasStatusChange) {
         await tx.tenant.update({
           where: { id },
-          data: { status: parsed.data.status },
+          data: {
+            ...(parsed.data.status ? { status: parsed.data.status } : {}),
+            ...(hasOrganizationChange ? { organizationId: normalizedOrganizationId } : {}),
+          },
+        })
+      } else if (hasOrganizationChange) {
+        await tx.tenant.update({
+          where: { id },
+          data: { organizationId: normalizedOrganizationId },
         })
       }
 
@@ -174,6 +216,12 @@ export async function PATCH(
           slug: true,
           status: true,
           createdAt: true,
+          organization: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
           domains: {
             orderBy: { createdAt: "asc" },
             take: 1,
@@ -197,6 +245,25 @@ export async function PATCH(
         },
         after: {
           status: updated.status,
+        },
+      })
+    }
+    if (hasOrganizationChange) {
+      await recordDomainAuditEventSafe(prisma, {
+        tenantId: actorTenantId,
+        event: "tenant.organization.updated",
+        entityType: "Tenant",
+        entityId: updated.id,
+        actorUserId: sessionUserId,
+        actorRole,
+        requestId: logContext.requestId,
+        before: {
+          organizationId: currentOrganizationId,
+          organizationName: currentOrganizationName,
+        },
+        after: {
+          organizationId: updated.organization?.id ?? null,
+          organizationName: updated.organization?.name ?? null,
         },
       })
     }
@@ -225,6 +292,8 @@ export async function PATCH(
         slug: updated.slug,
         status: updated.status,
         userCount: updated._count.users,
+        organizationId: updated.organization?.id ?? null,
+        organizationName: updated.organization?.name ?? null,
         customDomain: updated.domains[0]?.hostname ?? null,
         createdAt: updated.createdAt.toISOString(),
       },
@@ -233,6 +302,8 @@ export async function PATCH(
       tenantId: id,
       previousStatus: tenant.status,
       nextStatus: updated.status,
+      previousOrganizationId: currentOrganizationId,
+      nextOrganizationId: updated.organization?.id ?? null,
       previousCustomDomain: currentCustomDomain,
       nextCustomDomain: updated.domains[0]?.hostname ?? null,
     })

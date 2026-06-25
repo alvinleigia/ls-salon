@@ -32,13 +32,22 @@ type TenantRow = {
   slug: string
   status: TenantStatus
   userCount: number
+  organizationId: string | null
+  organizationName: string | null
   customDomain: string | null
   createdAt: string
+}
+
+type OrganizationOption = {
+  id: string
+  name: string
+  slug: string
 }
 
 type TenantCreateFormValues = {
   name: string
   slug: string
+  organizationId: string
   customDomain: string
   adminName: string
   adminEmail: string
@@ -57,6 +66,7 @@ type TenantAdminEditValues = {
 const defaultFormValues: TenantCreateFormValues = {
   name: "",
   slug: "",
+  organizationId: "",
   customDomain: "",
   adminName: "",
   adminEmail: "",
@@ -98,10 +108,17 @@ const getTenantAccessUrl = (tenant: TenantRow, rootDomain: string) => {
 
 type TenantsPageClientProps = {
   rootDomain: string
+  platformAccessMode: "SUPER_ADMIN" | "ORG_MEMBER"
 }
 
-export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps) {
+export default function TenantsPageClient({
+  rootDomain,
+  platformAccessMode,
+}: TenantsPageClientProps) {
+  const canReassignTenantOrganization = platformAccessMode === "SUPER_ADMIN"
+  const canResetAllTenants = platformAccessMode === "SUPER_ADMIN"
   const [items, setItems] = React.useState<TenantRow[]>([])
+  const [organizationOptions, setOrganizationOptions] = React.useState<OrganizationOption[]>([])
   const [totalRows, setTotalRows] = React.useState(0)
   const [loading, setLoading] = React.useState(true)
   const [creating, setCreating] = React.useState(false)
@@ -111,6 +128,7 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
   const [createOpen, setCreateOpen] = React.useState(false)
   const [editAdminOpen, setEditAdminOpen] = React.useState(false)
   const [editDomainOpen, setEditDomainOpen] = React.useState(false)
+  const [editOrganizationOpen, setEditOrganizationOpen] = React.useState(false)
   const [resetAllOpen, setResetAllOpen] = React.useState(false)
   const [resetAllConfirmation, setResetAllConfirmation] = React.useState("")
   const [keepPlatformTenantOnReset, setKeepPlatformTenantOnReset] = React.useState(true)
@@ -120,9 +138,12 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
   const [adminLoadingTenantId, setAdminLoadingTenantId] = React.useState<string | null>(null)
   const [adminSavingTenantId, setAdminSavingTenantId] = React.useState<string | null>(null)
   const [domainSavingTenantId, setDomainSavingTenantId] = React.useState<string | null>(null)
+  const [organizationSavingTenantId, setOrganizationSavingTenantId] = React.useState<string | null>(null)
   const [editingTenantId, setEditingTenantId] = React.useState<string | null>(null)
   const [domainTenant, setDomainTenant] = React.useState<TenantRow | null>(null)
   const [domainValue, setDomainValue] = React.useState("")
+  const [organizationTenant, setOrganizationTenant] = React.useState<TenantRow | null>(null)
+  const [organizationValue, setOrganizationValue] = React.useState("")
   const [pendingStatusChange, setPendingStatusChange] = React.useState<{
     tenant: TenantRow
     status: TenantStatus
@@ -143,6 +164,11 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
     errors: domainErrors,
     setErrorsFromResponse: setDomainErrorsFromResponse,
     clearErrors: clearDomainErrors,
+  } = useFormErrors()
+  const {
+    errors: organizationErrors,
+    setErrorsFromResponse: setOrganizationErrorsFromResponse,
+    clearErrors: clearOrganizationErrors,
   } = useFormErrors()
 
   const loadTenants = React.useCallback(async () => {
@@ -171,6 +197,23 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
   React.useEffect(() => {
     void loadTenants()
   }, [loadTenants])
+
+  React.useEffect(() => {
+    const loadOrganizations = async () => {
+      const response = await fetch("/api/organizations?page=1&pageSize=100", { cache: "no-store" })
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string }
+        toast.error(data.error ?? "Unable to load organizations.")
+        setOrganizationOptions([])
+        return
+      }
+
+      const data = (await response.json()) as ListResponse<OrganizationOption>
+      setOrganizationOptions(data.items)
+    }
+
+    void loadOrganizations()
+  }, [])
 
   React.useEffect(() => {
     setPagination((prev) =>
@@ -325,6 +368,13 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
     setEditDomainOpen(true)
   }
 
+  const openOrganizationEditor = (tenant: TenantRow) => {
+    clearOrganizationErrors()
+    setOrganizationTenant(tenant)
+    setOrganizationValue(tenant.organizationId ?? "")
+    setEditOrganizationOpen(true)
+  }
+
   const saveTenantDomain = async () => {
     if (!domainTenant) return
     setDomainSavingTenantId(domainTenant.id)
@@ -350,6 +400,34 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
     setEditDomainOpen(false)
     setDomainTenant(null)
     setDomainValue("")
+    await loadTenants()
+  }
+
+  const saveTenantOrganization = async () => {
+    if (!organizationTenant) return
+    setOrganizationSavingTenantId(organizationTenant.id)
+    clearOrganizationErrors()
+    const response = await fetch(`/api/tenants/${organizationTenant.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ organizationId: organizationValue }),
+    })
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string
+      details?: { fieldErrors?: Record<string, string[]> }
+    }
+    if (!response.ok) {
+      setOrganizationErrorsFromResponse(data)
+      toast.error(data.error ?? "Unable to update tenant organization.")
+      setOrganizationSavingTenantId(null)
+      return
+    }
+
+    toast.success("Tenant organization updated.")
+    setOrganizationSavingTenantId(null)
+    setEditOrganizationOpen(false)
+    setOrganizationTenant(null)
+    setOrganizationValue("")
     await loadTenants()
   }
 
@@ -404,6 +482,12 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
         accessorFn: (row) => row.slug,
       },
       {
+        id: "organization",
+        meta: { label: "Organization" },
+        header: "Organization",
+        accessorFn: (row) => row.organizationName ?? "Unassigned",
+      },
+      {
         id: "status",
         meta: { label: "Status" },
         header: "Status",
@@ -454,7 +538,8 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
             lifecycleUpdatingId !== tenant.id &&
             adminResettingId !== tenant.id &&
             adminLoadingTenantId !== tenant.id &&
-            domainSavingTenantId !== tenant.id
+            domainSavingTenantId !== tenant.id &&
+            organizationSavingTenantId !== tenant.id
           return (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -491,6 +576,11 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
                 <DropdownMenuItem onSelect={() => openDomainEditor(tenant)}>
                   Edit custom domain
                 </DropdownMenuItem>
+                {canReassignTenantOrganization ? (
+                  <DropdownMenuItem onSelect={() => openOrganizationEditor(tenant)}>
+                    Edit organization
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem onSelect={() => void sendAdminReset(tenant)}>
                   Send admin reset
                 </DropdownMenuItem>
@@ -500,7 +590,14 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
         },
       },
     ],
-    [adminLoadingTenantId, adminResettingId, domainSavingTenantId, lifecycleUpdatingId, rootDomain]
+    [
+      adminLoadingTenantId,
+      adminResettingId,
+      domainSavingTenantId,
+      lifecycleUpdatingId,
+      organizationSavingTenantId,
+      rootDomain,
+    ]
   )
 
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -541,7 +638,7 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
         </Button>
       </div>
 
-      <DataTableToolbar table={table} searchPlaceholder="Search name, slug or domain">
+      <DataTableToolbar table={table} searchPlaceholder="Search name, slug, organization or domain">
         <div className="flex items-end gap-2">
           <FormField id="tenant-status" label="Status">
             <select
@@ -560,24 +657,26 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
       </DataTableToolbar>
       <DataTable table={table} loading={loading} emptyMessage="No tenants found." />
       <DataTablePagination table={table} totalRows={totalRows} />
-      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
-        <h2 className="text-base font-semibold text-destructive">Danger zone</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Test-only hard reset: delete tenant data in bulk while preserving the platform admin login tenant.
-        </p>
-        <div className="mt-3">
-          <Button
-            variant="destructive"
-            onClick={() => {
-              setResetAllConfirmation("")
-              setKeepPlatformTenantOnReset(true)
-              setResetAllOpen(true)
-            }}
-          >
-            Reset all tenant data
-          </Button>
+      {canResetAllTenants ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <h2 className="text-base font-semibold text-destructive">Danger zone</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Test-only hard reset: delete tenant data in bulk while preserving the platform admin login tenant.
+          </p>
+          <div className="mt-3">
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setResetAllConfirmation("")
+                setKeepPlatformTenantOnReset(true)
+                setResetAllOpen(true)
+              }}
+            >
+              Reset all tenant data
+            </Button>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <Dialog
         open={createOpen}
@@ -619,6 +718,30 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
                 }
                 placeholder="example-tenant"
               />
+            </FormField>
+            <FormField
+              id="tenant-organization"
+              label="Organization (optional)"
+              error={errors.organizationId}
+            >
+              <select
+                id="tenant-organization"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                value={formValues.organizationId}
+                onChange={(event) =>
+                  setFormValues((prev) => ({
+                    ...prev,
+                    organizationId: event.target.value,
+                  }))
+                }
+              >
+                <option value="">No parent organization</option>
+                {organizationOptions.map((organization) => (
+                  <option key={organization.id} value={organization.id}>
+                    {organization.name}
+                  </option>
+                ))}
+              </select>
             </FormField>
             <FormField
               id="tenant-custom-domain"
@@ -681,6 +804,62 @@ export default function TenantsPageClient({ rootDomain }: TenantsPageClientProps
             </Button>
             <Button onClick={() => void createTenant()} loading={creating} loadingText="Creating...">
               Create tenant
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={editOrganizationOpen}
+        onOpenChange={(open) => {
+          setEditOrganizationOpen(open)
+          if (!open) {
+            setOrganizationTenant(null)
+            setOrganizationValue("")
+            clearOrganizationErrors()
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit organization</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">
+              Attach this salon tenant to a parent company, or leave it unassigned for now.
+            </div>
+            <FormField
+              id="tenant-organization-edit"
+              label="Organization"
+              error={organizationErrors.organizationId}
+            >
+              <select
+                id="tenant-organization-edit"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                value={organizationValue}
+                onChange={(event) => setOrganizationValue(event.target.value)}
+              >
+                <option value="">No parent organization</option>
+                {organizationOptions.map((organization) => (
+                  <option key={organization.id} value={organization.id}>
+                    {organization.name}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOrganizationOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void saveTenantOrganization()}
+              loading={Boolean(
+                organizationTenant && organizationSavingTenantId === organizationTenant.id
+              )}
+              loadingText="Saving..."
+            >
+              Save organization
             </Button>
           </DialogFooter>
         </DialogContent>

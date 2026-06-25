@@ -10,9 +10,8 @@ import {
   logApiRequestSuccess,
   withRequestId,
 } from "@/lib/api-logging"
-import { canManageTenants, type Role } from "@/lib/permissions"
-import { enterRlsBypassDbContext, prisma } from "@/lib/prisma"
-import { requireTenantSession } from "@/lib/tenant-auth"
+import { requirePlatformConsoleAccess } from "@/lib/platform-console"
+import { prisma } from "@/lib/prisma"
 import { isManagedTenantHostname, normalizeHostname } from "@/lib/tenancy"
 import { createTenantSchema } from "@/lib/validation"
 import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
@@ -30,31 +29,11 @@ const listSchema = z.object({
   status: z.enum(["ACTIVE", "SUSPENDED", "ARCHIVED"]).optional(),
 })
 
-const ensureProvisioningAccess = async (request: Request) => {
-  const tenantSession = await requireTenantSession(request)
-  if (tenantSession.error) return { error: tenantSession.error }
-  if (!canManageTenants(tenantSession.context.role as Role)) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
-  }
-
-  const sessionTenant = await prisma.tenant.findFirst({
-    where: { id: tenantSession.context.tenantId },
-    select: { id: true, slug: true },
-  })
-  if (!sessionTenant || sessionTenant.slug !== PLATFORM_TENANT_SLUG) {
-    return { error: NextResponse.json({ error: "Forbidden." }, { status: 403 }) }
-  }
-
-  enterRlsBypassDbContext()
-
-  return { context: tenantSession.context }
-}
-
 export async function GET(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const authorized = await ensureProvisioningAccess(request)
+  const authorized = await requirePlatformConsoleAccess(request)
   if (authorized.error) {
     logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_platform_scope_failed" })
     return withRequestId(authorized.error, logContext.requestId)
@@ -83,11 +62,15 @@ export async function GET(request: Request) {
         OR: [
           { name: { contains: q, mode: Prisma.QueryMode.insensitive } },
           { slug: { contains: q, mode: Prisma.QueryMode.insensitive } },
+          { organization: { name: { contains: q, mode: Prisma.QueryMode.insensitive } } },
           { domains: { some: { hostname: { contains: q, mode: Prisma.QueryMode.insensitive } } } },
         ],
       })
     }
     const where: Prisma.TenantWhereInput = { AND: andConditions }
+    if (authorized.context.mode === "ORG_MEMBER") {
+      where.organizationId = { in: authorized.context.organizationIds }
+    }
     const skip = (page - 1) * pageSize
 
     const [total, items] = await prisma.$transaction([
@@ -103,6 +86,12 @@ export async function GET(request: Request) {
           slug: true,
           status: true,
           createdAt: true,
+          organization: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
           domains: {
             orderBy: { createdAt: "asc" },
             take: 1,
@@ -119,6 +108,8 @@ export async function GET(request: Request) {
       slug: string
       status: "ACTIVE" | "SUSPENDED" | "ARCHIVED"
       userCount: number
+      organizationId: string | null
+      organizationName: string | null
       customDomain: string | null
       createdAt: string
     }> = {
@@ -128,6 +119,8 @@ export async function GET(request: Request) {
         slug: item.slug,
         status: item.status,
         userCount: item._count.users,
+        organizationId: item.organization?.id ?? null,
+        organizationName: item.organization?.name ?? null,
         customDomain: item.domains[0]?.hostname ?? null,
         createdAt: item.createdAt.toISOString(),
       })),
@@ -151,7 +144,7 @@ export async function POST(request: Request) {
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const authorized = await ensureProvisioningAccess(request)
+  const authorized = await requirePlatformConsoleAccess(request)
   if (authorized.error) {
     logApiRequestSuccess(logContext, authorized.error.status, { reason: "unauthorized_or_platform_scope_failed" })
     return withRequestId(authorized.error, logContext.requestId)
@@ -179,6 +172,7 @@ export async function POST(request: Request) {
     const data = parsed.data
     const normalizedSlug = data.slug.trim().toLowerCase()
     const normalizedAdminEmail = data.adminEmail.trim().toLowerCase()
+    const normalizedOrganizationId = data.organizationId?.trim() ? data.organizationId.trim() : null
     const normalizedCustomDomain = data.customDomain
       ? normalizeHostname(data.customDomain)
       : null
@@ -191,14 +185,35 @@ export async function POST(request: Request) {
       logApiRequestSuccess(logContext, 409, { reason: "custom_domain_conflicts_with_managed_root" })
       return withRequestId(response, logContext.requestId)
     }
+    if (authorized.context.mode === "ORG_MEMBER") {
+      if (!normalizedOrganizationId) {
+        const response = NextResponse.json(
+          { error: "Organization is required for parent-company tenant creation." },
+          { status: 400 }
+        )
+        logApiRequestSuccess(logContext, 400, { reason: "organization_required_for_org_member" })
+        return withRequestId(response, logContext.requestId)
+      }
+      if (!authorized.context.organizationIds.includes(normalizedOrganizationId)) {
+        const response = NextResponse.json({ error: "Forbidden." }, { status: 403 })
+        logApiRequestSuccess(logContext, 403, { reason: "organization_scope_failed" })
+        return withRequestId(response, logContext.requestId)
+      }
+    }
 
-    const [existingTenant, existingUser, existingDomain] = await Promise.all([
+    const [existingTenant, existingUser, existingDomain, organization] = await Promise.all([
       prisma.tenant.findUnique({ where: { slug: normalizedSlug }, select: { id: true } }),
       prisma.user.findFirst({ where: { email: normalizedAdminEmail }, select: { id: true } }),
       normalizedCustomDomain
         ? prisma.tenantDomain.findUnique({
             where: { hostname: normalizedCustomDomain },
             select: { id: true },
+          })
+        : Promise.resolve(null),
+      normalizedOrganizationId
+        ? prisma.organization.findUnique({
+            where: { id: normalizedOrganizationId },
+            select: { id: true, name: true },
           })
         : Promise.resolve(null),
     ])
@@ -217,6 +232,11 @@ export async function POST(request: Request) {
       logApiRequestSuccess(logContext, 409, { reason: "duplicate_custom_domain" })
       return withRequestId(response, logContext.requestId)
     }
+    if (normalizedOrganizationId && !organization) {
+      const response = NextResponse.json({ error: "Organization not found." }, { status: 404 })
+      logApiRequestSuccess(logContext, 404, { reason: "organization_not_found" })
+      return withRequestId(response, logContext.requestId)
+    }
 
     const adminPasswordHash = await bcrypt.hash(data.adminPassword, 10)
 
@@ -225,9 +245,22 @@ export async function POST(request: Request) {
         data: {
           name: data.name.trim(),
           slug: normalizedSlug,
+          organizationId: normalizedOrganizationId,
           status: "ACTIVE",
         },
-        select: { id: true, name: true, slug: true, status: true, createdAt: true },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          status: true,
+          createdAt: true,
+          organization: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
       })
       const admin = await tx.user.create({
         data: {
@@ -270,12 +303,16 @@ export async function POST(request: Request) {
         adminUserId: created.admin.id,
         adminEmail: created.admin.email,
         adminRole: created.admin.role,
+        organizationId: normalizedOrganizationId,
+        organizationName: organization?.name ?? null,
         customDomain: normalizedCustomDomain,
       },
       after: {
         name: created.tenant.name,
         slug: created.tenant.slug,
         status: created.tenant.status,
+        organizationId: created.tenant.organization?.id ?? null,
+        organizationName: created.tenant.organization?.name ?? null,
         customDomain: normalizedCustomDomain,
       },
     })
@@ -287,6 +324,8 @@ export async function POST(request: Request) {
           name: created.tenant.name,
           slug: created.tenant.slug,
           status: created.tenant.status,
+          organizationId: created.tenant.organization?.id ?? null,
+          organizationName: created.tenant.organization?.name ?? null,
           customDomain: normalizedCustomDomain,
           createdAt: created.tenant.createdAt.toISOString(),
         },

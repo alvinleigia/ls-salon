@@ -3,6 +3,7 @@ import { INVENTORY_UNIT_OPTIONS } from "@/lib/constants/inventory"
 import { getStateOptionsByCountry } from "@/lib/constants/countries"
 
 export const roleSchema = z.enum(["ADMIN", "MANAGER", "STAFF", "CUSTOMER"])
+export const organizationMembershipRoleSchema = z.enum(["OWNER", "ADMIN", "VIEWER"])
 export const genderSchema = z.enum([
   "MALE",
   "FEMALE",
@@ -1420,6 +1421,38 @@ const tenantHostnameSchema = z
   )
 
 const optionalTenantHostnameSchema = tenantHostnameSchema.optional().or(z.literal(""))
+const optionalOrganizationIdSchema = z.string().trim().min(1).optional().or(z.literal(""))
+
+export const createOrganizationSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  slug: z
+    .string()
+    .trim()
+    .min(2)
+    .max(63)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+})
+
+export const createOrganizationMemberSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  email: z.string().trim().email(),
+  phone: z.string().trim().min(7).max(20).optional().or(z.literal("")),
+  role: organizationMembershipRoleSchema.default("ADMIN"),
+  password: z.string().trim().min(8).max(100).optional().or(z.literal("")),
+})
+
+export const updateOrganizationMemberSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).optional().or(z.literal("")),
+    email: z.string().trim().email().optional().or(z.literal("")),
+    phone: z.string().trim().min(7).max(20).optional().or(z.literal("")),
+    role: organizationMembershipRoleSchema.optional(),
+    status: z.enum(["ACTIVE", "SUSPENDED", "INVITED", "ARCHIVED"]).optional(),
+    password: z.string().trim().min(8).max(100).optional().or(z.literal("")),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one field is required.",
+  })
 
 export const createTenantSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -1432,13 +1465,19 @@ export const createTenantSchema = z.object({
   adminName: z.string().trim().min(1).max(100),
   adminEmail: z.string().trim().email(),
   adminPassword: z.string().trim().min(8).max(100),
+  organizationId: optionalOrganizationIdSchema,
   customDomain: optionalTenantHostnameSchema,
 })
 
 export const updateTenantStatusSchema = z.object({
   status: z.enum(["ACTIVE", "SUSPENDED", "ARCHIVED"]).optional(),
+  organizationId: optionalOrganizationIdSchema,
   customDomain: optionalTenantHostnameSchema,
-}).refine((value) => Boolean(value.status || value.customDomain !== undefined), {
+}).refine((value) => Boolean(
+  value.status ||
+  value.customDomain !== undefined ||
+  value.organizationId !== undefined
+), {
   message: "At least one field is required.",
 })
 
@@ -1460,6 +1499,9 @@ export const updateTenantAdminSchema = z
   })
 
 export type CreateTenantInput = z.infer<typeof createTenantSchema>
+export type CreateOrganizationInput = z.infer<typeof createOrganizationSchema>
+export type CreateOrganizationMemberInput = z.infer<typeof createOrganizationMemberSchema>
+export type UpdateOrganizationMemberInput = z.infer<typeof updateOrganizationMemberSchema>
 export type UpdateTenantStatusInput = z.infer<typeof updateTenantStatusSchema>
 export type ResetAllTenantsInput = z.infer<typeof resetAllTenantsSchema>
 export type UpdateTenantAdminInput = z.infer<typeof updateTenantAdminSchema>

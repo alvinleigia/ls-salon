@@ -3,9 +3,9 @@ import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { getPlatformConsoleAccessFromSession } from "@/lib/platform-console"
 
-import TenantsPageClient from "./tenants-page-client"
+import OrganizationsPageClient from "./organizations-page-client"
 
-export default async function SettingsTenantsPage() {
+export default async function SettingsOrganizationsPage() {
   const session = await auth()
 
   if (!session?.user) {
@@ -17,12 +17,10 @@ export default async function SettingsTenantsPage() {
     redirect("/dashboard")
   }
 
-  const rootDomain = process.env.APP_ROOT_DOMAIN?.trim().toLowerCase() ?? ""
-
   return (
-    <TenantsPageClient
-      rootDomain={rootDomain}
+    <OrganizationsPageClient
       platformAccessMode={platformAccess.mode}
+      organizationRolesById={platformAccess.organizationRolesById}
     />
   )
 }

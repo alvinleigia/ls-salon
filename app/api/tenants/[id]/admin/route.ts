@@ -9,34 +9,13 @@ import {
   withRequestId,
 } from "@/lib/api-logging"
 import { recordDomainAuditEventSafe } from "@/lib/domain-audit"
-import { canManageTenants, type Role } from "@/lib/permissions"
-import { enterRlsBypassDbContext, prisma } from "@/lib/prisma"
-import { requireTenantSession } from "@/lib/tenant-auth"
+import { requirePlatformConsoleAccess } from "@/lib/platform-console"
+import { prisma } from "@/lib/prisma"
 import { updateTenantAdminSchema } from "@/lib/validation"
 
 const PLATFORM_TENANT_SLUG = (
   process.env.PLATFORM_ADMIN_TENANT_SLUG?.trim().toLowerCase() || "platform"
 )
-
-const ensureProvisioningAccess = async (request: Request) => {
-  const tenantSession = await requireTenantSession(request)
-  if (tenantSession.error) return { error: tenantSession.error }
-  if (!canManageTenants(tenantSession.context.role as Role)) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
-  }
-
-  const sessionTenant = await prisma.tenant.findFirst({
-    where: { id: tenantSession.context.tenantId },
-    select: { id: true, slug: true },
-  })
-  if (!sessionTenant || sessionTenant.slug !== PLATFORM_TENANT_SLUG) {
-    return { error: NextResponse.json({ error: "Forbidden." }, { status: 403 }) }
-  }
-
-  enterRlsBypassDbContext()
-
-  return { context: tenantSession.context }
-}
 
 const findTenantAdmin = async (tenantId: string) =>
   prisma.user.findFirst({
@@ -64,7 +43,7 @@ export async function GET(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const authorized = await ensureProvisioningAccess(request)
+  const authorized = await requirePlatformConsoleAccess(request)
   if (authorized.error) {
     logApiRequestSuccess(logContext, authorized.error.status, {
       reason: "unauthorized_or_platform_scope_failed",
@@ -76,11 +55,32 @@ export async function GET(
     const { id } = await params
     const tenant = await prisma.tenant.findUnique({
       where: { id },
-      select: { id: true },
+      select: {
+        id: true,
+        slug: true,
+        organization: { select: { id: true } },
+      },
     })
     if (!tenant) {
       const response = NextResponse.json({ error: "Tenant not found." }, { status: 404 })
       logApiRequestSuccess(logContext, 404, { reason: "tenant_not_found", tenantId: id })
+      return withRequestId(response, logContext.requestId)
+    }
+    if (tenant.slug === PLATFORM_TENANT_SLUG) {
+      const response = NextResponse.json(
+        { error: "Platform tenant cannot be changed from this action." },
+        { status: 409 }
+      )
+      logApiRequestSuccess(logContext, 409, { reason: "platform_tenant_restricted", tenantId: id })
+      return withRequestId(response, logContext.requestId)
+    }
+    if (
+      authorized.context.mode === "ORG_MEMBER" &&
+      (!tenant.organization?.id ||
+        !authorized.context.organizationIds.includes(tenant.organization.id))
+    ) {
+      const response = NextResponse.json({ error: "Forbidden." }, { status: 403 })
+      logApiRequestSuccess(logContext, 403, { reason: "tenant_scope_failed", tenantId: id })
       return withRequestId(response, logContext.requestId)
     }
 
@@ -114,7 +114,7 @@ export async function PATCH(
   const logContext = createApiLogContext(request)
   logApiRequestStart(logContext, request)
 
-  const authorized = await ensureProvisioningAccess(request)
+  const authorized = await requirePlatformConsoleAccess(request)
   if (authorized.error) {
     logApiRequestSuccess(logContext, authorized.error.status, {
       reason: "unauthorized_or_platform_scope_failed",
@@ -143,11 +143,32 @@ export async function PATCH(
     const { id } = await params
     const tenant = await prisma.tenant.findUnique({
       where: { id },
-      select: { id: true },
+      select: {
+        id: true,
+        slug: true,
+        organization: { select: { id: true } },
+      },
     })
     if (!tenant) {
       const response = NextResponse.json({ error: "Tenant not found." }, { status: 404 })
       logApiRequestSuccess(logContext, 404, { reason: "tenant_not_found", tenantId: id })
+      return withRequestId(response, logContext.requestId)
+    }
+    if (tenant.slug === PLATFORM_TENANT_SLUG) {
+      const response = NextResponse.json(
+        { error: "Platform tenant cannot be changed from this action." },
+        { status: 409 }
+      )
+      logApiRequestSuccess(logContext, 409, { reason: "platform_tenant_restricted", tenantId: id })
+      return withRequestId(response, logContext.requestId)
+    }
+    if (
+      authorized.context.mode === "ORG_MEMBER" &&
+      (!tenant.organization?.id ||
+        !authorized.context.organizationIds.includes(tenant.organization.id))
+    ) {
+      const response = NextResponse.json({ error: "Forbidden." }, { status: 403 })
+      logApiRequestSuccess(logContext, 403, { reason: "tenant_scope_failed", tenantId: id })
       return withRequestId(response, logContext.requestId)
     }
 
